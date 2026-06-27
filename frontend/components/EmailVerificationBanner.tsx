@@ -24,6 +24,7 @@ export function EmailVerificationBanner() {
     mutationFn: () => apiFetch("/auth/verify-email/request", { method: "POST" }),
     onSuccess: () => setSent(true)
   });
+  const resendError = resend.error instanceof Error ? resend.error.message : undefined;
 
   if (!hydrated || !user || user.emailVerified || dismissed) return null;
 
@@ -55,6 +56,7 @@ export function EmailVerificationBanner() {
         <Link className="font-bold underline underline-offset-2 transition hover:opacity-80" href="/settings">
           {t("verify.openSettings")}
         </Link>
+        {resendError ? <span className="ml-1 font-medium text-red-700 dark:text-red-300">{resendError}</span> : null}
       </p>
       <button
         className="shrink-0 rounded-md p-1.5 text-amber-900/70 transition hover:bg-amber-200/60 dark:text-amber-200/70 dark:hover:bg-amber-400/10"

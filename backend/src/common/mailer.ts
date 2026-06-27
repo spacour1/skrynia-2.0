@@ -11,7 +11,13 @@ function getTransporter() {
       host: env.SMTP_HOST,
       port: env.SMTP_PORT,
       secure: env.SMTP_SECURE,
-      auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASSWORD } : undefined
+      auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASSWORD } : undefined,
+      // Without these, a blocked/unreachable SMTP host hangs on nodemailer's defaults
+      // (multiple minutes) instead of failing fast - that hang propagates all the way up
+      // to a stuck "sending..." button on /auth/verify-email/request, which awaits the send.
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 10_000
     });
   }
   return transporter;

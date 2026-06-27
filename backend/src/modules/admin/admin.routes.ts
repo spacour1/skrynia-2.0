@@ -253,12 +253,24 @@ router.patch(
   "/listings/:id",
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
-    const body = z.object({ status: z.enum(["active", "paused", "blocked", "deleted"]) }).parse(req.body);
+    // isHot/isRecommended are promotional placements, not something a seller should be
+    // able to grant themselves — they're only settable here, through the admin panel.
+    const body = z
+      .object({
+        status: z.enum(["active", "paused", "blocked", "deleted"]).optional(),
+        isHot: z.boolean().optional(),
+        isRecommended: z.boolean().optional()
+      })
+      .parse(req.body);
     const result = await pool.query(
-      `update products set status = $2, updated_at = now()
+      `update products
+       set status = coalesce($2, status),
+           is_hot = coalesce($3, is_hot),
+           is_recommended = coalesce($4, is_recommended),
+           updated_at = now()
        where id = $1
-       returning id, title, status`,
-      [id, body.status]
+       returning id, title, status, is_hot as "isHot", is_recommended as "isRecommended"`,
+      [id, body.status ?? null, body.isHot ?? null, body.isRecommended ?? null]
     );
     if (!result.rows[0]) throw notFound("Listing not found");
     res.json({ listing: result.rows[0] });

@@ -78,8 +78,6 @@ type LotForm = {
   deliveryTemplate: string;
   autoDelivery: boolean;
   instantPublication: boolean;
-  isHot: boolean;
-  isRecommended: boolean;
 };
 
 type SelectedMedia = {
@@ -108,9 +106,7 @@ const initialForm: LotForm = {
   deliveryTime: "instant",
   deliveryTemplate: "",
   autoDelivery: false,
-  instantPublication: true,
-  isHot: false,
-  isRecommended: false
+  instantPublication: true
 };
 
 const productTypes = [
@@ -280,8 +276,6 @@ function SellerProductsContent() {
         server: form.server || null,
         platform: form.platform || null,
         deliveryTemplate: form.deliveryTemplate || null,
-        isHot: form.isHot,
-        isRecommended: form.isRecommended,
         metadata: {
           shortDescription: form.shortDescription,
           region: form.region || undefined,
@@ -495,8 +489,9 @@ function SellerProductsContent() {
           <FormSection step={7}>
             <Toggle checked={form.autoDelivery} onChange={(checked) => setField("autoDelivery", checked)} name="autoDelivery" title="Автоматическая доставка" text="Покупатель получит товар сразу после оплаты." />
             <Toggle checked={form.instantPublication} onChange={(checked) => setField("instantPublication", checked)} name="instantPublication" title="Мгновенная публикация" text="Опубликовать лот сразу после нажатия кнопки." />
-            <Toggle checked={form.isHot} onChange={(checked) => setField("isHot", checked)} name="isHot" title="Выделить лот" text="Лот будет выделен в результатах поиска." badge="PRO" />
-            <Toggle checked={form.isRecommended} onChange={(checked) => setField("isRecommended", checked)} name="isRecommended" title="Рекомендовано" text="Показать отметку SKRYNIA на карточке." badge="PRO" />
+            <p className="text-xs text-muted">
+              Отметки «Хит» и «Рекомендовано SKRYNIA» назначает администрация площадки — это нельзя включить самостоятельно.
+            </p>
           </FormSection>
 
           {error ? <p className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{error}</p> : null}

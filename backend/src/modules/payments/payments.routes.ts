@@ -20,8 +20,17 @@ import { buildWayforpayAck, createWayforpayInvoice, getWayforpayStatus, isWayfor
 
 const router = Router();
 
+const SIMULATED_PROVIDERS = new Set(["mock", "stripe", "fondy"]);
+
 const paySchema = z.object({
   provider: z.enum(["mock", "stripe", "liqpay", "fondy", "monobank"]).default("mock")
+}).superRefine((value, ctx) => {
+  // Simulated providers always "succeed" without ever charging anyone — fine for local
+  // dev and demos, but in production this endpoint would let any buyer get escrow funds
+  // locked for a seller without paying a cent. Only a real gateway can be chosen live.
+  if (env.NODE_ENV === "production" && SIMULATED_PROVIDERS.has(value.provider)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["provider"], message: "This payment provider is not available" });
+  }
 });
 
 const walletTopupSchema = z.object({

@@ -25,8 +25,6 @@ const productSchema = z.object({
   deliveryType: z.enum(["manual", "instant"]).default("manual"),
   productType: z.enum(["account", "key", "topup", "boosting", "service", "item", "currency"]).optional(),
   oldPrice: z.string().optional().nullable(),
-  isHot: z.coerce.boolean().optional(),
-  isRecommended: z.coerce.boolean().optional(),
   server: z.string().max(80).optional().nullable(),
   platform: z.string().max(80).optional().nullable(),
   deliveryTemplate: z.string().max(5000).optional().nullable(),
@@ -405,7 +403,7 @@ router.get(
     if (cached) return res.json(cached);
     const result = await pool.query(
       `select p.id, p.title, p.description, p.price_cents as "priceCents", p.currency, p.stock,
-              p.status, p.delivery_type as "deliveryType", p.delivery_template as "deliveryTemplate",
+              p.status, p.delivery_type as "deliveryType",
               p.product_type as "productType", p.old_price_cents as "oldPriceCents",
               p.sales_count as "salesCount", p.is_hot as "isHot", p.is_recommended as "isRecommended",
               p.server, p.platform, p.metadata, p.created_at as "createdAt",
@@ -525,10 +523,9 @@ router.post(
     const result = await pool.query(
       `insert into products(
          seller_id, category_id, game_id, section_id, title, description, price_cents, old_price_cents,
-         currency, stock, delivery_type, product_type, server, platform, delivery_template, metadata,
-         is_hot, is_recommended
+         currency, stock, delivery_type, product_type, server, platform, delivery_template, metadata
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
        returning id`,
       [
         req.user.id,
@@ -546,9 +543,7 @@ router.post(
         input.server ?? null,
         input.platform ?? null,
         input.deliveryTemplate ?? null,
-        input.metadata,
-        input.isHot ?? false,
-        input.isRecommended ?? false
+        input.metadata
       ]
     );
     if (input.media?.length) await replaceProductMedia(result.rows[0].id, input.media);
@@ -593,9 +588,7 @@ router.patch(
            platform = coalesce($14, platform),
            delivery_template = coalesce($15, delivery_template),
            metadata = coalesce($16, metadata),
-           is_hot = coalesce($17, is_hot),
-           is_recommended = coalesce($18, is_recommended),
-           status = coalesce($19, status),
+           status = coalesce($17, status),
            updated_at = now()
        where id = $1`,
       [
@@ -615,8 +608,6 @@ router.patch(
         input.platform ?? undefined,
         input.deliveryTemplate ?? undefined,
         input.metadata,
-        input.isHot,
-        input.isRecommended,
         input.status
       ]
     );

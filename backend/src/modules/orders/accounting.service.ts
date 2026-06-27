@@ -214,6 +214,37 @@ export async function recordWalletWithdrawalLedger(params: {
   });
 }
 
+/** Reverses a previously recorded wallet withdrawal when an admin can't actually pay it out. */
+export async function recordWalletWithdrawalReversalLedger(params: {
+  client: DbClient;
+  transactionId: string;
+  userId: string;
+  amountCents: number;
+  currency: string;
+}) {
+  await postLedgerEntry(params.client, {
+    idempotencyKey: `wallet_withdrawal_reversal:${params.transactionId}`,
+    entryType: "adjustment",
+    currency: params.currency,
+    metadata: { kind: "wallet_withdrawal_reversal" },
+    lines: [
+      {
+        accountCode: ledgerAccountCodes.providerClearing(params.currency),
+        accountName: `${params.currency} provider clearing`,
+        accountType: "asset",
+        debitCents: params.amountCents
+      },
+      {
+        accountCode: ledgerAccountCodes.userPayable(params.currency, params.userId),
+        accountName: `${params.currency} user payable liability`,
+        accountType: "liability",
+        userId: params.userId,
+        creditCents: params.amountCents
+      }
+    ]
+  });
+}
+
 export async function recordRefundLedger(params: {
   client: DbClient;
   orderId: string;

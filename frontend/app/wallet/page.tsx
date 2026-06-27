@@ -58,6 +58,8 @@ function WalletContent() {
   const [topupAmount, setTopupAmount] = useState("");
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [withdrawCardNumber, setWithdrawCardNumber] = useState("");
+  const [withdrawHolderName, setWithdrawHolderName] = useState("");
 
   const wallet = useQuery({
     queryKey: ["wallet"],
@@ -100,11 +102,21 @@ function WalletContent() {
     mutationFn: () =>
       apiFetch("/users/me/wallet/withdraw", {
         method: "POST",
-        body: JSON.stringify({ amount: withdrawAmount.trim(), currency: primary.currency })
+        body: JSON.stringify({
+          amount: withdrawAmount.trim(),
+          currency: primary.currency,
+          destination: {
+            method: "card",
+            accountNumber: withdrawCardNumber.trim(),
+            holderName: withdrawHolderName.trim()
+          }
+        })
       }),
     onSuccess: () => {
       setWithdrawOpen(false);
       setWithdrawAmount("");
+      setWithdrawCardNumber("");
+      setWithdrawHolderName("");
       client.invalidateQueries({ queryKey: ["wallet"] });
     }
   });
@@ -203,10 +215,34 @@ function WalletContent() {
                     onChange={(event) => setWithdrawAmount(event.target.value)}
                   />
                 </label>
+                <label className="mt-3 block space-y-2">
+                  <span className="block text-xs font-bold text-muted">Номер карты для вывода</span>
+                  <input
+                    className="app-input h-11 w-full"
+                    type="text"
+                    placeholder="0000 0000 0000 0000"
+                    value={withdrawCardNumber}
+                    onChange={(event) => setWithdrawCardNumber(event.target.value)}
+                  />
+                </label>
+                <label className="mt-3 block space-y-2">
+                  <span className="block text-xs font-bold text-muted">Получатель (как на карте)</span>
+                  <input
+                    className="app-input h-11 w-full"
+                    type="text"
+                    placeholder="Иван Иванов"
+                    value={withdrawHolderName}
+                    onChange={(event) => setWithdrawHolderName(event.target.value)}
+                  />
+                </label>
                 <p className="mt-2 text-xs text-muted">
-                  Вывод обрабатывается вручную и не уходит на карту автоматически — это симуляция для MVP.
+                  Заявка проверяется вручную: администратор переводит деньги на указанную карту и подтверждает выплату.
                 </p>
-                <button className="app-button mt-3 h-11 w-full" disabled={!withdrawAmount || withdraw.isPending} onClick={() => withdraw.mutate()}>
+                <button
+                  className="app-button mt-3 h-11 w-full"
+                  disabled={!withdrawAmount || !withdrawCardNumber || !withdrawHolderName || withdraw.isPending}
+                  onClick={() => withdraw.mutate()}
+                >
                   {withdraw.isPending ? "Отправляем заявку..." : "Подтвердить вывод"}
                 </button>
                 {withdraw.error ? <p className="mt-2 text-sm text-rose-600">{(withdraw.error as ApiError).message}</p> : null}

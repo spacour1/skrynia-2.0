@@ -13,6 +13,7 @@ import { lockEscrow } from "../orders/ledger.service.js";
 import { announceOrderPaid } from "../payments/payments.routes.js";
 import { paymentAttemptsTotal } from "../../common/metrics.js";
 import { logger } from "../../common/logger.js";
+import { listPayouts, completePayout, rejectPayout } from "../users/wallet.service.js";
 
 const router = Router();
 
@@ -323,6 +324,39 @@ router.post(
     }
     await announceOrderPaid(updated, req.user.id);
     res.json({ order: updated });
+  })
+);
+
+router.get(
+  "/payouts",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const status = z.enum(["pending", "processing", "paid", "rejected"]).optional().parse(req.query.status);
+    const payouts = await listPayouts(status);
+    res.json({ payouts });
+  })
+);
+
+/**
+ * Admin has already wired the bank transfer themselves using the destination on file;
+ * this just records the bank's own reference and marks the payout settled.
+ */
+router.post(
+  "/payouts/:id/complete",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const payoutId = z.string().uuid().parse(req.params.id);
+    const { reference } = z.object({ reference: z.string().trim().min(1).max(200) }).parse(req.body);
+    const payout = await completePayout(payoutId, req.user.id, reference);
+    res.json({ payout });
+  })
+);
+
+router.post(
+  "/payouts/:id/reject",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const payoutId = z.string().uuid().parse(req.params.id);
+    const { reason } = z.object({ reason: z.string().trim().min(1).max(500) }).parse(req.body);
+    const payout = await rejectPayout(payoutId, req.user.id, reason);
+    res.json({ payout });
   })
 );
 

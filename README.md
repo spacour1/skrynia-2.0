@@ -162,7 +162,9 @@ to the real deployed domain in production — it's used as the canonical base fo
 
 - Replace simulated payment providers with real webhooks and idempotency keys.
 - Move JWT secret and payment credentials to a secret manager.
-- Add email verification and stronger fraud/risk rules.
+- Add stronger fraud/risk rules (email verification and Telegram login signature checks are in place).
+- Wire up an automated payout rail (e.g. LiqPay P2P payouts) — withdrawals currently go through
+  manual admin review and bank transfer confirmation (`/admin/payouts`).
 - Add object scanning for uploads.
 - Add observability, backups, and admin audit logs.
 - Set `NEXT_PUBLIC_SITE_URL` to the production domain (used by the sitemap and OG tags).

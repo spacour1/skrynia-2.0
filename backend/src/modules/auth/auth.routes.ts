@@ -14,6 +14,14 @@ import { authRateLimit } from "../../common/middleware/security.js";
 import { ACCESS_COOKIE, REFRESH_COOKIE, setAuthCookies, clearAuthCookies } from "../../common/cookies.js";
 import type { AuthedRequest, Role } from "../../common/types.js";
 import { disconnectSession } from "../chat/ws.service.js";
+import { verifyTelegramAuth } from "./telegram.service.js";
+import {
+  createEmailVerificationToken,
+  consumeEmailVerificationToken,
+  createPasswordResetToken,
+  consumePasswordResetToken
+} from "./verification.service.js";
+import { sendEmail } from "../../common/mailer.js";
 
 const router = Router();
 
@@ -29,9 +37,30 @@ const loginSchema = z.object({
 });
 
 const telegramSchema = z.object({
-  telegramId: z.string().min(3),
-  username: z.string().min(2).max(80)
+  id: z.union([z.number(), z.string()]),
+  first_name: z.string().optional(),
+  last_name: z.string().optional(),
+  username: z.string().optional(),
+  photo_url: z.string().optional(),
+  auth_date: z.union([z.number(), z.string()]),
+  hash: z.string()
 });
+
+const emailVerifyConfirmSchema = z.object({ token: z.string().min(1) });
+const passwordForgotSchema = z.object({ email: z.string().email() });
+const passwordResetSchema = z.object({ token: z.string().min(1), password: z.string().min(8) });
+
+function sendVerificationEmail(user: { id: string; email: string; displayName?: string }) {
+  return createEmailVerificationToken(user.id).then((token) => {
+    const link = `${env.FRONTEND_URL}/verify-email?token=${token}`;
+    return sendEmail({
+      to: user.email,
+      subject: "Confirm your email",
+      text: `Confirm your email by visiting: ${link}`,
+      html: `<p>Confirm your email by clicking the link below:</p><p><a href="${link}">${link}</a></p>`
+    });
+  });
+}
 
 function hashRefreshToken(token: string) {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -78,6 +107,7 @@ router.post(
 
     const session = await issueSession(user.id, user.role);
     setAuthCookies(res, session);
+    await sendVerificationEmail(user);
     res.status(201).json({ user });
   })
 );
@@ -111,20 +141,24 @@ router.post(
   authRateLimit,
   asyncHandler(async (req, res) => {
     const input = telegramSchema.parse(req.body);
-    const email = `tg_${input.telegramId}@telegram.local`;
+    verifyTelegramAuth(input);
+
+    const telegramId = String(input.id);
+    const displayName = input.username ?? input.first_name ?? telegramId;
+    const email = `tg_${telegramId}@telegram.local`;
 
     const result = await pool.query(
       `insert into users(email, display_name, role, telegram_id)
        values ($1, $2, 'user', $3)
        on conflict (telegram_id) do update set display_name = excluded.display_name
        returning id, email, display_name as "displayName", role`,
-      [email, input.username, input.telegramId]
+      [email, displayName, telegramId]
     );
     const user = result.rows[0];
     await pool.query(`insert into wallets(user_id, currency) values ($1, 'UAH') on conflict (user_id, currency) do nothing`, [user.id]);
     const session = await issueSession(user.id, user.role);
     setAuthCookies(res, session);
-    res.json({ user, stub: true });
+    res.json({ user });
   })
 );
 
@@ -190,6 +224,71 @@ router.post(
 
     clearAuthCookies(res);
     res.status(204).send();
+  })
+);
+
+router.post(
+  "/verify-email/request",
+  authenticate,
+  authRateLimit,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const result = await pool.query(
+      `select id, email, display_name as "displayName", email_verified_at as "emailVerifiedAt" from users where id = $1`,
+      [req.user.id]
+    );
+    const user = result.rows[0];
+    if (!user) throw badRequest("Account not found");
+    if (user.emailVerifiedAt) return res.json({ status: "already_verified" });
+
+    await sendVerificationEmail(user);
+    res.json({ status: "sent" });
+  })
+);
+
+router.post(
+  "/verify-email/confirm",
+  authRateLimit,
+  asyncHandler(async (req, res) => {
+    const input = emailVerifyConfirmSchema.parse(req.body);
+    const userId = await consumeEmailVerificationToken(input.token);
+    await pool.query(`update users set email_verified_at = now() where id = $1 and email_verified_at is null`, [userId]);
+    res.json({ status: "verified" });
+  })
+);
+
+router.post(
+  "/password/forgot",
+  authRateLimit,
+  asyncHandler(async (req, res) => {
+    const input = passwordForgotSchema.parse(req.body);
+    const result = await pool.query(`select id, email from users where email = $1`, [input.email.toLowerCase()]);
+    const user = result.rows[0];
+
+    // Always respond the same way whether or not the account exists, so this endpoint
+    // can't be used to enumerate registered emails.
+    if (user) {
+      const token = await createPasswordResetToken(user.id);
+      const link = `${env.FRONTEND_URL}/reset-password?token=${token}`;
+      await sendEmail({
+        to: user.email,
+        subject: "Reset your password",
+        text: `Reset your password by visiting: ${link}`,
+        html: `<p>Reset your password by clicking the link below:</p><p><a href="${link}">${link}</a></p>`
+      });
+    }
+    res.json({ status: "sent" });
+  })
+);
+
+router.post(
+  "/password/reset",
+  authRateLimit,
+  asyncHandler(async (req, res) => {
+    const input = passwordResetSchema.parse(req.body);
+    const userId = await consumePasswordResetToken(input.token);
+    const passwordHash = await bcrypt.hash(input.password, 12);
+    await pool.query(`update users set password_hash = $2, updated_at = now() where id = $1`, [userId, passwordHash]);
+    res.json({ status: "reset" });
   })
 );
 

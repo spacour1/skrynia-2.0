@@ -11,6 +11,7 @@ import { recordOrderEvent } from "../orders/order-events.service.js";
 import { notifyOrderEvent } from "../chat/ws.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
 import { paymentAttemptsTotal } from "../../common/metrics.js";
+import { webhookRateLimit } from "../../common/middleware/security.js";
 import { logger } from "../../common/logger.js";
 import { moneyToCents } from "../../common/validation.js";
 import { createWalletTopup, completeWalletTopup } from "../users/wallet.service.js";
@@ -275,6 +276,7 @@ router.post(
  */
 router.post(
   "/liqpay/callback",
+  webhookRateLimit,
   express.urlencoded({ extended: false }),
   asyncHandler(async (req, res) => {
     const body = z.object({ data: z.string(), signature: z.string() }).safeParse(req.body);
@@ -333,6 +335,7 @@ router.post(
  */
 router.post(
   "/monobank/callback",
+  webhookRateLimit,
   asyncHandler(async (req, res) => {
     const body = z.object({ invoiceId: z.string() }).safeParse(req.body);
     if (!body.success) return res.status(400).send("Malformed callback");
@@ -380,6 +383,7 @@ router.post(
  */
 router.post(
   "/wayforpay/callback",
+  webhookRateLimit,
   asyncHandler(async (req, res) => {
     const body = z.object({ orderReference: z.string() }).safeParse(req.body);
     if (!body.success) return res.status(400).send("Malformed callback");

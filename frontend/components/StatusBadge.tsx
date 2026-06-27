@@ -19,7 +19,9 @@ const colors: Record<string, string> = {
   posted: "bg-emerald-100 text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-200",
   voided: "bg-zinc-100 text-zinc-700 dark:bg-zinc-400/15 dark:text-zinc-200",
   balanced: "bg-emerald-100 text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-200",
-  mismatch: "bg-rose-100 text-rose-800 dark:bg-rose-400/15 dark:text-rose-200"
+  mismatch: "bg-rose-100 text-rose-800 dark:bg-rose-400/15 dark:text-rose-200",
+  rejected: "bg-rose-100 text-rose-800 dark:bg-rose-400/15 dark:text-rose-200",
+  processing: "bg-amber-100 text-amber-800 dark:bg-amber-400/15 dark:text-amber-200"
 };
 
 export function StatusBadge({ status }: { status: string }) {

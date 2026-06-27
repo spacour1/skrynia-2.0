@@ -57,6 +57,15 @@ export const apiRateLimit = rateLimit({
   handler: rateLimitResponse
 });
 
+export const webhookRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  keyGenerator: (req) => `webhook:${req.ip}`,
+  handler: rateLimitResponse
+});
+
 export const writeRateLimit = rateLimit({
   windowMs: 60 * 1000,
   limit: 60,

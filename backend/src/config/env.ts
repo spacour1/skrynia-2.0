@@ -36,6 +36,13 @@ const schema = z.object({
   WAYFORPAY_MERCHANT_ACCOUNT: z.string().optional(),
   WAYFORPAY_MERCHANT_SECRET_KEY: z.string().optional(),
   WAYFORPAY_SERVICE_URL: z.string().optional(),
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().default(587),
+  SMTP_SECURE: z.coerce.boolean().default(false),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASSWORD: z.string().optional(),
+  SMTP_FROM: z.string().default("EscrowMarket <no-reply@escrowmarket.local>"),
   METRICS_USER: z.string().default("metrics"),
   METRICS_PASSWORD: z.string().default("dev-metrics-password-change-me")
 }).superRefine((value, ctx) => {
@@ -68,6 +75,14 @@ const schema = z.object({
       path: ["LIQPAY_PUBLIC_KEY"],
       message:
         "No real payment provider is configured for production (need LiqPay, Monobank, WayForPay, or manual transfer credentials)"
+    });
+  }
+
+  if (!value.SMTP_HOST) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["SMTP_HOST"],
+      message: "SMTP_HOST must be configured in production so verification and password-reset emails can be sent"
     });
   }
 });

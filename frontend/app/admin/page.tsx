@@ -116,6 +116,14 @@ function AdminContent() {
         </div>
       </Link>
 
+      <Link className="interactive-card flex items-center gap-4 p-5" href="/admin/payouts">
+        <WalletCards className="h-6 w-6 text-brand" />
+        <div>
+          <p className="font-bold">Выплаты продавцам</p>
+          <p className="text-sm text-muted">Подтверждение и отклонение заявок на вывод средств</p>
+        </div>
+      </Link>
+
       <Link className="interactive-card flex items-center gap-4 p-5" href="/admin/media">
         <ImageIcon className="h-6 w-6 text-brand" />
         <div>

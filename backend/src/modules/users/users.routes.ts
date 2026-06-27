@@ -126,7 +126,13 @@ router.get(
 
 const withdrawSchema = z.object({
   amount: z.string(),
-  currency: z.string().length(3).default("UAH")
+  currency: z.string().length(3).default("UAH"),
+  destination: z.object({
+    method: z.enum(["card", "iban"]),
+    accountNumber: z.string().min(4).max(64),
+    holderName: z.string().min(2).max(120),
+    bankName: z.string().max(120).optional()
+  })
 });
 
 router.post(
@@ -136,8 +142,8 @@ router.post(
     const input = withdrawSchema.parse(req.body);
     const amountCents = moneyToCents(input.amount);
     if (amountCents < 100) throw badRequest("Minimum withdrawal amount is 1.00");
-    const transaction = await requestWithdrawal(req.user.id, amountCents, input.currency.toUpperCase());
-    res.status(201).json({ transaction });
+    const payout = await requestWithdrawal(req.user.id, amountCents, input.currency.toUpperCase(), input.destination);
+    res.status(201).json({ payout });
   })
 );
 

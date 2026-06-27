@@ -254,8 +254,8 @@ router.post(
 
     if (env.NODE_ENV === "production") {
       // Unlike registration, this is an explicit user action waiting on an email - a
-      // broken/unconfigured SMTP setup should surface as a real error here, not a
-      // silent "sent" (sendEmail resolves false rather than throwing when SMTP_HOST
+      // broken/unconfigured Resend setup should surface as a real error here, not a
+      // silent "sent" (sendEmail resolves false rather than throwing when RESEND_API_KEY
       // isn't set, since that path is allowed to exist outside production).
       let sent = false;
       try {

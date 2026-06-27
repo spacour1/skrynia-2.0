@@ -1,43 +1,51 @@
-import nodemailer from "nodemailer";
 import { env } from "../config/env.js";
 import { logger } from "./logger.js";
 
-let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
-
-function getTransporter() {
-  if (!env.SMTP_HOST) return null;
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: env.SMTP_HOST,
-      port: env.SMTP_PORT,
-      secure: env.SMTP_SECURE,
-      auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASSWORD } : undefined,
-      // Without these, a blocked/unreachable SMTP host hangs on nodemailer's defaults
-      // (multiple minutes) instead of failing fast - that hang propagates all the way up
-      // to a stuck "sending..." button on /auth/verify-email/request, which awaits the send.
-      connectionTimeout: 10_000,
-      greetingTimeout: 10_000,
-      socketTimeout: 10_000
-    });
-  }
-  return transporter;
-}
+const RESEND_API_URL = "https://api.resend.com/emails";
+const RESEND_TIMEOUT_MS = 10_000;
 
 /**
- * In dev/test, SMTP is usually unconfigured: rather than fail registration or password
- * reset over a missing mail server, this logs the email and no-ops. config/env.ts only
- * warns (not fails) when SMTP_HOST is missing in production too, so callers that need to
- * know whether a send actually happened (e.g. the verify-email/request endpoint) should
+ * In dev/test, Resend is usually unconfigured: rather than fail registration or password
+ * reset over a missing mail provider, this logs the email and no-ops. config/env.ts only
+ * warns (not fails) when RESEND_API_KEY is missing in production too, so callers that need
+ * to know whether a send actually happened (e.g. the verify-email/request endpoint) should
  * check the return value instead of assuming it always reaches an inbox.
+ *
+ * Sent over Resend's HTTPS API rather than SMTP: most PaaS hosts (Railway included) block
+ * outbound SMTP ports, which makes SMTP time out regardless of credentials.
  */
 export async function sendEmail(input: { to: string; subject: string; html: string; text: string }): Promise<boolean> {
-  const client = getTransporter();
-  if (!client) {
-    logger.warn({ to: input.to, subject: input.subject }, "email_not_sent_smtp_unconfigured");
+  if (!env.RESEND_API_KEY) {
+    logger.warn({ to: input.to, subject: input.subject }, "email_not_sent_resend_unconfigured");
     return false;
   }
-  await client.sendMail({ from: env.SMTP_FROM, to: input.to, subject: input.subject, html: input.html, text: input.text });
-  return true;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), RESEND_TIMEOUT_MS);
+  try {
+    const response = await fetch(RESEND_API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: env.EMAIL_FROM,
+        to: input.to,
+        subject: input.subject,
+        html: input.html,
+        text: input.text
+      }),
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`Resend API responded ${response.status}: ${body}`);
+    }
+    return true;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /**

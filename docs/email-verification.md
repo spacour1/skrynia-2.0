@@ -40,16 +40,18 @@ Redis is already a hard dependency for sessions.
 ## Required env vars
 
 ```
-SMTP_HOST=
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=
-SMTP_PASSWORD=
-SMTP_FROM=SKRYNIA <no-reply@skrynia.com.ua>
+RESEND_API_KEY=
+EMAIL_FROM=SKRYNIA <no-reply@skrynia.com.ua>
 ```
 
+Mail is sent over [Resend](https://resend.com)'s HTTPS API, not SMTP. Most PaaS hosts
+(Railway included) block outbound SMTP ports (25/465/587) at the network level, which
+makes any SMTP provider — Gmail or otherwise — silently time out regardless of how
+correct the credentials are. Resend's API runs over plain HTTPS (443), which isn't
+blocked.
+
 - **Missing in development/test**: the server starts normally; `sendEmail` logs
-  `email_not_sent_smtp_unconfigured` and resolves `false` instead of sending. Register
+  `email_not_sent_resend_unconfigured` and resolves `false` instead of sending. Register
   and `/auth/verify-email/request` both still respond with the link itself
   (`debugVerificationUrl`) so you can copy-paste it without an inbox.
 - **Missing in production**: the server still starts (a `console.warn` is logged at
@@ -59,20 +61,19 @@ SMTP_FROM=SKRYNIA <no-reply@skrynia.com.ua>
   fails because of this — the account exists either way, it just won't have gotten an
   email.
 
-## Setting up SMTP
+## Setting up Resend
 
-Any SMTP provider works. Quick options:
+1. Sign up at [resend.com](https://resend.com) (free tier covers low-volume
+   transactional mail).
+2. Create an API key, set it as `RESEND_API_KEY`.
+3. Without a verified sending domain, you can still send from `onboarding@resend.dev` —
+   set `EMAIL_FROM=SKRYNIA <onboarding@resend.dev>` to get mail working immediately.
+4. To send from your own domain (e.g. `no-reply@skrynia.com.ua`), verify it in Resend's
+   dashboard (adds a few DNS TXT/CNAME records for SPF/DKIM), then update `EMAIL_FROM`.
 
-- **Gmail**: enable 2-Step Verification, create an [App Password](https://myaccount.google.com/apppasswords),
-  use `smtp.gmail.com:587`, your Gmail address as `SMTP_USER`, the app password as
-  `SMTP_PASSWORD`.
-- **Resend / Brevo / Mailgun**: sign up, verify a sending domain, copy their SMTP
-  host/user/password from their dashboard. Better deliverability than Gmail for
-  production traffic.
+## Testing locally without Resend
 
-## Testing locally without SMTP
-
-1. Leave `SMTP_HOST` unset.
+1. Leave `RESEND_API_KEY` unset.
 2. Register a user — the response includes `debugVerificationUrl` (dev/test only).
 3. Open that URL, click "Confirm email".
 4. Check `GET /auth/me` — `emailVerified` should now be `true`.
@@ -85,7 +86,7 @@ returns `{ status: "sent", debugVerificationUrl }` outside production.
 | Endpoint | Auth | Notes |
 |---|---|---|
 | `POST /auth/register` | none | Always succeeds even if the email send fails; includes `debugVerificationUrl` outside production. |
-| `POST /auth/verify-email/request` | cookie | Rate-limited (see below). Returns `{ status: "already_verified" }` if nothing to do. In production, surfaces a real error if SMTP is broken/unconfigured. |
+| `POST /auth/verify-email/request` | cookie | Rate-limited (see below). Returns `{ status: "already_verified" }` if nothing to do. In production, surfaces a real error if Resend is broken/unconfigured. |
 | `POST /auth/verify-email/confirm` | none (token-based) | Body `{ token }`. One-time use, 24h TTL. CSRF-exempt (no session cookie exists yet when the link is opened in a fresh tab). |
 | `GET /auth/me` / `GET /users/me` | cookie | Both include `emailVerified`. |
 | `POST /auth/password/forgot` / `POST /auth/password/reset` | none | Unrelated to email verification, but share the same Redis-token pattern. Never reveal whether an email is registered. |
@@ -132,7 +133,7 @@ forms render `<EmailNotVerifiedNotice />` (a friendly message + resend button) i
 1. Register a real account and confirm the email actually arrives (not just logged).
 2. Hit `POST /auth/verify-email/request` once — confirm it returns `{ status: "sent" }`
    without an error.
-3. Temporarily break `SMTP_PASSWORD` and confirm `/auth/verify-email/request` now returns
+3. Temporarily break `RESEND_API_KEY` and confirm `/auth/verify-email/request` now returns
    an error (not a fake "sent") — then fix it back.
 4. Confirm an unverified test account gets a 403 with `code: "email_not_verified"` when
    trying to create a listing, and that the UI shows the friendly notice, not raw JSON.
@@ -140,10 +141,11 @@ forms render `<EmailNotVerifiedNotice />` (a friendly message + resend button) i
 ## If the email doesn't arrive
 
 - Check spam/junk first.
-- Check backend logs for `email_not_sent_smtp_unconfigured` (SMTP_HOST missing) or a
-  nodemailer error (bad credentials, blocked port, provider rate limit).
-- Confirm `SMTP_FROM`'s domain is allowed to send via your provider (some providers
-  require the `From` domain to match a verified sending domain).
+- Check backend logs for `email_not_sent_resend_unconfigured` (`RESEND_API_KEY` missing)
+  or a `verification_email_resend_failed` / `password_reset_email_failed` entry with the
+  Resend API's error response (bad API key, unverified `EMAIL_FROM` domain, rate limit).
+- Confirm `EMAIL_FROM`'s domain is verified in Resend, or fall back to
+  `onboarding@resend.dev` while testing.
 - As a fallback, an admin can manually verify an account by running
   `update users set email_verified_at = now() where email = '...'` — there's no UI for
   this today; it's a deliberate manual escape hatch, not a supported flow.

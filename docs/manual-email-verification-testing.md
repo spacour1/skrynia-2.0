@@ -65,10 +65,10 @@ Then confirm the email (step 1) and verify all of the above now work normally.
 
 These only matter on a deploy with `NODE_ENV=production`:
 
-1. With SMTP configured correctly: `POST /auth/verify-email/request` returns
+1. With Resend configured correctly: `POST /auth/verify-email/request` returns
    `{ "status": "sent" }` with no `debugVerificationUrl` field.
-2. Temporarily set `SMTP_PASSWORD` to something wrong (or unset `SMTP_HOST`), redeploy,
-   and confirm `/auth/verify-email/request` now returns a 400 error instead of a fake
+2. Temporarily set `RESEND_API_KEY` to something wrong (or unset it), redeploy, and
+   confirm `/auth/verify-email/request` now returns a 400 error instead of a fake
    "sent" — then revert.
 3. Confirm registration *still succeeds* in both cases above (it must never fail due to
    the email send itself) — check the response is 201 with a `user` object.

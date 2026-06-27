@@ -17,9 +17,10 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Email verification (registration confirmation, password reset) needs `SMTP_*` set —
+Email verification (registration confirmation, password reset) needs `RESEND_API_KEY` set —
 see [docs/email-verification.md](docs/email-verification.md) for setup and local testing
-without a real mail server.
+without a real mail provider. (Mail is sent over Resend's HTTPS API rather than SMTP,
+since most PaaS hosts block outbound SMTP ports.)
 
 Open:
 

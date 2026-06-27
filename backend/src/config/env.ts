@@ -37,12 +37,11 @@ const schema = z.object({
   WAYFORPAY_MERCHANT_SECRET_KEY: z.string().optional(),
   WAYFORPAY_SERVICE_URL: z.string().optional(),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
-  SMTP_HOST: z.string().optional(),
-  SMTP_PORT: z.coerce.number().int().default(587),
-  SMTP_SECURE: z.coerce.boolean().default(false),
-  SMTP_USER: z.string().optional(),
-  SMTP_PASSWORD: z.string().optional(),
-  SMTP_FROM: z.string().default("EscrowMarket <no-reply@escrowmarket.local>"),
+  // SMTP is intentionally not used: most PaaS hosts (Railway included) block outbound
+  // SMTP ports (25/465/587) at the network level, which makes mail silently time out
+  // regardless of credentials. Resend's HTTP API runs over plain HTTPS (443) instead.
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().default("EscrowMarket <onboarding@resend.dev>"),
   METRICS_USER: z.string().default("metrics"),
   METRICS_PASSWORD: z.string().default("dev-metrics-password-change-me")
 }).superRefine((value, ctx) => {
@@ -83,7 +82,7 @@ const schema = z.object({
 export const env = schema.parse(process.env);
 
 // Email is non-critical to keep the site running: warn instead of refusing to start, since
-// verify-email/password-reset just no-op (see common/mailer.ts) until SMTP is configured.
-if (env.NODE_ENV === "production" && !env.SMTP_HOST) {
-  console.warn("SMTP_HOST is not configured - verification and password-reset emails will not be sent");
+// verify-email/password-reset just no-op (see common/mailer.ts) until Resend is configured.
+if (env.NODE_ENV === "production" && !env.RESEND_API_KEY) {
+  console.warn("RESEND_API_KEY is not configured - verification and password-reset emails will not be sent");
 }

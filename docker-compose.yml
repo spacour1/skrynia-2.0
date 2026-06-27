@@ -42,6 +42,8 @@ services:
       LOCAL_UPLOAD_DIR: uploads
       METRICS_USER: ${METRICS_USER:-metrics}
       METRICS_PASSWORD: ${METRICS_PASSWORD:?METRICS_PASSWORD must be set in .env}
+      MONOBANK_TOKEN: ${MONOBANK_TOKEN:-}
+      MONOBANK_WEBHOOK_URL: ${MONOBANK_WEBHOOK_URL:-}
     ports:
       - "4000:4000"
     volumes:

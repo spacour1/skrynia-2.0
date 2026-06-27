@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RequireAuth } from "../../components/RequireAuth";
 import { ApiError, apiFetch, money } from "../../lib/api";
 import { redirectToLiqpay, type LiqpayCheckout } from "../../lib/liqpay";
+import { redirectToMonobank, type MonobankCheckout } from "../../lib/monobank";
 
 type WalletItem = {
   id: string;
@@ -67,13 +68,22 @@ function WalletContent() {
   const primary = wallet.data?.wallet ?? wallets[0] ?? { currency: "UAH", availableCents: 0, escrowCents: 0 };
   const processingCents = sumTransactions(transactions.filter((tx) => tx.status !== "completed" && tx.status !== "succeeded"));
 
-  const topup = useMutation({
+  const topupWithLiqpay = useMutation({
     mutationFn: () =>
       apiFetch<LiqpayCheckout>("/payments/wallet/liqpay/checkout", {
         method: "POST",
         body: JSON.stringify({ amount: topupAmount.trim() })
       }),
     onSuccess: redirectToLiqpay
+  });
+
+  const topupWithMonobank = useMutation({
+    mutationFn: () =>
+      apiFetch<MonobankCheckout>("/payments/wallet/monobank/checkout", {
+        method: "POST",
+        body: JSON.stringify({ amount: topupAmount.trim() })
+      }),
+    onSuccess: redirectToMonobank
   });
 
   const withdraw = useMutation({
@@ -142,10 +152,16 @@ function WalletContent() {
                     onChange={(event) => setTopupAmount(event.target.value)}
                   />
                 </label>
-                <button className="app-button-action mt-3 h-11 w-full" disabled={!topupAmount || topup.isPending} onClick={() => topup.mutate()}>
-                  {topup.isPending ? "Переходим к оплате..." : "Перейти к оплате через LiqPay"}
-                </button>
-                {topup.error ? <p className="mt-2 text-sm text-rose-600">{(topup.error as ApiError).message}</p> : null}
+                <div className="mt-3 grid gap-2">
+                  <button className="app-button-action h-11 w-full" disabled={!topupAmount || topupWithLiqpay.isPending} onClick={() => topupWithLiqpay.mutate()}>
+                    {topupWithLiqpay.isPending ? "Переходим к оплате..." : "Перейти к оплате через LiqPay"}
+                  </button>
+                  <button className="app-button-action h-11 w-full" disabled={!topupAmount || topupWithMonobank.isPending} onClick={() => topupWithMonobank.mutate()}>
+                    {topupWithMonobank.isPending ? "Переходим к оплате..." : "Перейти к оплате через Monobank"}
+                  </button>
+                </div>
+                {topupWithLiqpay.error ? <p className="mt-2 text-sm text-rose-600">{(topupWithLiqpay.error as ApiError).message}</p> : null}
+                {topupWithMonobank.error ? <p className="mt-2 text-sm text-rose-600">{(topupWithMonobank.error as ApiError).message}</p> : null}
               </div>
             ) : null}
 

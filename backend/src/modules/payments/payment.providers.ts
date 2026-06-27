@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 
-export type PaymentProviderName = "mock" | "stripe" | "liqpay" | "fondy";
+export type PaymentProviderName = "mock" | "stripe" | "liqpay" | "fondy" | "monobank";
 
 export type PaymentResult = {
   provider: PaymentProviderName;
@@ -67,11 +67,34 @@ class LiqpayCaptureProvider implements PaymentProvider {
   }
 }
 
+/**
+ * Monobank's webhook (see monobank.service.ts) is the same kind of out-of-process
+ * confirmation as LiqPay's: by the time this runs, getMonobankInvoiceStatus has already
+ * confirmed the payment, so capture() just records the invoiceId as the reference.
+ */
+class MonobankCaptureProvider implements PaymentProvider {
+  public name: PaymentProviderName = "monobank";
+
+  async capture(input: {
+    orderId: string;
+    amountCents: number;
+    currency: string;
+    idempotencyKey: string;
+    externalReference?: string;
+  }): Promise<PaymentResult> {
+    if (!input.externalReference) {
+      throw new Error("Monobank capture requires a confirmed externalReference from the payment webhook");
+    }
+    return { provider: "monobank", reference: input.externalReference, status: "captured" };
+  }
+}
+
 const providers: Record<PaymentProviderName, PaymentProvider> = {
   mock: new SimulatedProvider("mock"),
   stripe: new SimulatedProvider("stripe"),
   liqpay: new LiqpayCaptureProvider(),
-  fondy: new SimulatedProvider("fondy")
+  fondy: new SimulatedProvider("fondy"),
+  monobank: new MonobankCaptureProvider()
 };
 
 export function getPaymentProvider(name: PaymentProviderName) {

@@ -7,7 +7,7 @@ A production-oriented MVP for a peer-to-peer digital marketplace similar to FunP
 - Frontend: Next.js, React Query, Zustand, TailwindCSS
 - Backend: Express, TypeScript, PostgreSQL, Redis, WebSocket chat
 - Storage: local upload storage by default, S3-compatible config supported
-- Payments: pluggable provider interface with mock, Stripe, LiqPay, and Fondy simulation
+- Payments: pluggable provider interface with mock, Stripe, and Fondy simulation, plus real LiqPay and Monobank Acquiring integrations
 
 ## Quick Start With Docker
 
@@ -116,6 +116,8 @@ This MVP uses an internal virtual ledger, not real banking logic.
 - `POST /marketplace/products`
 - `POST /orders`
 - `POST /payments/orders/:orderId/pay`
+- `POST /payments/orders/:orderId/liqpay/checkout`
+- `POST /payments/orders/:orderId/monobank/checkout`
 - `POST /orders/:id/start`
 - `POST /orders/:id/deliver`
 - `POST /orders/:id/confirm`

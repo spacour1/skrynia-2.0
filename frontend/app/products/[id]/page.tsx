@@ -20,6 +20,7 @@ import { useAuth } from "../../../lib/auth-store";
 import { useI18n } from "../../../lib/i18n";
 import { fieldLabel, formatFieldValue } from "../../../lib/product-fields";
 import { redirectToLiqpay, type LiqpayCheckout } from "../../../lib/liqpay";
+import { redirectToMonobank, type MonobankCheckout } from "../../../lib/monobank";
 
 const HIDDEN_METADATA_KEYS = new Set(["catalogKind", "shortDescription", "region", "rank"]);
 
@@ -60,15 +61,28 @@ export default function ProductPage({ params }: { params: { id: string } }) {
     retry: false
   });
 
-  const buyNow = useMutation({
+  async function createOrder() {
+    const { order } = await apiFetch<{ order: { id: string } }>("/orders", {
+      method: "POST",
+      body: JSON.stringify({ productId: params.id, quantity: 1 })
+    });
+    return order;
+  }
+
+  const buyWithLiqpay = useMutation({
     mutationFn: async () => {
-      const { order } = await apiFetch<{ order: { id: string } }>("/orders", {
-        method: "POST",
-        body: JSON.stringify({ productId: params.id, quantity: 1 })
-      });
+      const order = await createOrder();
       return apiFetch<LiqpayCheckout>(`/payments/orders/${order.id}/liqpay/checkout`, { method: "POST" });
     },
     onSuccess: redirectToLiqpay
+  });
+
+  const buyWithMonobank = useMutation({
+    mutationFn: async () => {
+      const order = await createOrder();
+      return apiFetch<MonobankCheckout>(`/payments/orders/${order.id}/monobank/checkout`, { method: "POST" });
+    },
+    onSuccess: redirectToMonobank
   });
 
   if (product.isLoading) return <p className="text-muted">{t("common.loading")}</p>;
@@ -136,17 +150,24 @@ export default function ProductPage({ params }: { params: { id: string } }) {
               {isOwn ? null : item.stock < 1 ? (
                 <p className="mt-5 rounded-lg bg-panel/35 p-3 text-center text-sm text-muted">Лот распродан</p>
               ) : user ? (
-                <button className="app-button-action mt-5 w-full py-3" disabled={buyNow.isPending} onClick={() => buyNow.mutate()}>
-                  <CreditCard className="h-5 w-5" />
-                  {buyNow.isPending ? "Переходим к оплате..." : "Купить"}
-                </button>
+                <div className="mt-5 grid gap-2">
+                  <button className="app-button-action w-full py-3" disabled={buyWithLiqpay.isPending} onClick={() => buyWithLiqpay.mutate()}>
+                    <CreditCard className="h-5 w-5" />
+                    {buyWithLiqpay.isPending ? "Переходим к оплате..." : "Купить через LiqPay"}
+                  </button>
+                  <button className="app-button-action w-full py-3" disabled={buyWithMonobank.isPending} onClick={() => buyWithMonobank.mutate()}>
+                    <CreditCard className="h-5 w-5" />
+                    {buyWithMonobank.isPending ? "Переходим к оплате..." : "Купить через Monobank"}
+                  </button>
+                </div>
               ) : (
                 <button className="app-button-action mt-5 w-full py-3" onClick={() => router.push("/login")}>
                   <CreditCard className="h-5 w-5" />
                   Войти и купить
                 </button>
               )}
-              {buyNow.error ? <p className="mt-2 text-sm text-rose-600">{buyNow.error.message}</p> : null}
+              {buyWithLiqpay.error ? <p className="mt-2 text-sm text-rose-600">{buyWithLiqpay.error.message}</p> : null}
+              {buyWithMonobank.error ? <p className="mt-2 text-sm text-rose-600">{buyWithMonobank.error.message}</p> : null}
             </div>
           </div>
         </section>

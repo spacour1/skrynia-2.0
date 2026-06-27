@@ -23,6 +23,7 @@ import { useAuth } from "../../../lib/auth-store";
 import { StatusBadge } from "../../../components/StatusBadge";
 import { useI18n } from "../../../lib/i18n";
 import { redirectToLiqpay, type LiqpayCheckout } from "../../../lib/liqpay";
+import { redirectToMonobank, type MonobankCheckout } from "../../../lib/monobank";
 
 const statusSteps = [
   { key: "pending", label: "Создан", text: "Заказ ожидает оплаты или подтверждения." },
@@ -76,13 +77,18 @@ export default function OrderPage({ params }: { params: { id: string } }) {
     onSuccess: redirectToLiqpay
   });
 
-  // The buyer lands back here right after the LiqPay checkout page; LiqPay's own
-  // server-to-server webhook is what actually confirms payment, so poll briefly in
-  // case it hasn't landed yet when this page re-mounts.
-  const returningFromLiqpay = searchParams.get("liqpay") === "return";
+  const payWithMonobank = useMutation({
+    mutationFn: () => apiFetch<MonobankCheckout>(`/payments/orders/${params.id}/monobank/checkout`, { method: "POST" }),
+    onSuccess: redirectToMonobank
+  });
+
+  // The buyer lands back here right after the LiqPay/Monobank checkout page; the
+  // provider's own server-to-server webhook is what actually confirms payment, so poll
+  // briefly in case it hasn't landed yet when this page re-mounts.
+  const returningFromCheckout = searchParams.get("liqpay") === "return" || searchParams.get("monobank") === "return";
   const pollAttempts = useRef(0);
   useEffect(() => {
-    if (!returningFromLiqpay) return;
+    if (!returningFromCheckout) return;
     const timer = window.setInterval(() => {
       pollAttempts.current += 1;
       refresh();
@@ -90,7 +96,7 @@ export default function OrderPage({ params }: { params: { id: string } }) {
     }, 2000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [returningFromLiqpay]);
+  }, [returningFromCheckout]);
 
   if (order.isLoading) return <p className="text-muted">{t("orders.loadingOrder")}</p>;
   if (!order.data) return <p className="text-rose-600">{t("orders.notFound")}</p>;
@@ -259,11 +265,18 @@ export default function OrderPage({ params }: { params: { id: string } }) {
           <div className="mt-4 grid gap-3">
             {isBuyer && item.status === "pending" ? (
               <ActionCard title="Оплатить заказ" text="Деньги будут удержаны в escrow до подтверждения доставки.">
-                <button className="app-button-action w-full" disabled={payWithLiqpay.isPending} onClick={() => payWithLiqpay.mutate()}>
-                  <CreditCard className="h-4 w-4" />
-                  {payWithLiqpay.isPending ? "Переходим к оплате..." : "Оплатить через LiqPay"}
-                </button>
+                <div className="grid gap-2">
+                  <button className="app-button-action w-full" disabled={payWithLiqpay.isPending} onClick={() => payWithLiqpay.mutate()}>
+                    <CreditCard className="h-4 w-4" />
+                    {payWithLiqpay.isPending ? "Переходим к оплате..." : "Оплатить через LiqPay"}
+                  </button>
+                  <button className="app-button-action w-full" disabled={payWithMonobank.isPending} onClick={() => payWithMonobank.mutate()}>
+                    <CreditCard className="h-4 w-4" />
+                    {payWithMonobank.isPending ? "Переходим к оплате..." : "Оплатить через Monobank"}
+                  </button>
+                </div>
                 {payWithLiqpay.error ? <p className="mt-2 text-sm text-rose-600">{payWithLiqpay.error.message}</p> : null}
+                {payWithMonobank.error ? <p className="mt-2 text-sm text-rose-600">{payWithMonobank.error.message}</p> : null}
               </ActionCard>
             ) : null}
 

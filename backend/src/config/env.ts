@@ -28,6 +28,8 @@ const schema = z.object({
   LIQPAY_PUBLIC_KEY: z.string().optional(),
   LIQPAY_PRIVATE_KEY: z.string().optional(),
   LIQPAY_SERVER_URL: z.string().optional(),
+  MONOBANK_TOKEN: z.string().optional(),
+  MONOBANK_WEBHOOK_URL: z.string().optional(),
   METRICS_USER: z.string().default("metrics"),
   METRICS_PASSWORD: z.string().default("dev-metrics-password-change-me")
 }).superRefine((value, ctx) => {

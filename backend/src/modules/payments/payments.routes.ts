@@ -15,11 +15,12 @@ import { logger } from "../../common/logger.js";
 import { moneyToCents } from "../../common/validation.js";
 import { createWalletTopup, completeWalletTopup } from "../users/wallet.service.js";
 import { buildLiqpayCheckout, decodeLiqpayCallback, isLiqpaySuccessStatus, verifyLiqpaySignature } from "./liqpay.service.js";
+import { createMonobankInvoice, getMonobankInvoiceStatus, isMonobankSuccessStatus } from "./monobank.service.js";
 
 const router = Router();
 
 const paySchema = z.object({
-  provider: z.enum(["mock", "stripe", "liqpay", "fondy"]).default("mock")
+  provider: z.enum(["mock", "stripe", "liqpay", "fondy", "monobank"]).default("mock")
 });
 
 const walletTopupSchema = z.object({
@@ -107,6 +108,34 @@ router.post(
 );
 
 router.post(
+  "/orders/:orderId/monobank/checkout",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const orderId = z.string().uuid().parse(req.params.orderId);
+    const result = await pool.query(
+      `select o.id, o.buyer_id, o.amount_cents, o.currency, o.status, p.title as product_title
+       from orders o
+       join products p on p.id = o.product_id
+       where o.id = $1`,
+      [orderId]
+    );
+    const order = result.rows[0];
+    if (!order) throw notFound("Order not found");
+    if (order.buyer_id !== req.user.id) throw forbidden("Only the buyer can pay this order");
+    if (order.status !== "pending") throw badRequest("Only pending orders can be paid");
+
+    const invoice = await createMonobankInvoice({
+      reference: order.id,
+      amountCents: Number(order.amount_cents),
+      currency: order.currency,
+      description: `SKRYNIA: ${order.product_title}`,
+      redirectUrl: `${env.FRONTEND_URL}/orders/${order.id}?monobank=return`
+    });
+    res.json({ pageUrl: invoice.pageUrl, invoiceId: invoice.invoiceId });
+  })
+);
+
+router.post(
   "/wallet/liqpay/checkout",
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
@@ -123,6 +152,26 @@ router.post(
       resultUrl: `${env.FRONTEND_URL}/wallet?liqpay=return`
     });
     res.json({ data: checkout.data, signature: checkout.signature, actionUrl: checkout.actionUrl });
+  })
+);
+
+router.post(
+  "/wallet/monobank/checkout",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const input = walletTopupSchema.parse(req.body);
+    const amountCents = moneyToCents(input.amount);
+    if (amountCents < 100) throw badRequest("Minimum top-up amount is 1.00");
+
+    const topup = await createWalletTopup(req.user.id, amountCents, "UAH");
+    const invoice = await createMonobankInvoice({
+      reference: topup.id,
+      amountCents,
+      currency: "UAH",
+      description: "SKRYNIA: пополнение баланса",
+      redirectUrl: `${env.FRONTEND_URL}/wallet?monobank=return`
+    });
+    res.json({ pageUrl: invoice.pageUrl, invoiceId: invoice.invoiceId });
   })
 );
 
@@ -175,6 +224,54 @@ router.post(
       } catch (error) {
         paymentAttemptsTotal.labels("liqpay", "failed").inc();
         logger.warn({ topupId: callback.order_id, error }, "liqpay_callback_topup_skipped");
+      }
+      return res.status(200).send("ok");
+    }
+
+    res.status(200).send("ok");
+  })
+);
+
+/**
+ * Monobank's webHookUrl ping. We don't verify Monobank's ECDSA body signature here —
+ * instead we treat the webhook purely as a "go check now" signal and re-fetch the
+ * invoice status ourselves with our merchant token, which is the data we actually act
+ * on. Like the LiqPay webhook, this can be delivered more than once for the same
+ * invoice, so every step must stay safe to repeat.
+ */
+router.post(
+  "/monobank/callback",
+  asyncHandler(async (req, res) => {
+    const body = z.object({ invoiceId: z.string() }).safeParse(req.body);
+    if (!body.success) return res.status(400).send("Malformed callback");
+
+    const invoice = await getMonobankInvoiceStatus(body.data.invoiceId);
+    if (!isMonobankSuccessStatus(invoice.status) || !invoice.reference) {
+      return res.status(200).send("ok");
+    }
+
+    const orderRow = await pool.query(`select id, buyer_id from orders where id = $1`, [invoice.reference]);
+    const order = orderRow.rows[0];
+    if (order) {
+      try {
+        const updated = await lockEscrow(order.id, order.buyer_id, "monobank", invoice.invoiceId);
+        paymentAttemptsTotal.labels("monobank", "captured").inc();
+        await announceOrderPaid(updated, order.buyer_id);
+      } catch (error) {
+        paymentAttemptsTotal.labels("monobank", "failed").inc();
+        logger.warn({ orderId: order.id, error }, "monobank_callback_capture_skipped");
+      }
+      return res.status(200).send("ok");
+    }
+
+    const topupRow = await pool.query(`select id from wallet_topups where id = $1`, [invoice.reference]);
+    if (topupRow.rows[0]) {
+      try {
+        await completeWalletTopup(invoice.reference, "monobank", invoice.invoiceId);
+        paymentAttemptsTotal.labels("monobank", "captured").inc();
+      } catch (error) {
+        paymentAttemptsTotal.labels("monobank", "failed").inc();
+        logger.warn({ topupId: invoice.reference, error }, "monobank_callback_topup_skipped");
       }
       return res.status(200).send("ok");
     }

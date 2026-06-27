@@ -56,6 +56,20 @@ const schema = z.object({
       message: "METRICS_PASSWORD must be set to a real secret in production"
     });
   }
+
+  const hasLiqpay = Boolean(value.LIQPAY_PUBLIC_KEY && value.LIQPAY_PRIVATE_KEY);
+  const hasMonobank = Boolean(value.MONOBANK_TOKEN);
+  const hasWayforpay = Boolean(value.WAYFORPAY_MERCHANT_ACCOUNT && value.WAYFORPAY_MERCHANT_SECRET_KEY);
+  const hasManual = Boolean(value.MANUAL_PAYMENT_CARD_NUMBER && value.MANUAL_PAYMENT_RECEIVER_NAME);
+
+  if (!hasLiqpay && !hasMonobank && !hasWayforpay && !hasManual) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["LIQPAY_PUBLIC_KEY"],
+      message:
+        "No real payment provider is configured for production (need LiqPay, Monobank, WayForPay, or manual transfer credentials)"
+    });
+  }
 });
 
 export const env = schema.parse(process.env);

@@ -23,7 +23,7 @@ const router = Router();
 const SIMULATED_PROVIDERS = new Set(["mock", "stripe", "fondy"]);
 
 const paySchema = z.object({
-  provider: z.enum(["mock", "stripe", "liqpay", "fondy", "monobank"]).default("mock")
+  provider: z.enum(["mock", "stripe", "liqpay", "fondy", "monobank"])
 }).superRefine((value, ctx) => {
   // Simulated providers always "succeed" without ever charging anyone — fine for local
   // dev and demos, but in production this endpoint would let any buyer get escrow funds

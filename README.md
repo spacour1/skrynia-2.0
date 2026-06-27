@@ -78,6 +78,25 @@ npm install
 npm run dev
 ```
 
+## Automated Tests
+
+The backend has a Vitest suite covering the escrow/ledger money logic (`lockEscrow`,
+`releaseEscrow`, `refundEscrow`) and the cents/decimal money parsing in `validation.ts`.
+It runs against a real Postgres database (no mocking of SQL), using the `mock` payment
+provider so it never touches a real payment gateway.
+
+```bash
+cd backend
+docker exec <postgres-container> psql -U marketplace -d marketplace -c "CREATE DATABASE marketplace_test"
+TEST_DATABASE_URL=postgres://marketplace:marketplace@localhost:5432/marketplace_test npx node-pg-migrate up --envPath .env
+npm test
+```
+
+`TEST_DATABASE_URL` defaults to `postgres://marketplace:marketplace@localhost:5432/marketplace_test`
+if not set. CI (`.github/workflows/ci.yml`) spins up its own throwaway Postgres service, runs
+migrations, then `npm run lint` and `npm test` for the backend, and `npm run typecheck` for the
+frontend, on every push and pull request.
+
 ## Core Flow
 
 1. Register or log in as a seller.

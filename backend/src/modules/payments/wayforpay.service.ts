@@ -10,7 +10,12 @@ function requireConfig() {
   if (!env.WAYFORPAY_MERCHANT_ACCOUNT || !env.WAYFORPAY_MERCHANT_SECRET_KEY) {
     throw badRequest("WayForPay is not configured on this server");
   }
-  return { merchantAccount: env.WAYFORPAY_MERCHANT_ACCOUNT, secretKey: env.WAYFORPAY_MERCHANT_SECRET_KEY };
+  // A stray trailing newline/space from copy-pasting the secret into Railway's env
+  // editor silently breaks every signature while leaving every other field looking fine.
+  return {
+    merchantAccount: env.WAYFORPAY_MERCHANT_ACCOUNT.trim(),
+    secretKey: env.WAYFORPAY_MERCHANT_SECRET_KEY.trim()
+  };
 }
 
 function sign(secretKey: string, fields: (string | number)[]) {
@@ -34,7 +39,7 @@ export async function createWayforpayInvoice(input: {
   const orderDate = Math.floor(Date.now() / 1000);
   const amount = centsToDecimalString(input.amountCents);
 
-  const signature = sign(secretKey, [
+  const signedFields = [
     merchantAccount,
     domainName(),
     input.orderReference,
@@ -44,7 +49,8 @@ export async function createWayforpayInvoice(input: {
     input.productName,
     1,
     amount
-  ]);
+  ];
+  const signature = sign(secretKey, signedFields);
 
   const response = await fetch(API_URL, {
     method: "POST",
@@ -84,7 +90,9 @@ export async function createWayforpayInvoice(input: {
         orderDate,
         amount,
         currency: input.currency,
-        productName: input.productName
+        productName: input.productName,
+        signedString: signedFields.join(";"),
+        secretKeyLength: secretKey.length
       },
       "wayforpay_invoice_creation_failed"
     );

@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { env } from "../../config/env.js";
 import { badRequest } from "../../common/errors.js";
 import { centsToDecimalString } from "../../common/validation.js";
+import { logger } from "../../common/logger.js";
 
 const API_URL = "https://api.wayforpay.com/api";
 
@@ -72,6 +73,21 @@ export async function createWayforpayInvoice(input: {
     | { reasonCode?: number; reason?: string; invoiceUrl?: string }
     | null;
   if (!response.ok || !body || body.reasonCode !== 1100 || !body.invoiceUrl) {
+    logger.warn(
+      {
+        httpStatus: response.status,
+        reasonCode: body?.reasonCode,
+        reason: body?.reason,
+        merchantAccount,
+        merchantDomainName: domainName(),
+        orderReference: input.orderReference,
+        orderDate,
+        amount,
+        currency: input.currency,
+        productName: input.productName
+      },
+      "wayforpay_invoice_creation_failed"
+    );
     throw badRequest(`WayForPay invoice creation failed: ${body?.reason ?? "unknown error"}`);
   }
   return { invoiceUrl: body.invoiceUrl, orderReference: input.orderReference };

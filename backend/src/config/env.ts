@@ -78,13 +78,12 @@ const schema = z.object({
     });
   }
 
-  if (!value.SMTP_HOST) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["SMTP_HOST"],
-      message: "SMTP_HOST must be configured in production so verification and password-reset emails can be sent"
-    });
-  }
 });
 
 export const env = schema.parse(process.env);
+
+// Email is non-critical to keep the site running: warn instead of refusing to start, since
+// verify-email/password-reset just no-op (see common/mailer.ts) until SMTP is configured.
+if (env.NODE_ENV === "production" && !env.SMTP_HOST) {
+  console.warn("SMTP_HOST is not configured - verification and password-reset emails will not be sent");
+}

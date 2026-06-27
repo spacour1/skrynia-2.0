@@ -16,6 +16,7 @@ import { moneyToCents } from "../../common/validation.js";
 import { createWalletTopup, completeWalletTopup } from "../users/wallet.service.js";
 import { buildLiqpayCheckout, decodeLiqpayCallback, isLiqpaySuccessStatus, verifyLiqpaySignature } from "./liqpay.service.js";
 import { createMonobankInvoice, getMonobankInvoiceStatus, isMonobankSuccessStatus } from "./monobank.service.js";
+import { buildWayforpayAck, createWayforpayInvoice, getWayforpayStatus, isWayforpaySuccessStatus } from "./wayforpay.service.js";
 
 const router = Router();
 
@@ -135,6 +136,33 @@ router.post(
   })
 );
 
+router.post(
+  "/orders/:orderId/wayforpay/checkout",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const orderId = z.string().uuid().parse(req.params.orderId);
+    const result = await pool.query(
+      `select o.id, o.buyer_id, o.amount_cents, o.currency, o.status, p.title as product_title
+       from orders o
+       join products p on p.id = o.product_id
+       where o.id = $1`,
+      [orderId]
+    );
+    const order = result.rows[0];
+    if (!order) throw notFound("Order not found");
+    if (order.buyer_id !== req.user.id) throw forbidden("Only the buyer can pay this order");
+    if (order.status !== "pending") throw badRequest("Only pending orders can be paid");
+
+    const invoice = await createWayforpayInvoice({
+      orderReference: order.id,
+      amountCents: Number(order.amount_cents),
+      currency: order.currency,
+      productName: `SKRYNIA: ${order.product_title}`
+    });
+    res.json({ invoiceUrl: invoice.invoiceUrl });
+  })
+);
+
 /**
  * Read-only: just hands the buyer the bank details and an order-specific comment to put
  * in the transfer. Doesn't touch order state — only an admin confirming the transfer
@@ -208,6 +236,25 @@ router.post(
       redirectUrl: `${env.FRONTEND_URL}/wallet?monobank=return`
     });
     res.json({ pageUrl: invoice.pageUrl, invoiceId: invoice.invoiceId });
+  })
+);
+
+router.post(
+  "/wallet/wayforpay/checkout",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const input = walletTopupSchema.parse(req.body);
+    const amountCents = moneyToCents(input.amount);
+    if (amountCents < 100) throw badRequest("Minimum top-up amount is 1.00");
+
+    const topup = await createWalletTopup(req.user.id, amountCents, "UAH");
+    const invoice = await createWayforpayInvoice({
+      orderReference: topup.id,
+      amountCents,
+      currency: "UAH",
+      productName: "SKRYNIA: пополнение баланса"
+    });
+    res.json({ invoiceUrl: invoice.invoiceUrl });
   })
 );
 
@@ -313,6 +360,51 @@ router.post(
     }
 
     res.status(200).send("ok");
+  })
+);
+
+/**
+ * WayForPay's serviceUrl webhook. As with the Monobank callback, we don't trust the
+ * body's merchantSignature — we only use orderReference to know what to re-check via
+ * getWayforpayStatus, signed with our own merchant credentials. WayForPay also requires
+ * a specific signed acknowledgment back or it will keep retrying.
+ */
+router.post(
+  "/wayforpay/callback",
+  asyncHandler(async (req, res) => {
+    const body = z.object({ orderReference: z.string() }).safeParse(req.body);
+    if (!body.success) return res.status(400).send("Malformed callback");
+
+    const orderReference = body.data.orderReference;
+    const status = await getWayforpayStatus(orderReference);
+
+    if (isWayforpaySuccessStatus(status.transactionStatus)) {
+      const orderRow = await pool.query(`select id, buyer_id from orders where id = $1`, [orderReference]);
+      const order = orderRow.rows[0];
+      if (order) {
+        try {
+          const updated = await lockEscrow(order.id, order.buyer_id, "wayforpay", orderReference);
+          paymentAttemptsTotal.labels("wayforpay", "captured").inc();
+          await announceOrderPaid(updated, order.buyer_id);
+        } catch (error) {
+          paymentAttemptsTotal.labels("wayforpay", "failed").inc();
+          logger.warn({ orderId: order.id, error }, "wayforpay_callback_capture_skipped");
+        }
+      } else {
+        const topupRow = await pool.query(`select id from wallet_topups where id = $1`, [orderReference]);
+        if (topupRow.rows[0]) {
+          try {
+            await completeWalletTopup(orderReference, "wayforpay", orderReference);
+            paymentAttemptsTotal.labels("wayforpay", "captured").inc();
+          } catch (error) {
+            paymentAttemptsTotal.labels("wayforpay", "failed").inc();
+            logger.warn({ topupId: orderReference, error }, "wayforpay_callback_topup_skipped");
+          }
+        }
+      }
+    }
+
+    res.json(buildWayforpayAck(orderReference));
   })
 );
 

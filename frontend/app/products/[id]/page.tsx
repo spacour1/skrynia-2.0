@@ -21,6 +21,7 @@ import { useI18n } from "../../../lib/i18n";
 import { fieldLabel, formatFieldValue } from "../../../lib/product-fields";
 import { redirectToLiqpay, type LiqpayCheckout } from "../../../lib/liqpay";
 import { redirectToMonobank, type MonobankCheckout } from "../../../lib/monobank";
+import { redirectToWayforpay, type WayforpayCheckout } from "../../../lib/wayforpay";
 
 const HIDDEN_METADATA_KEYS = new Set(["catalogKind", "shortDescription", "region", "rank"]);
 
@@ -83,6 +84,14 @@ export default function ProductPage({ params }: { params: { id: string } }) {
       return apiFetch<MonobankCheckout>(`/payments/orders/${order.id}/monobank/checkout`, { method: "POST" });
     },
     onSuccess: redirectToMonobank
+  });
+
+  const buyWithWayforpay = useMutation({
+    mutationFn: async () => {
+      const order = await createOrder();
+      return apiFetch<WayforpayCheckout>(`/payments/orders/${order.id}/wayforpay/checkout`, { method: "POST" });
+    },
+    onSuccess: redirectToWayforpay
   });
 
   const buyWithManualTransfer = useMutation({
@@ -164,6 +173,10 @@ export default function ProductPage({ params }: { params: { id: string } }) {
                     <CreditCard className="h-5 w-5" />
                     {buyWithMonobank.isPending ? "Переходим к оплате..." : "Купить через Monobank"}
                   </button>
+                  <button className="app-button-action w-full py-3" disabled={buyWithWayforpay.isPending} onClick={() => buyWithWayforpay.mutate()}>
+                    <CreditCard className="h-5 w-5" />
+                    {buyWithWayforpay.isPending ? "Переходим к оплате..." : "Купить через WayForPay"}
+                  </button>
                   <button className="app-button-secondary w-full py-3" disabled={buyWithManualTransfer.isPending} onClick={() => buyWithManualTransfer.mutate()}>
                     <CreditCard className="h-5 w-5" />
                     {buyWithManualTransfer.isPending ? "Создаём заказ..." : "Оплатить переводом"}
@@ -177,6 +190,7 @@ export default function ProductPage({ params }: { params: { id: string } }) {
               )}
               {buyWithLiqpay.error ? <p className="mt-2 text-sm text-rose-600">{buyWithLiqpay.error.message}</p> : null}
               {buyWithMonobank.error ? <p className="mt-2 text-sm text-rose-600">{buyWithMonobank.error.message}</p> : null}
+              {buyWithWayforpay.error ? <p className="mt-2 text-sm text-rose-600">{buyWithWayforpay.error.message}</p> : null}
               {buyWithManualTransfer.error ? <p className="mt-2 text-sm text-rose-600">{buyWithManualTransfer.error.message}</p> : null}
             </div>
           </div>

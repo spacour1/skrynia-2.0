@@ -7,6 +7,7 @@ import { RequireAuth } from "../../components/RequireAuth";
 import { ApiError, apiFetch, money } from "../../lib/api";
 import { redirectToLiqpay, type LiqpayCheckout } from "../../lib/liqpay";
 import { redirectToMonobank, type MonobankCheckout } from "../../lib/monobank";
+import { redirectToWayforpay, type WayforpayCheckout } from "../../lib/wayforpay";
 
 type WalletItem = {
   id: string;
@@ -86,6 +87,15 @@ function WalletContent() {
     onSuccess: redirectToMonobank
   });
 
+  const topupWithWayforpay = useMutation({
+    mutationFn: () =>
+      apiFetch<WayforpayCheckout>("/payments/wallet/wayforpay/checkout", {
+        method: "POST",
+        body: JSON.stringify({ amount: topupAmount.trim() })
+      }),
+    onSuccess: redirectToWayforpay
+  });
+
   const withdraw = useMutation({
     mutationFn: () =>
       apiFetch("/users/me/wallet/withdraw", {
@@ -159,9 +169,13 @@ function WalletContent() {
                   <button className="app-button-action h-11 w-full" disabled={!topupAmount || topupWithMonobank.isPending} onClick={() => topupWithMonobank.mutate()}>
                     {topupWithMonobank.isPending ? "Переходим к оплате..." : "Перейти к оплате через Monobank"}
                   </button>
+                  <button className="app-button-action h-11 w-full" disabled={!topupAmount || topupWithWayforpay.isPending} onClick={() => topupWithWayforpay.mutate()}>
+                    {topupWithWayforpay.isPending ? "Переходим к оплате..." : "Перейти к оплате через WayForPay"}
+                  </button>
                 </div>
                 {topupWithLiqpay.error ? <p className="mt-2 text-sm text-rose-600">{(topupWithLiqpay.error as ApiError).message}</p> : null}
                 {topupWithMonobank.error ? <p className="mt-2 text-sm text-rose-600">{(topupWithMonobank.error as ApiError).message}</p> : null}
+                {topupWithWayforpay.error ? <p className="mt-2 text-sm text-rose-600">{(topupWithWayforpay.error as ApiError).message}</p> : null}
               </div>
             ) : null}
 

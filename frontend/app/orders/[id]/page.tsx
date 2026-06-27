@@ -25,6 +25,7 @@ import { useI18n } from "../../../lib/i18n";
 import { redirectToLiqpay, type LiqpayCheckout } from "../../../lib/liqpay";
 import { redirectToMonobank, type MonobankCheckout } from "../../../lib/monobank";
 import { ManualPaymentPanel } from "../../../components/ManualPaymentPanel";
+import { redirectToWayforpay, type WayforpayCheckout } from "../../../lib/wayforpay";
 
 const statusSteps = [
   { key: "pending", label: "Создан", text: "Заказ ожидает оплаты или подтверждения." },
@@ -84,10 +85,18 @@ export default function OrderPage({ params }: { params: { id: string } }) {
     onSuccess: redirectToMonobank
   });
 
-  // The buyer lands back here right after the LiqPay/Monobank checkout page; the
-  // provider's own server-to-server webhook is what actually confirms payment, so poll
-  // briefly in case it hasn't landed yet when this page re-mounts.
-  const returningFromCheckout = searchParams.get("liqpay") === "return" || searchParams.get("monobank") === "return";
+  const payWithWayforpay = useMutation({
+    mutationFn: () => apiFetch<WayforpayCheckout>(`/payments/orders/${params.id}/wayforpay/checkout`, { method: "POST" }),
+    onSuccess: redirectToWayforpay
+  });
+
+  // The buyer lands back here right after the checkout page; the provider's own
+  // server-to-server webhook is what actually confirms payment, so poll briefly in case
+  // it hasn't landed yet when this page re-mounts.
+  const returningFromCheckout =
+    searchParams.get("liqpay") === "return" ||
+    searchParams.get("monobank") === "return" ||
+    searchParams.get("wayforpay") === "return";
   const pollAttempts = useRef(0);
   useEffect(() => {
     if (!returningFromCheckout) return;
@@ -276,6 +285,10 @@ export default function OrderPage({ params }: { params: { id: string } }) {
                     <CreditCard className="h-4 w-4" />
                     {payWithMonobank.isPending ? "Переходим к оплате..." : "Оплатить через Monobank"}
                   </button>
+                  <button className="app-button-action w-full" disabled={payWithWayforpay.isPending} onClick={() => payWithWayforpay.mutate()}>
+                    <CreditCard className="h-4 w-4" />
+                    {payWithWayforpay.isPending ? "Переходим к оплате..." : "Оплатить через WayForPay"}
+                  </button>
                   <button className="app-button-secondary w-full" onClick={() => setShowManualPayment((value) => !value)}>
                     <CreditCard className="h-4 w-4" />
                     {showManualPayment ? "Скрыть реквизиты для перевода" : "Оплатить переводом"}
@@ -283,6 +296,7 @@ export default function OrderPage({ params }: { params: { id: string } }) {
                 </div>
                 {payWithLiqpay.error ? <p className="mt-2 text-sm text-rose-600">{payWithLiqpay.error.message}</p> : null}
                 {payWithMonobank.error ? <p className="mt-2 text-sm text-rose-600">{payWithMonobank.error.message}</p> : null}
+                {payWithWayforpay.error ? <p className="mt-2 text-sm text-rose-600">{payWithWayforpay.error.message}</p> : null}
                 {showManualPayment ? (
                   <div className="mt-3">
                     <ManualPaymentPanel orderId={params.id} />

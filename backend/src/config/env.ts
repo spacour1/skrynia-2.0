@@ -33,6 +33,9 @@ const schema = z.object({
   MANUAL_PAYMENT_CARD_NUMBER: z.string().optional(),
   MANUAL_PAYMENT_RECEIVER_NAME: z.string().optional(),
   MANUAL_PAYMENT_BANK: z.string().optional(),
+  WAYFORPAY_MERCHANT_ACCOUNT: z.string().optional(),
+  WAYFORPAY_MERCHANT_SECRET_KEY: z.string().optional(),
+  WAYFORPAY_SERVICE_URL: z.string().optional(),
   METRICS_USER: z.string().default("metrics"),
   METRICS_PASSWORD: z.string().default("dev-metrics-password-change-me")
 }).superRefine((value, ctx) => {

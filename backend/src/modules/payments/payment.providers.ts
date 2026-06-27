@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 
-export type PaymentProviderName = "mock" | "stripe" | "liqpay" | "fondy" | "monobank" | "manual";
+export type PaymentProviderName = "mock" | "stripe" | "liqpay" | "fondy" | "monobank" | "manual" | "wayforpay";
 
 export type PaymentResult = {
   provider: PaymentProviderName;
@@ -108,13 +108,36 @@ class ManualCaptureProvider implements PaymentProvider {
   }
 }
 
+/**
+ * WayForPay's webhook (see wayforpay.service.ts) confirms via the same kind of
+ * out-of-process re-check as Monobank/LiqPay: by the time this runs, getWayforpayStatus
+ * has already confirmed "Approved", so capture() just records the orderReference.
+ */
+class WayforpayCaptureProvider implements PaymentProvider {
+  public name: PaymentProviderName = "wayforpay";
+
+  async capture(input: {
+    orderId: string;
+    amountCents: number;
+    currency: string;
+    idempotencyKey: string;
+    externalReference?: string;
+  }): Promise<PaymentResult> {
+    if (!input.externalReference) {
+      throw new Error("WayForPay capture requires a confirmed externalReference from the payment webhook");
+    }
+    return { provider: "wayforpay", reference: input.externalReference, status: "captured" };
+  }
+}
+
 const providers: Record<PaymentProviderName, PaymentProvider> = {
   mock: new SimulatedProvider("mock"),
   stripe: new SimulatedProvider("stripe"),
   liqpay: new LiqpayCaptureProvider(),
   fondy: new SimulatedProvider("fondy"),
   monobank: new MonobankCaptureProvider(),
-  manual: new ManualCaptureProvider()
+  manual: new ManualCaptureProvider(),
+  wayforpay: new WayforpayCaptureProvider()
 };
 
 export function getPaymentProvider(name: PaymentProviderName) {

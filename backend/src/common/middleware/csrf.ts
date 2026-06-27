@@ -6,14 +6,15 @@ import { CSRF_COOKIE } from "../cookies.js";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 // Routes that legitimately mutate state without an existing CSRF-protected session:
-// auth bootstrap endpoints (no session cookie yet) and the LiqPay/Monobank server-to-server
-// webhooks (external POSTs that never carry our cookies in the first place).
+// auth bootstrap endpoints (no session cookie yet) and the LiqPay/Monobank/WayForPay
+// server-to-server webhooks (external POSTs that never carry our cookies in the first place).
 const EXEMPT_PATHS = new Set([
   "/auth/login",
   "/auth/register",
   "/auth/telegram",
   "/payments/liqpay/callback",
-  "/payments/monobank/callback"
+  "/payments/monobank/callback",
+  "/payments/wayforpay/callback"
 ]);
 
 function timingSafeEqual(a: string, b: string) {

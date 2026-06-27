@@ -19,6 +19,7 @@ function readCookie(header: string | undefined, name: string): string | undefine
 type Client = WebSocket & {
   userId?: string;
   jti?: string;
+  emailVerified?: boolean;
   rooms?: Set<string>;
   sentAt?: number[];
 };
@@ -42,15 +43,17 @@ async function authenticateSocket(token: string) {
     if (!exists) throw new Error("Session expired");
   }
 
-  const result = await pool.query<{ id: string; isBanned: boolean }>(
-    `select id, is_banned as "isBanned" from users where id = $1`,
+  const result = await pool.query<{ id: string; isBanned: boolean; emailVerified: boolean }>(
+    `select id, is_banned as "isBanned",
+            (email_verified_at is not null or telegram_id is not null) as "emailVerified"
+     from users where id = $1`,
     [payload.sub]
   );
   const user = result.rows[0];
   if (!user) throw new Error("Invalid user");
   if (user.isBanned) throw new Error("Account is banned");
 
-  return { userId: user.id, jti: payload.jti };
+  return { userId: user.id, jti: payload.jti, emailVerified: user.emailVerified };
 }
 
 function sendJson(client: WebSocket, payload: unknown) {
@@ -172,9 +175,10 @@ export function attachWebSocketServer(server: http.Server) {
       const token = readCookie(req.headers.cookie, ACCESS_COOKIE);
       if (!token) throw new Error("Missing token");
 
-      const { userId, jti } = await authenticateSocket(token);
+      const { userId, jti, emailVerified } = await authenticateSocket(token);
       client.userId = userId;
       client.jti = jti;
+      client.emailVerified = emailVerified;
       client.rooms = new Set();
       clientsByJti.set(jti, client);
 
@@ -204,6 +208,13 @@ export function attachWebSocketServer(server: http.Server) {
           }
 
           if (msg.type === "message") {
+            if (!client.emailVerified) {
+              return sendJson(client, {
+                type: "error",
+                code: "email_not_verified",
+                message: "Please verify your email to send messages"
+              });
+            }
             if (isSpam(client)) return sendJson(client, { type: "error", message: "Slow down" });
             const body = (msg.body ?? "").trim();
             if (!msg.conversationId || !body || body.length > 3000) {

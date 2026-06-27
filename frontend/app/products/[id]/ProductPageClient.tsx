@@ -15,7 +15,8 @@ import {
   Truck
 } from "lucide-react";
 import { ChatPanel } from "../../../components/ChatPanel";
-import { apiFetch, money, type Product } from "../../../lib/api";
+import { EmailNotVerifiedNotice } from "../../../components/EmailNotVerifiedNotice";
+import { apiFetch, isEmailNotVerifiedError, money, type Product } from "../../../lib/api";
 import { useAuth } from "../../../lib/auth-store";
 import { useI18n } from "../../../lib/i18n";
 import { fieldLabel, formatFieldValue } from "../../../lib/product-fields";
@@ -98,6 +99,8 @@ export function ProductPageClient({ id }: { id: string }) {
     mutationFn: () => createOrder(),
     onSuccess: (order) => router.push(`/orders/${order.id}`)
   });
+
+  const buyError = buyWithLiqpay.error ?? buyWithMonobank.error ?? buyWithWayforpay.error ?? buyWithManualTransfer.error;
 
   if (product.isLoading) return <p className="text-muted">{t("common.loading")}</p>;
   if (!product.data) return <p className="text-rose-600">{t("home.noListings")}</p>;
@@ -188,10 +191,15 @@ export function ProductPageClient({ id }: { id: string }) {
                   Войти и купить
                 </button>
               )}
-              {buyWithLiqpay.error ? <p className="mt-2 text-sm text-rose-600">{buyWithLiqpay.error.message}</p> : null}
-              {buyWithMonobank.error ? <p className="mt-2 text-sm text-rose-600">{buyWithMonobank.error.message}</p> : null}
-              {buyWithWayforpay.error ? <p className="mt-2 text-sm text-rose-600">{buyWithWayforpay.error.message}</p> : null}
-              {buyWithManualTransfer.error ? <p className="mt-2 text-sm text-rose-600">{buyWithManualTransfer.error.message}</p> : null}
+              {buyError ? (
+                isEmailNotVerifiedError(buyError) ? (
+                  <div className="mt-3">
+                    <EmailNotVerifiedNotice />
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm text-rose-600">{buyError.message}</p>
+                )
+              ) : null}
             </div>
           </div>
         </section>
@@ -298,7 +306,15 @@ export function ProductPageClient({ id }: { id: string }) {
                 Открыть чат
               </button>
             )}
-          {autoChat.error ? <p className="mt-2 text-sm text-rose-600">{autoChat.error.message}</p> : null}
+          {autoChat.error ? (
+            isEmailNotVerifiedError(autoChat.error) ? (
+              <div className="mt-3">
+                <EmailNotVerifiedNotice />
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-rose-600">{autoChat.error.message}</p>
+            )
+          ) : null}
         </section>
 
         <section className="app-card p-5">

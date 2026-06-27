@@ -4,12 +4,13 @@ import { z } from "zod";
 import { pool } from "../../db/pool.js";
 import { asyncHandler, badRequest, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
+import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { cacheGet, cacheSet } from "../../common/redis.js";
 import { moneyToCents } from "../../common/validation.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { isUserOnline } from "../chat/ws.service.js";
 import { requestWithdrawal } from "./wallet.service.js";
-import { sendVerificationEmail, fireAndForget } from "../auth/verification.service.js";
+import { createAndSendVerificationEmail, fireAndForget } from "../auth/verification.service.js";
 
 const router = Router();
 
@@ -83,7 +84,10 @@ router.patch(
     );
     const user = result.rows[0];
     if (emailChanged) {
-      fireAndForget(sendVerificationEmail(user), "profile_email_change_verification_failed");
+      fireAndForget(
+        createAndSendVerificationEmail(user).then((created) => created.sendPromise),
+        "profile_email_change_verification_failed"
+      );
     }
     res.json({ user });
   })
@@ -148,6 +152,7 @@ const withdrawSchema = z.object({
 router.post(
   "/me/wallet/withdraw",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = withdrawSchema.parse(req.body);
     const amountCents = moneyToCents(input.amount);

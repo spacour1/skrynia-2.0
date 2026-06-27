@@ -19,10 +19,12 @@ import {
   consumeEmailVerificationToken,
   createPasswordResetToken,
   consumePasswordResetToken,
-  sendVerificationEmail,
+  createAndSendVerificationEmail,
+  checkResendRateLimit,
+  sendPasswordResetEmail,
   fireAndForget
 } from "./verification.service.js";
-import { sendEmail } from "../../common/mailer.js";
+import { logger } from "../../common/logger.js";
 
 const router = Router();
 
@@ -97,8 +99,19 @@ router.post(
 
     const session = await issueSession(user.id, user.role);
     setAuthCookies(res, session);
-    fireAndForget(sendVerificationEmail(user), "registration_verification_email_failed");
-    res.status(201).json({ user });
+
+    // Token creation (Redis) and the email send itself must never fail registration —
+    // the account and wallet are already committed by this point.
+    let debugVerificationUrl: string | undefined;
+    try {
+      const { link, sendPromise } = await createAndSendVerificationEmail(user);
+      fireAndForget(sendPromise, "registration_verification_email_failed");
+      if (env.NODE_ENV !== "production") debugVerificationUrl = link;
+    } catch (error) {
+      logger.error({ error, userId: user.id }, "registration_verification_token_failed");
+    }
+
+    res.status(201).json({ user, ...(debugVerificationUrl ? { debugVerificationUrl } : {}) });
   })
 );
 
@@ -236,8 +249,30 @@ router.post(
     if (!user) throw badRequest("Account not found");
     if (user.emailVerified) return res.json({ status: "already_verified" });
 
-    fireAndForget(sendVerificationEmail(user), "verification_email_resend_failed");
-    res.json({ status: "sent" });
+    await checkResendRateLimit(user.id);
+    const { link, sendPromise } = await createAndSendVerificationEmail(user);
+
+    if (env.NODE_ENV === "production") {
+      // Unlike registration, this is an explicit user action waiting on an email - a
+      // broken/unconfigured SMTP setup should surface as a real error here, not a
+      // silent "sent" (sendEmail resolves false rather than throwing when SMTP_HOST
+      // isn't set, since that path is allowed to exist outside production).
+      let sent = false;
+      try {
+        sent = await sendPromise;
+      } catch (error) {
+        logger.error({ error, userId: user.id }, "verification_email_resend_failed");
+        throw badRequest("Could not send the verification email right now, try again later");
+      }
+      if (!sent) {
+        logger.error({ userId: user.id }, "verification_email_resend_smtp_unconfigured");
+        throw badRequest("Could not send the verification email right now, try again later");
+      }
+      return res.json({ status: "sent" });
+    }
+
+    fireAndForget(sendPromise, "verification_email_resend_failed");
+    res.json({ status: "sent", debugVerificationUrl: link });
   })
 );
 
@@ -265,15 +300,7 @@ router.post(
     if (user) {
       const token = await createPasswordResetToken(user.id);
       const link = `${env.FRONTEND_URL}/reset-password?token=${token}`;
-      fireAndForget(
-        sendEmail({
-          to: user.email,
-          subject: "Reset your password",
-          text: `Reset your password by visiting: ${link}`,
-          html: `<p>Reset your password by clicking the link below:</p><p><a href="${link}">${link}</a></p>`
-        }),
-        "password_reset_email_failed"
-      );
+      fireAndForget(sendPasswordResetEmail(user, link), "password_reset_email_failed");
     }
     res.json({ status: "sent" });
   })

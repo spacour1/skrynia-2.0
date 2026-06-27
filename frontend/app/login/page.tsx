@@ -51,6 +51,11 @@ export default function LoginPage() {
         {error && <p className="text-sm text-rose-600">{error}</p>}
         <button className="app-button w-full">{t("nav.login")}</button>
       </form>
+      <p className="mt-3 text-sm">
+        <Link className="text-brand hover:underline" href="/forgot-password">
+          {t("auth.forgotPassword")}
+        </Link>
+      </p>
       <p className="mt-4 text-sm text-muted">
         {t("auth.noAccount")}{" "}
         <Link className="text-brand hover:underline" href="/register">

@@ -4,6 +4,7 @@ import { env } from "../../config/env.js";
 import { inTx, pool } from "../../db/pool.js";
 import { asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
+import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { cacheDel, cacheDelPattern, cacheGet, cacheSet } from "../../common/redis.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { releaseEscrow } from "./ledger.service.js";
@@ -34,6 +35,7 @@ function canSeeOrder(order: { buyer_id: string; seller_id: string }, user: Authe
 router.post(
   "/",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = createOrderSchema.parse(req.body);
 
@@ -172,6 +174,7 @@ router.get(
 router.post(
   "/:id/start",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const result = await pool.query(
@@ -208,6 +211,7 @@ router.post(
 router.post(
   "/:id/deliver",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const input = deliverSchema.parse(req.body);
@@ -249,6 +253,7 @@ router.post(
 router.post(
   "/:id/confirm",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const orderResult = await pool.query(`select buyer_id, seller_id, status from orders where id = $1`, [id]);
@@ -280,6 +285,7 @@ router.post(
 router.post(
   "/:id/review",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const input = reviewSchema.parse(req.body);

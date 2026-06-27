@@ -17,6 +17,10 @@ cp .env.example .env
 docker compose up --build
 ```
 
+Email verification (registration confirmation, password reset) needs `SMTP_*` set —
+see [docs/email-verification.md](docs/email-verification.md) for setup and local testing
+without a real mail server.
+
 Open:
 
 - Frontend: http://localhost:3000
@@ -131,6 +135,8 @@ This MVP uses an internal virtual ledger, not real banking logic.
 
 - `POST /auth/register`
 - `POST /auth/login`
+- `POST /auth/verify-email/request` / `POST /auth/verify-email/confirm` (see [docs/email-verification.md](docs/email-verification.md))
+- `POST /auth/password/forgot` / `POST /auth/password/reset`
 - `GET /marketplace/products`
 - `POST /marketplace/products`
 - `POST /orders`

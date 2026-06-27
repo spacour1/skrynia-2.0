@@ -3,6 +3,7 @@ import { z } from "zod";
 import { pool } from "../../db/pool.js";
 import { asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
+import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { broadcastConversation } from "./ws.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
@@ -101,6 +102,7 @@ router.get(
 router.post(
   "/sellers/:sellerId/start",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const sellerId = z.string().uuid().parse(req.params.sellerId);
     if (sellerId === req.user.id) throw badRequest("You cannot message yourself");
@@ -116,6 +118,7 @@ router.post(
 router.post(
   "/products/:productId/start",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const productId = z.string().uuid().parse(req.params.productId);
     const product = await pool.query(
@@ -141,6 +144,7 @@ router.post(
 router.post(
   "/conversations/:conversationId/messages",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const conversationId = z.string().uuid().parse(req.params.conversationId);
     const input = sendMessageSchema.parse(req.body);

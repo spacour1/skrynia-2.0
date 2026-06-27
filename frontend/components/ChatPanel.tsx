@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { FileText, ImageIcon, Loader2, Paperclip, Send, X } from "lucide-react";
 import { apiFetch, WS_URL } from "../lib/api";
 import { useAuth } from "../lib/auth-store";
+import { EmailNotVerifiedNotice } from "./EmailNotVerifiedNotice";
 
 type Message = {
   id: string;
@@ -23,6 +24,7 @@ export function ChatPanel({ conversationId, compact = false }: { conversationId:
   const [uploading, setUploading] = useState(false);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState("");
+  const [emailBlocked, setEmailBlocked] = useState(false);
   const socket = useRef<WebSocket | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -52,6 +54,7 @@ export function ChatPanel({ conversationId, compact = false }: { conversationId:
     ws.addEventListener("open", () => {
       setConnected(true);
       setError("");
+      setEmailBlocked(false);
       ws.send(JSON.stringify({ type: "join_conversation", conversationId }));
     });
     ws.addEventListener("close", () => setConnected(false));
@@ -60,7 +63,13 @@ export function ChatPanel({ conversationId, compact = false }: { conversationId:
       if (payload.type === "message") {
         setMessages((current) => (current.some((item) => item.id === payload.message.id) ? current : [...current, payload.message]));
       }
-      if (payload.type === "error") setError(payload.message ?? "Chat error");
+      if (payload.type === "error") {
+        if (payload.code === "email_not_verified") {
+          setEmailBlocked(true);
+        } else {
+          setError(payload.message ?? "Chat error");
+        }
+      }
     });
 
     return () => ws.close();
@@ -135,7 +144,13 @@ export function ChatPanel({ conversationId, compact = false }: { conversationId:
       </div>
 
       <form ref={formRef} className={`${compact ? "bg-transparent px-3 pb-3 pt-2" : "border-t border-line bg-card/95 p-4"}`} onSubmit={submit}>
-        {error ? <p className="mb-2 text-xs font-bold text-rose-400">{error}</p> : null}
+        {emailBlocked ? (
+          <div className="mb-2">
+            <EmailNotVerifiedNotice />
+          </div>
+        ) : error ? (
+          <p className="mb-2 text-xs font-bold text-rose-400">{error}</p>
+        ) : null}
         {attachmentUrl ? (
           <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-brand/30 bg-brand/10 px-3 py-2 text-sm">
             <span className="inline-flex min-w-0 items-center gap-2 font-bold text-brand">

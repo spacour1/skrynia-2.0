@@ -3,6 +3,7 @@ import { z } from "zod";
 import { pool } from "../../db/pool.js";
 import { asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
+import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { requireRole } from "../../common/middleware/rbac.js";
 import { cacheDel, cacheDelPattern, cacheGet, cacheSet } from "../../common/redis.js";
 import { moneyToCents, paginationSchema } from "../../common/validation.js";
@@ -517,6 +518,7 @@ async function resolveCategorization(input: { categoryId?: string | null; gameId
 router.post(
   "/products",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = productSchema.parse(req.body);
     const categorization = await resolveCategorization(input);

@@ -227,6 +227,15 @@ export class ApiError extends Error {
   ) {
     super(message);
   }
+
+  get code(): string | undefined {
+    const normalized = this.payload as { error?: { code?: string } } | undefined;
+    return normalized?.error?.code;
+  }
+}
+
+export function isEmailNotVerifiedError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403 && error.code === "email_not_verified";
 }
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);

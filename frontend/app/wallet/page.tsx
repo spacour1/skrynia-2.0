@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import { ArrowDownToLine, ArrowUpFromLine, CircleDollarSign, Hourglass, LockKeyhole, Search, ShieldCheck, WalletCards, type LucideIcon } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RequireAuth } from "../../components/RequireAuth";
-import { ApiError, apiFetch, money } from "../../lib/api";
+import { EmailNotVerifiedNotice } from "../../components/EmailNotVerifiedNotice";
+import { ApiError, apiFetch, isEmailNotVerifiedError, money } from "../../lib/api";
 import { redirectToLiqpay, type LiqpayCheckout } from "../../lib/liqpay";
 import { redirectToMonobank, type MonobankCheckout } from "../../lib/monobank";
 import { redirectToWayforpay, type WayforpayCheckout } from "../../lib/wayforpay";
@@ -98,6 +99,8 @@ function WalletContent() {
     onSuccess: redirectToWayforpay
   });
 
+  const topupError = topupWithLiqpay.error ?? topupWithMonobank.error ?? topupWithWayforpay.error;
+
   const withdraw = useMutation({
     mutationFn: () =>
       apiFetch("/users/me/wallet/withdraw", {
@@ -185,9 +188,15 @@ function WalletContent() {
                     {topupWithWayforpay.isPending ? "Переходим к оплате..." : "Перейти к оплате через WayForPay"}
                   </button>
                 </div>
-                {topupWithLiqpay.error ? <p className="mt-2 text-sm text-rose-600">{(topupWithLiqpay.error as ApiError).message}</p> : null}
-                {topupWithMonobank.error ? <p className="mt-2 text-sm text-rose-600">{(topupWithMonobank.error as ApiError).message}</p> : null}
-                {topupWithWayforpay.error ? <p className="mt-2 text-sm text-rose-600">{(topupWithWayforpay.error as ApiError).message}</p> : null}
+                {topupError ? (
+                  isEmailNotVerifiedError(topupError) ? (
+                    <div className="mt-2">
+                      <EmailNotVerifiedNotice />
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-sm text-rose-600">{(topupError as ApiError).message}</p>
+                  )
+                ) : null}
               </div>
             ) : null}
 
@@ -245,7 +254,15 @@ function WalletContent() {
                 >
                   {withdraw.isPending ? "Отправляем заявку..." : "Подтвердить вывод"}
                 </button>
-                {withdraw.error ? <p className="mt-2 text-sm text-rose-600">{(withdraw.error as ApiError).message}</p> : null}
+                {withdraw.error ? (
+                  isEmailNotVerifiedError(withdraw.error) ? (
+                    <div className="mt-2">
+                      <EmailNotVerifiedNotice />
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-sm text-rose-600">{(withdraw.error as ApiError).message}</p>
+                  )
+                ) : null}
               </div>
             ) : null}
           </div>

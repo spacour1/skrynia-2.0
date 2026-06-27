@@ -4,6 +4,7 @@ import { z } from "zod";
 import { pool } from "../../db/pool.js";
 import { asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
+import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { env } from "../../config/env.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { lockEscrow } from "../orders/ledger.service.js";
@@ -68,6 +69,7 @@ export async function announceOrderPaid(order: { id: string; buyer_id: string; s
 router.post(
   "/orders/:orderId/pay",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const orderId = z.string().uuid().parse(req.params.orderId);
     const input = paySchema.parse(req.body);
@@ -93,6 +95,7 @@ router.post(
 router.post(
   "/orders/:orderId/liqpay/checkout",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const orderId = z.string().uuid().parse(req.params.orderId);
     const result = await pool.query(
@@ -121,6 +124,7 @@ router.post(
 router.post(
   "/orders/:orderId/monobank/checkout",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const orderId = z.string().uuid().parse(req.params.orderId);
     const result = await pool.query(
@@ -149,6 +153,7 @@ router.post(
 router.post(
   "/orders/:orderId/wayforpay/checkout",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const orderId = z.string().uuid().parse(req.params.orderId);
     const result = await pool.query(
@@ -212,6 +217,7 @@ router.get(
 router.post(
   "/wallet/liqpay/checkout",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = walletTopupSchema.parse(req.body);
     const amountCents = moneyToCents(input.amount);
@@ -232,6 +238,7 @@ router.post(
 router.post(
   "/wallet/monobank/checkout",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = walletTopupSchema.parse(req.body);
     const amountCents = moneyToCents(input.amount);
@@ -252,6 +259,7 @@ router.post(
 router.post(
   "/wallet/wayforpay/checkout",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = walletTopupSchema.parse(req.body);
     const amountCents = moneyToCents(input.amount);

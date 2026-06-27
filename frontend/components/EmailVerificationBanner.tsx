@@ -6,10 +6,12 @@ import { useMutation } from "@tanstack/react-query";
 import { MailWarning, X } from "lucide-react";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth-store";
+import { useI18n } from "../lib/i18n";
 
 const DISMISS_KEY = "skrynia-email-banner-dismissed";
 
 export function EmailVerificationBanner() {
+  const { t } = useI18n();
   const user = useAuth((state) => state.user);
   const hydrated = useAuth((state) => state.hydrated);
   const [dismissed, setDismissed] = useState(() => {
@@ -37,9 +39,9 @@ export function EmailVerificationBanner() {
     >
       <MailWarning className="h-5 w-5 shrink-0" />
       <p className="min-w-0 flex-1 leading-5">
-        Подтвердите email, чтобы защитить аккаунт и получать уведомления о заказах.{" "}
+        {t("verify.bannerText")}{" "}
         {sent ? (
-          <span className="font-bold">Письмо отправлено — проверьте почту.</span>
+          <span className="font-bold">{t("verify.sent")}</span>
         ) : (
           <button
             className="font-bold underline underline-offset-2 transition hover:opacity-80 disabled:opacity-60"
@@ -47,19 +49,17 @@ export function EmailVerificationBanner() {
             onClick={() => resend.mutate()}
             disabled={resend.isPending}
           >
-            {resend.isPending ? "Отправляем..." : "Отправить письмо"}
+            {resend.isPending ? `${t("verify.resend")}...` : t("verify.resend")}
           </button>
         )}{" "}
-        или откройте{" "}
         <Link className="font-bold underline underline-offset-2 transition hover:opacity-80" href="/settings">
-          настройки
+          {t("verify.openSettings")}
         </Link>
-        .
       </p>
       <button
         className="shrink-0 rounded-md p-1.5 text-amber-900/70 transition hover:bg-amber-200/60 dark:text-amber-200/70 dark:hover:bg-amber-400/10"
         type="button"
-        aria-label="Скрыть уведомление"
+        aria-label="dismiss"
         onClick={dismiss}
       >
         <X className="h-4 w-4" />

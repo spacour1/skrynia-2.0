@@ -3,6 +3,7 @@ import { z } from "zod";
 import { pool } from "../../db/pool.js";
 import { asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
+import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { refundEscrow, releaseEscrow } from "../orders/ledger.service.js";
@@ -24,6 +25,7 @@ const resolveSchema = z.object({
 router.post(
   "/orders/:orderId/dispute",
   authenticate,
+  requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const orderId = z.string().uuid().parse(req.params.orderId);
     const input = openSchema.parse(req.body);

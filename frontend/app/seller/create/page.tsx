@@ -21,7 +21,8 @@ import {
 } from "lucide-react";
 import { RequireAuth } from "../../../components/RequireAuth";
 import { GameIcon } from "../../../components/GameIcon";
-import { apiFetch, money, type Game, type GameSection, type Product } from "../../../lib/api";
+import { EmailNotVerifiedNotice } from "../../../components/EmailNotVerifiedNotice";
+import { apiFetch, isEmailNotVerifiedError, money, type Game, type GameSection, type Product } from "../../../lib/api";
 import { useAuth } from "../../../lib/auth-store";
 import { BOOLEAN_FIELD_KEYS, fieldLabel } from "../../../lib/product-fields";
 
@@ -84,6 +85,7 @@ function SellerCreateContent() {
   const [autoDelivery, setAutoDelivery] = useState(true);
   const [price, setPrice] = useState("");
   const [error, setError] = useState("");
+  const [emailBlocked, setEmailBlocked] = useState(false);
 
   const games = useQuery({
     queryKey: ["games"],
@@ -153,7 +155,15 @@ function SellerCreateContent() {
       return { id, draft };
     },
     onSuccess: ({ id, draft }) => router.push(draft ? "/seller/products" : `/products/${id}`),
-    onError: (err) => setError(err instanceof Error ? err.message : "Не удалось создать лот")
+    onError: (err) => {
+      if (isEmailNotVerifiedError(err)) {
+        setEmailBlocked(true);
+        setError("");
+        return;
+      }
+      setEmailBlocked(false);
+      setError(err instanceof Error ? err.message : "Не удалось создать лот");
+    }
   });
 
   function chooseGame(game: Game) {
@@ -360,6 +370,7 @@ function SellerCreateContent() {
             <p className="text-xs text-muted">Комиссия площадки: 2.5% от суммы сделки</p>
           </section>
 
+          {emailBlocked ? <EmailNotVerifiedNotice /> : null}
           {error ? <p className="rounded-lg bg-rose-500/10 p-3 text-sm font-bold text-rose-400">{error}</p> : null}
 
           <div className="grid gap-3 border-t border-line pt-5 sm:grid-cols-2">

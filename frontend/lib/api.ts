@@ -1,4 +1,7 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+// Routed through the Next.js rewrite in next.config.mjs so the browser always talks to
+// its own origin — this keeps auth/CSRF cookies same-site even when the backend lives on
+// a different domain (e.g. Vercel frontend + Railway backend).
+export const API_URL = "/api";
 export const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4000/ws";
 
 export type Role = "user" | "seller" | "admin";

@@ -56,6 +56,9 @@ export function errorHandler(error: unknown, req: Request, res: Response, _next:
   if (error && typeof error === "object" && "code" in error) {
     const pgError = error as { code?: string; constraint?: string; detail?: string };
     if (pgError.code === "23505") {
+      if (pgError.constraint === "users_email_key") {
+        return sendError(req, res, 409, "conflict", "An account with this email already exists");
+      }
       return sendError(req, res, 409, "conflict", "A record with these unique fields already exists", {
         constraint: pgError.constraint
       });

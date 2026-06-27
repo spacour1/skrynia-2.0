@@ -22,6 +22,7 @@ import {
   consumePasswordResetToken
 } from "./verification.service.js";
 import { sendEmail } from "../../common/mailer.js";
+import { logger } from "../../common/logger.js";
 
 const router = Router();
 
@@ -49,6 +50,14 @@ const telegramSchema = z.object({
 const emailVerifyConfirmSchema = z.object({ token: z.string().min(1) });
 const passwordForgotSchema = z.object({ email: z.string().email() });
 const passwordResetSchema = z.object({ token: z.string().min(1), password: z.string().min(8) });
+
+/**
+ * Fire-and-forget: SMTP latency (slow/misconfigured providers) must never make the caller
+ * wait, since these run inline in user-facing request handlers like /register.
+ */
+function fireAndForget(promise: Promise<unknown>, context: string) {
+  promise.catch((error) => logger.error({ error }, context));
+}
 
 function sendVerificationEmail(user: { id: string; email: string; displayName?: string }) {
   return createEmailVerificationToken(user.id).then((token) => {
@@ -107,7 +116,7 @@ router.post(
 
     const session = await issueSession(user.id, user.role);
     setAuthCookies(res, session);
-    await sendVerificationEmail(user);
+    fireAndForget(sendVerificationEmail(user), "registration_verification_email_failed");
     res.status(201).json({ user });
   })
 );
@@ -240,7 +249,7 @@ router.post(
     if (!user) throw badRequest("Account not found");
     if (user.emailVerifiedAt) return res.json({ status: "already_verified" });
 
-    await sendVerificationEmail(user);
+    fireAndForget(sendVerificationEmail(user), "verification_email_resend_failed");
     res.json({ status: "sent" });
   })
 );
@@ -269,12 +278,15 @@ router.post(
     if (user) {
       const token = await createPasswordResetToken(user.id);
       const link = `${env.FRONTEND_URL}/reset-password?token=${token}`;
-      await sendEmail({
-        to: user.email,
-        subject: "Reset your password",
-        text: `Reset your password by visiting: ${link}`,
-        html: `<p>Reset your password by clicking the link below:</p><p><a href="${link}">${link}</a></p>`
-      });
+      fireAndForget(
+        sendEmail({
+          to: user.email,
+          subject: "Reset your password",
+          text: `Reset your password by visiting: ${link}`,
+          html: `<p>Reset your password by clicking the link below:</p><p><a href="${link}">${link}</a></p>`
+        }),
+        "password_reset_email_failed"
+      );
     }
     res.json({ status: "sent" });
   })

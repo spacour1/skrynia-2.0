@@ -47,6 +47,9 @@ jobs:
     defaults:
       run:
         working-directory: frontend
+    env:
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_WS_URL: ws://localhost:4000/ws
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -56,3 +59,6 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run typecheck
+      # Catches build-time-only failures (e.g. broken static generation, bad imports in
+      # client/server boundaries) that `tsc --noEmit` alone doesn't see.
+      - run: npm run build

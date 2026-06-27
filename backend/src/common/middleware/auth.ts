@@ -25,7 +25,8 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
     }
 
     const result = await pool.query<AuthUser>(
-      `select id, email, display_name as "displayName", role, is_banned as "isBanned"
+      `select id, email, display_name as "displayName", role, is_banned as "isBanned",
+              (email_verified_at is not null or telegram_id is not null) as "emailVerified"
        from users
        where id = $1`,
       [payload.sub]

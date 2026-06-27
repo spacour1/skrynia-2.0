@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
 import { Nav } from "../components/Nav";
+import { EmailVerificationBanner } from "../components/EmailVerificationBanner";
 import { SITE_NAME, SITE_URL } from "../lib/site";
 
 const description =
@@ -49,7 +50,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <Providers>
           <Nav />
-          <main className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:pl-[17rem] lg:pr-8">{children}</main>
+          <main className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:pl-[17rem] lg:pr-8">
+            <EmailVerificationBanner />
+            {children}
+          </main>
         </Providers>
       </body>
     </html>

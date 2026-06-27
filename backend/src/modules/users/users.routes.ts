@@ -9,6 +9,7 @@ import { moneyToCents } from "../../common/validation.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { isUserOnline } from "../chat/ws.service.js";
 import { requestWithdrawal } from "./wallet.service.js";
+import { sendVerificationEmail, fireAndForget } from "../auth/verification.service.js";
 
 const router = Router();
 
@@ -34,7 +35,8 @@ router.get(
       `select id, email, display_name as "displayName", role,
               avatar_url as "avatarUrl", push_enabled as "pushEnabled",
               two_factor_enabled as "twoFactorEnabled", settings,
-              created_at as "createdAt"
+              created_at as "createdAt",
+              (email_verified_at is not null or telegram_id is not null) as "emailVerified"
        from users where id = $1`,
       [req.user.id]
     );
@@ -47,8 +49,9 @@ router.patch(
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = updateMeSchema.parse(req.body);
-    if (input.email) {
-      const exists = await pool.query(`select id from users where email = $1 and id != $2`, [input.email.toLowerCase(), req.user.id]);
+    const emailChanged = Boolean(input.email && input.email.toLowerCase() !== req.user.email.toLowerCase());
+    if (emailChanged) {
+      const exists = await pool.query(`select id from users where email = $1 and id != $2`, [input.email!.toLowerCase(), req.user.id]);
       if (exists.rows[0]) throw badRequest("Email is already used");
     }
 
@@ -60,11 +63,13 @@ router.patch(
            push_enabled = coalesce($5, push_enabled),
            two_factor_enabled = coalesce($6, two_factor_enabled),
            settings = coalesce($7, settings),
+           email_verified_at = case when $8 then null else email_verified_at end,
            updated_at = now()
        where id = $1
        returning id, email, display_name as "displayName", role,
                  avatar_url as "avatarUrl", push_enabled as "pushEnabled",
-                 two_factor_enabled as "twoFactorEnabled", settings`,
+                 two_factor_enabled as "twoFactorEnabled", settings,
+                 (email_verified_at is not null or telegram_id is not null) as "emailVerified"`,
       [
         req.user.id,
         input.displayName,
@@ -72,10 +77,15 @@ router.patch(
         input.avatarUrl === "" ? null : input.avatarUrl,
         input.pushEnabled,
         input.twoFactorEnabled,
-        input.settings
+        input.settings,
+        emailChanged
       ]
     );
-    res.json({ user: result.rows[0] });
+    const user = result.rows[0];
+    if (emailChanged) {
+      fireAndForget(sendVerificationEmail(user), "profile_email_change_verification_failed");
+    }
+    res.json({ user });
   })
 );
 

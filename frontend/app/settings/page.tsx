@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
   Camera,
@@ -9,6 +9,8 @@ import {
   KeyRound,
   Loader2,
   Mail,
+  MailCheck,
+  MailWarning,
   Moon,
   Save,
   ShieldCheck,
@@ -52,6 +54,7 @@ export default function SettingsPage() {
 function SettingsContent() {
   const authUser = useAuth((state) => state.user);
   const setUser = useAuth((state) => state.setUser);
+  const queryClient = useQueryClient();
   const { theme, setThemeAndReload } = useTheme();
   const [profile, setProfile] = useState<ProfileState>(emptyProfile);
   const [profileMessage, setProfileMessage] = useState("");
@@ -109,6 +112,7 @@ function SettingsContent() {
     onSuccess: (response) => {
       setProfileMessage("Настройки профиля сохранены");
       if (authUser) setUser({ ...authUser, ...response.user });
+      queryClient.invalidateQueries({ queryKey: ["me-settings"] });
     },
     onError: (err) => setProfileMessage(err instanceof Error ? err.message : "Не удалось сохранить настройки")
   });
@@ -121,6 +125,16 @@ function SettingsContent() {
       }),
     onSuccess: () => setPasswordMessage("Пароль обновлен"),
     onError: (err) => setPasswordMessage(err instanceof Error ? err.message : "Не удалось сменить пароль")
+  });
+
+  const [verifyMessage, setVerifyMessage] = useState("");
+  const resendVerification = useMutation({
+    mutationFn: () => apiFetch<{ status: string }>("/auth/verify-email/request", { method: "POST" }),
+    onSuccess: (response) =>
+      setVerifyMessage(
+        response.status === "already_verified" ? "Email уже подтвержден" : "Письмо отправлено — проверьте почту (и папку спам)"
+      ),
+    onError: (err) => setVerifyMessage(err instanceof Error ? err.message : "Не удалось отправить письмо")
   });
 
   function pickAvatar(file?: File) {
@@ -299,6 +313,39 @@ function SettingsContent() {
               </button>
             </div>
           </form>
+
+          <section className="app-card overflow-hidden">
+            <SectionHeader icon={Mail} title="Подтверждение email" text="Защитите аккаунт и разблокируйте уведомления о заказах на почту." />
+            <div className="space-y-4 p-5">
+              {me.data?.user.emailVerified ? (
+                <div className="flex items-center gap-3 rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-4 text-sm text-emerald-700 dark:text-emerald-300">
+                  <MailCheck className="h-5 w-5 shrink-0" />
+                  <span className="font-bold">Email подтвержден</span>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3 rounded-lg border border-amber-400/40 bg-amber-100 p-4 text-sm text-amber-900 dark:bg-amber-400/10 dark:text-amber-200">
+                    <MailWarning className="h-5 w-5 shrink-0" />
+                    <span className="font-bold">Email не подтвержден</span>
+                  </div>
+                  <p className="text-sm leading-6 text-muted">
+                    Мы отправили письмо со ссылкой на <strong>{profile.email}</strong> при регистрации. Если оно не пришло — отправьте
+                    повторно.
+                  </p>
+                  <button
+                    className="app-button-secondary w-full"
+                    type="button"
+                    disabled={resendVerification.isPending}
+                    onClick={() => resendVerification.mutate()}
+                  >
+                    {resendVerification.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+                    Отправить письмо повторно
+                  </button>
+                </>
+              )}
+              <StatusMessage message={verifyMessage} />
+            </div>
+          </section>
 
           <section className="app-card p-5">
             <h2 className="flex items-center gap-2 font-black text-ink">

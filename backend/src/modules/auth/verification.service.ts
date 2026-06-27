@@ -1,6 +1,9 @@
 import crypto from "node:crypto";
 import { getRedis } from "../../common/redis.js";
 import { badRequest } from "../../common/errors.js";
+import { env } from "../../config/env.js";
+import { sendEmail } from "../../common/mailer.js";
+import { logger } from "../../common/logger.js";
 
 const EMAIL_VERIFY_TTL_SECONDS = 24 * 60 * 60;
 const PASSWORD_RESET_TTL_SECONDS = 60 * 60;
@@ -46,4 +49,24 @@ export async function consumePasswordResetToken(token: string) {
   if (!userId) throw badRequest("Reset link is invalid or expired");
   await redis.del(key);
   return userId;
+}
+
+export function sendVerificationEmail(user: { id: string; email: string }) {
+  return createEmailVerificationToken(user.id).then((token) => {
+    const link = `${env.FRONTEND_URL}/verify-email?token=${token}`;
+    return sendEmail({
+      to: user.email,
+      subject: "Confirm your email",
+      text: `Confirm your email by visiting: ${link}`,
+      html: `<p>Confirm your email by clicking the link below:</p><p><a href="${link}">${link}</a></p>`
+    });
+  });
+}
+
+/**
+ * Fire-and-forget: SMTP latency (slow/misconfigured providers) must never make the caller
+ * wait, since these run inline in user-facing request handlers like /register.
+ */
+export function fireAndForget(promise: Promise<unknown>, context: string) {
+  promise.catch((error) => logger.error({ error }, context));
 }

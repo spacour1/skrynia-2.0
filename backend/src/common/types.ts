@@ -8,6 +8,7 @@ export type AuthUser = {
   displayName: string;
   role: Role;
   isBanned: boolean;
+  emailVerified: boolean;
 };
 
 declare global {

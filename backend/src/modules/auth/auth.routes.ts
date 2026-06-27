@@ -16,13 +16,13 @@ import type { AuthedRequest, Role } from "../../common/types.js";
 import { disconnectSession } from "../chat/ws.service.js";
 import { verifyTelegramAuth } from "./telegram.service.js";
 import {
-  createEmailVerificationToken,
   consumeEmailVerificationToken,
   createPasswordResetToken,
-  consumePasswordResetToken
+  consumePasswordResetToken,
+  sendVerificationEmail,
+  fireAndForget
 } from "./verification.service.js";
 import { sendEmail } from "../../common/mailer.js";
-import { logger } from "../../common/logger.js";
 
 const router = Router();
 
@@ -50,26 +50,6 @@ const telegramSchema = z.object({
 const emailVerifyConfirmSchema = z.object({ token: z.string().min(1) });
 const passwordForgotSchema = z.object({ email: z.string().email() });
 const passwordResetSchema = z.object({ token: z.string().min(1), password: z.string().min(8) });
-
-/**
- * Fire-and-forget: SMTP latency (slow/misconfigured providers) must never make the caller
- * wait, since these run inline in user-facing request handlers like /register.
- */
-function fireAndForget(promise: Promise<unknown>, context: string) {
-  promise.catch((error) => logger.error({ error }, context));
-}
-
-function sendVerificationEmail(user: { id: string; email: string; displayName?: string }) {
-  return createEmailVerificationToken(user.id).then((token) => {
-    const link = `${env.FRONTEND_URL}/verify-email?token=${token}`;
-    return sendEmail({
-      to: user.email,
-      subject: "Confirm your email",
-      text: `Confirm your email by visiting: ${link}`,
-      html: `<p>Confirm your email by clicking the link below:</p><p><a href="${link}">${link}</a></p>`
-    });
-  });
-}
 
 function hashRefreshToken(token: string) {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -108,7 +88,8 @@ router.post(
     const result = await pool.query(
       `insert into users(email, password_hash, display_name, role)
        values ($1, $2, $3, $4)
-       returning id, email, display_name as "displayName", role`,
+       returning id, email, display_name as "displayName", role,
+                 (email_verified_at is not null or telegram_id is not null) as "emailVerified"`,
       [input.email.toLowerCase(), passwordHash, input.displayName, "user"]
     );
     const user = result.rows[0];
@@ -127,7 +108,8 @@ router.post(
   asyncHandler(async (req, res) => {
     const input = loginSchema.parse(req.body);
     const result = await pool.query(
-      `select id, email, password_hash, display_name as "displayName", role, is_banned as "isBanned"
+      `select id, email, password_hash, display_name as "displayName", role, is_banned as "isBanned",
+              (email_verified_at is not null or telegram_id is not null) as "emailVerified"
        from users where email = $1`,
       [input.email.toLowerCase()]
     );
@@ -160,7 +142,8 @@ router.post(
       `insert into users(email, display_name, role, telegram_id)
        values ($1, $2, 'user', $3)
        on conflict (telegram_id) do update set display_name = excluded.display_name
-       returning id, email, display_name as "displayName", role`,
+       returning id, email, display_name as "displayName", role,
+                 (email_verified_at is not null or telegram_id is not null) as "emailVerified"`,
       [email, displayName, telegramId]
     );
     const user = result.rows[0];
@@ -190,7 +173,9 @@ router.post(
     await redis.del(`refresh:${tokenHash}`);
 
     const result = await pool.query(
-      `select id, email, display_name as "displayName", role, is_banned as "isBanned" from users where id = $1`,
+      `select id, email, display_name as "displayName", role, is_banned as "isBanned",
+              (email_verified_at is not null or telegram_id is not null) as "emailVerified"
+       from users where id = $1`,
       [userId]
     );
     const user = result.rows[0];
@@ -242,12 +227,14 @@ router.post(
   authRateLimit,
   asyncHandler(async (req: AuthedRequest, res) => {
     const result = await pool.query(
-      `select id, email, display_name as "displayName", email_verified_at as "emailVerifiedAt" from users where id = $1`,
+      `select id, email, display_name as "displayName",
+              (email_verified_at is not null or telegram_id is not null) as "emailVerified"
+       from users where id = $1`,
       [req.user.id]
     );
     const user = result.rows[0];
     if (!user) throw badRequest("Account not found");
-    if (user.emailVerifiedAt) return res.json({ status: "already_verified" });
+    if (user.emailVerified) return res.json({ status: "already_verified" });
 
     fireAndForget(sendVerificationEmail(user), "verification_email_resend_failed");
     res.json({ status: "sent" });

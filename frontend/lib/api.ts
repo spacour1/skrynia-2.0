@@ -17,6 +17,7 @@ export type User = {
   settings?: Record<string, unknown>;
   createdAt?: string;
   online?: boolean;
+  emailVerified?: boolean;
 };
 
 export type Category = {

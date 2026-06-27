@@ -1,0 +1,61 @@
+import express from "express";
+import cors from "cors";
+import cookieParser from "cookie-parser";
+import helmet from "helmet";
+import path from "node:path";
+import { env } from "./config/env.js";
+import { apiRateLimit, metricsAuth, writeRateLimit } from "./common/middleware/security.js";
+import { csrfProtection } from "./common/middleware/csrf.js";
+import { requestContext } from "./common/middleware/request-context.js";
+import { errorHandler } from "./common/errors.js";
+import { metricsText } from "./common/metrics.js";
+import authRoutes from "./modules/auth/auth.routes.js";
+import userRoutes from "./modules/users/users.routes.js";
+import marketplaceRoutes from "./modules/marketplace/marketplace.routes.js";
+import orderRoutes from "./modules/orders/orders.routes.js";
+import paymentRoutes from "./modules/payments/payments.routes.js";
+import chatRoutes from "./modules/chat/chat.routes.js";
+import disputeRoutes from "./modules/disputes/disputes.routes.js";
+import adminRoutes from "./modules/admin/admin.routes.js";
+import storageRoutes from "./modules/storage/storage.routes.js";
+import supportRoutes from "./modules/support/support.routes.js";
+import notificationRoutes from "./modules/notifications/notifications.routes.js";
+import currencyRoutes from "./modules/currencies/currencies.routes.js";
+
+export function createApp() {
+  const app = express();
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: "cross-origin" }
+    })
+  );
+  app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
+  app.use(cookieParser());
+  app.use(express.json({ limit: "1mb" }));
+  app.use(requestContext);
+  app.use(apiRateLimit);
+  app.use(writeRateLimit);
+  app.use(csrfProtection);
+  app.use("/uploads", express.static(path.resolve(env.LOCAL_UPLOAD_DIR)));
+
+  app.get("/health", (_req, res) => res.json({ ok: true }));
+  app.get("/metrics", metricsAuth, async (_req, res) => {
+    res.setHeader("content-type", "text/plain; version=0.0.4");
+    res.send(await metricsText());
+  });
+  app.use("/auth", authRoutes);
+  app.use("/users", userRoutes);
+  app.use("/marketplace", marketplaceRoutes);
+  app.use("/orders", orderRoutes);
+  app.use("/payments", paymentRoutes);
+  app.use("/chat", chatRoutes);
+  app.use("/disputes", disputeRoutes);
+  app.use("/admin", adminRoutes);
+  app.use("/storage", storageRoutes);
+  app.use("/support", supportRoutes);
+  app.use("/notifications", notificationRoutes);
+  app.use("/currencies", currencyRoutes);
+
+  app.use(errorHandler);
+  return app;
+}

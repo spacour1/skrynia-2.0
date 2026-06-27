@@ -1,0 +1,186 @@
+import { Router } from "express";
+import express from "express";
+import { z } from "zod";
+import { pool } from "../../db/pool.js";
+import { asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
+import { authenticate } from "../../common/middleware/auth.js";
+import { env } from "../../config/env.js";
+import type { AuthedRequest } from "../../common/types.js";
+import { lockEscrow } from "../orders/ledger.service.js";
+import { recordOrderEvent } from "../orders/order-events.service.js";
+import { notifyOrderEvent } from "../chat/ws.service.js";
+import { createNotification } from "../notifications/notifications.service.js";
+import { paymentAttemptsTotal } from "../../common/metrics.js";
+import { logger } from "../../common/logger.js";
+import { moneyToCents } from "../../common/validation.js";
+import { createWalletTopup, completeWalletTopup } from "../users/wallet.service.js";
+import { buildLiqpayCheckout, decodeLiqpayCallback, isLiqpaySuccessStatus, verifyLiqpaySignature } from "./liqpay.service.js";
+
+const router = Router();
+
+const paySchema = z.object({
+  provider: z.enum(["mock", "stripe", "liqpay", "fondy"]).default("mock")
+});
+
+const walletTopupSchema = z.object({
+  amount: z.string()
+});
+
+async function announceOrderPaid(order: { id: string; buyer_id: string; seller_id: string; payment_provider: string }, actorId: string) {
+  notifyOrderEvent(order.seller_id, { type: "order_paid", orderId: order.id });
+  notifyOrderEvent(order.buyer_id, { type: "order_paid", orderId: order.id });
+  await createNotification({
+    userId: order.seller_id,
+    type: "order_paid",
+    title: "Заказ оплачен",
+    body: "Покупатель оплатил заказ. Можно начинать выполнение.",
+    orderId: order.id
+  });
+  await createNotification({
+    userId: order.buyer_id,
+    type: "order_paid",
+    title: "Оплата в escrow",
+    body: "Средства зарезервированы до подтверждения доставки.",
+    orderId: order.id
+  });
+  await recordOrderEvent({
+    orderId: order.id,
+    actorId,
+    type: "paid",
+    title: "Заказ оплачен",
+    body: "Оплата зарезервирована в escrow.",
+    metadata: { provider: order.payment_provider }
+  });
+}
+
+router.post(
+  "/orders/:orderId/pay",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const orderId = z.string().uuid().parse(req.params.orderId);
+    const input = paySchema.parse(req.body);
+
+    let updated;
+    try {
+      updated = await lockEscrow(orderId, req.user.id, input.provider);
+      paymentAttemptsTotal.labels(input.provider, "captured").inc();
+    } catch (error) {
+      paymentAttemptsTotal.labels(input.provider, "failed").inc();
+      throw error;
+    }
+    const payment = {
+      provider: updated.payment_provider,
+      reference: updated.payment_reference,
+      status: "captured" as const
+    };
+    await announceOrderPaid(updated, req.user.id);
+    res.json({ order: updated, payment });
+  })
+);
+
+router.post(
+  "/orders/:orderId/liqpay/checkout",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const orderId = z.string().uuid().parse(req.params.orderId);
+    const result = await pool.query(
+      `select o.id, o.buyer_id, o.amount_cents, o.currency, o.status, p.title as product_title
+       from orders o
+       join products p on p.id = o.product_id
+       where o.id = $1`,
+      [orderId]
+    );
+    const order = result.rows[0];
+    if (!order) throw notFound("Order not found");
+    if (order.buyer_id !== req.user.id) throw forbidden("Only the buyer can pay this order");
+    if (order.status !== "pending") throw badRequest("Only pending orders can be paid");
+
+    const checkout = buildLiqpayCheckout({
+      orderId: order.id,
+      amountCents: Number(order.amount_cents),
+      currency: order.currency,
+      description: `SKRYNIA: ${order.product_title}`,
+      resultUrl: `${env.FRONTEND_URL}/orders/${order.id}?liqpay=return`
+    });
+    res.json({ data: checkout.data, signature: checkout.signature, actionUrl: checkout.actionUrl });
+  })
+);
+
+router.post(
+  "/wallet/liqpay/checkout",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const input = walletTopupSchema.parse(req.body);
+    const amountCents = moneyToCents(input.amount);
+    if (amountCents < 100) throw badRequest("Minimum top-up amount is 1.00");
+
+    const topup = await createWalletTopup(req.user.id, amountCents, "UAH");
+    const checkout = buildLiqpayCheckout({
+      orderId: topup.id,
+      amountCents,
+      currency: "UAH",
+      description: "SKRYNIA: пополнение баланса",
+      resultUrl: `${env.FRONTEND_URL}/wallet?liqpay=return`
+    });
+    res.json({ data: checkout.data, signature: checkout.signature, actionUrl: checkout.actionUrl });
+  })
+);
+
+/**
+ * LiqPay's server_url webhook. Called server-to-server (no auth, no CSRF token, and
+ * potentially more than once for the same payment) so every step here must be safe to
+ * repeat: verify the signature, then let lockEscrow's own `status = 'pending'` check
+ * make a second delivery a no-op instead of a double capture.
+ */
+router.post(
+  "/liqpay/callback",
+  express.urlencoded({ extended: false }),
+  asyncHandler(async (req, res) => {
+    const body = z.object({ data: z.string(), signature: z.string() }).safeParse(req.body);
+    if (!body.success) return res.status(400).send("Malformed callback");
+
+    if (!verifyLiqpaySignature(body.data.data, body.data.signature)) {
+      return res.status(400).send("Invalid signature");
+    }
+
+    const callback = decodeLiqpayCallback(body.data.data);
+    if (!isLiqpaySuccessStatus(callback.status)) {
+      // Not a final success (pending 3-D Secure, failure, etc.) - nothing to capture yet.
+      return res.status(200).send("ok");
+    }
+
+    const reference = String(callback.payment_id ?? callback.order_id);
+
+    const orderRow = await pool.query(`select id, buyer_id from orders where id = $1`, [callback.order_id]);
+    const order = orderRow.rows[0];
+    if (order) {
+      try {
+        const updated = await lockEscrow(order.id, order.buyer_id, "liqpay", reference);
+        paymentAttemptsTotal.labels("liqpay", "captured").inc();
+        await announceOrderPaid(updated, order.buyer_id);
+      } catch (error) {
+        // Order is no longer pending (already captured by an earlier delivery of this
+        // same webhook, or otherwise no longer payable) - acknowledge so LiqPay stops retrying.
+        paymentAttemptsTotal.labels("liqpay", "failed").inc();
+        logger.warn({ orderId: order.id, error }, "liqpay_callback_capture_skipped");
+      }
+      return res.status(200).send("ok");
+    }
+
+    const topupRow = await pool.query(`select id from wallet_topups where id = $1`, [callback.order_id]);
+    if (topupRow.rows[0]) {
+      try {
+        await completeWalletTopup(callback.order_id, "liqpay", reference);
+        paymentAttemptsTotal.labels("liqpay", "captured").inc();
+      } catch (error) {
+        paymentAttemptsTotal.labels("liqpay", "failed").inc();
+        logger.warn({ topupId: callback.order_id, error }, "liqpay_callback_topup_skipped");
+      }
+      return res.status(200).send("ok");
+    }
+
+    res.status(200).send("ok");
+  })
+);
+
+export default router;

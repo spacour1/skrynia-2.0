@@ -1,0 +1,178 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-bg: 244 248 253;
+  --color-surface: 249 252 255;
+  --color-card: 255 255 255;
+  --color-panel: 235 243 255;
+  --color-ink: 13 24 46;
+  --color-muted: 100 113 137;
+  --color-line: 222 230 243;
+  --color-brand: 59 130 246;
+  --color-action: 244 180 64;
+  --color-accent: 34 116 211;
+  --shadow-soft: 0 16px 38px rgba(54, 87, 130, 0.1);
+  --shadow-lift: 0 22px 54px rgba(54, 87, 130, 0.16);
+  color: rgb(var(--color-ink));
+  background: rgb(var(--color-bg));
+}
+
+html {
+  background: rgb(var(--color-bg));
+  transition:
+    background-color 320ms ease,
+    color 320ms ease;
+}
+
+.dark {
+  --color-bg: 3 6 10;
+  --color-surface: 7 10 15;
+  --color-card: 10 14 20;
+  --color-panel: 16 20 28;
+  --color-ink: 241 245 249;
+  --color-muted: 147 157 174;
+  --color-line: 31 38 52;
+  --color-brand: 246 190 78;
+  --color-action: 251 191 36;
+  --color-accent: 96 165 250;
+  --shadow-soft: 0 20px 52px rgba(0, 0, 0, 0.34);
+  --shadow-lift: 0 28px 70px rgba(0, 0, 0, 0.48);
+}
+
+body {
+  min-height: 100vh;
+  color: rgb(var(--color-ink));
+  background:
+    linear-gradient(180deg, rgba(var(--color-surface), 0.98), rgba(var(--color-bg), 1) 420px),
+    rgb(var(--color-bg));
+  text-rendering: optimizeLegibility;
+  transition:
+    background 360ms ease,
+    background-color 360ms ease,
+    color 320ms ease;
+}
+
+.dark body {
+  background:
+    linear-gradient(180deg, rgba(3, 6, 10, 1), rgba(5, 8, 13, 1) 520px),
+    rgb(var(--color-bg));
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+input,
+textarea,
+select {
+  color: rgb(var(--color-ink));
+  background-color: rgb(var(--color-card));
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: rgb(var(--color-muted));
+}
+
+select option {
+  color: rgb(var(--color-ink));
+  background: rgb(var(--color-card));
+}
+
+*,
+*::before,
+*::after {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow, opacity;
+  transition-duration: 180ms;
+  transition-timing-function: ease;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 320ms;
+  animation-timing-function: ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+::selection {
+  color: white;
+  background: rgb(var(--color-brand));
+}
+
+.dark .bg-brand.text-white,
+.dark .bg-brand .text-white {
+  color: rgb(4 24 22) !important;
+}
+
+.dark .bg-action.text-white {
+  color: rgb(35 23 3) !important;
+}
+
+.focus-ring {
+  @apply focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2 focus:ring-offset-surface;
+}
+
+@layer components {
+  .app-card {
+    @apply rounded-lg border border-line bg-card shadow-soft;
+  }
+
+  .interactive-card {
+    @apply rounded-lg border border-line bg-card shadow-soft transition hover:-translate-y-0.5 hover:border-brand/70 hover:shadow-lift;
+  }
+
+  .app-input {
+    @apply focus-ring rounded-md border border-line bg-card px-3 py-2 text-ink placeholder:text-muted;
+  }
+
+  .app-button {
+    @apply focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-brand px-4 py-2 font-semibold text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:bg-muted/40 disabled:text-white/80 dark:text-stone-950;
+  }
+
+  .app-button-secondary {
+    @apply focus-ring inline-flex items-center justify-center gap-2 rounded-md border border-line bg-card px-4 py-2 font-semibold text-ink transition hover:border-brand/70 hover:bg-panel;
+  }
+
+  .app-button-danger {
+    @apply focus-ring inline-flex items-center justify-center gap-2 rounded-md border border-rose-300 bg-card px-4 py-2 font-semibold text-rose-700 transition hover:bg-rose-50 dark:border-rose-400/40 dark:text-rose-300 dark:hover:bg-rose-400/10;
+  }
+
+  .app-button-action {
+    @apply focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-action px-4 py-2 font-semibold text-white transition hover:brightness-95 dark:text-yellow-950;
+  }
+
+  .table-shell {
+    @apply overflow-hidden rounded-lg border border-line bg-card shadow-soft;
+  }
+
+  .table-shell table {
+    @apply w-full text-left text-sm;
+  }
+
+  .table-shell thead {
+    @apply border-b border-line bg-panel/70 text-muted;
+  }
+
+  .table-shell th {
+    @apply px-4 py-3 font-semibold;
+  }
+
+  .table-shell td {
+    @apply px-4 py-3;
+  }
+}

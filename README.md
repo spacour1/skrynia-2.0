@@ -149,6 +149,15 @@ This MVP uses an internal virtual ledger, not real banking logic.
 - `GET /users/me/wallet`
 - `GET /admin/overview`
 
+## SEO
+
+The frontend serves a dynamic `/sitemap.xml` (home, games, and the first ~2000 active
+products) and `/robots.txt` (disallows private routes: admin, dashboard, favorites,
+login, register, messages, orders, seller, settings, wallet). Product and game pages get
+per-page `<title>`/description/Open Graph tags and `Product` JSON-LD, generated server-side
+in `app/products/[id]/page.tsx` and `app/games/[slug]/page.tsx`. Set `NEXT_PUBLIC_SITE_URL`
+to the real deployed domain in production — it's used as the canonical base for all of this.
+
 ## Notes For Production Hardening
 
 - Replace simulated payment providers with real webhooks and idempotency keys.
@@ -156,3 +165,4 @@ This MVP uses an internal virtual ledger, not real banking logic.
 - Add email verification and stronger fraud/risk rules.
 - Add object scanning for uploads.
 - Add observability, backups, and admin audit logs.
+- Set `NEXT_PUBLIC_SITE_URL` to the production domain (used by the sitemap and OG tags).

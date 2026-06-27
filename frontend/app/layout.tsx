@@ -2,10 +2,30 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
 import { Nav } from "../components/Nav";
+import { SITE_NAME, SITE_URL } from "../lib/site";
+
+const description =
+  "SKRYNIA — маркетплейс цифровых товаров и услуг для геймеров с безопасной сделкой через escrow: аккаунты, ключи, бустинг и пополнения.";
 
 export const metadata: Metadata = {
-  title: "Escrow Market MVP",
-  description: "Peer-to-peer digital goods marketplace with escrow"
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: `${SITE_NAME} — маркетплейс с безопасной сделкой`,
+    template: `%s | ${SITE_NAME}`
+  },
+  description,
+  openGraph: {
+    siteName: SITE_NAME,
+    type: "website",
+    locale: "ru_RU",
+    title: `${SITE_NAME} — маркетплейс с безопасной сделкой`,
+    description
+  },
+  twitter: {
+    card: "summary",
+    title: `${SITE_NAME} — маркетплейс с безопасной сделкой`,
+    description
+  }
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

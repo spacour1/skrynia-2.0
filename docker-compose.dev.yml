@@ -59,7 +59,12 @@ services:
     env_file:
       - ./frontend/.env.local
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:4000
+      # Read only by next.config.mjs's server-side rewrite (the Next.js process proxies
+      # /api/* to this address) — it runs inside this container, so it needs the backend's
+      # address on the docker network, not the host-facing localhost:4000.
+      NEXT_PUBLIC_API_URL: http://backend:4000
+      # Used directly by the browser to open a WebSocket, bypassing the rewrite entirely —
+      # this one does need the host-facing address.
       NEXT_PUBLIC_WS_URL: ws://localhost:4000/ws
       WATCHPACK_POLLING: "true"
     ports:

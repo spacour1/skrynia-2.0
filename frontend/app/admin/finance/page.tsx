@@ -7,6 +7,7 @@ import {
   ArrowUpCircle,
   Banknote,
   CheckCircle2,
+  Clock3,
   FileSearch,
   Filter,
   RefreshCcw,
@@ -14,7 +15,7 @@ import {
   Search,
   WalletCards
 } from "lucide-react";
-import { apiFetch, money } from "../../../lib/api";
+import { ApiError, apiFetch, money } from "../../../lib/api";
 import { RequireAuth } from "../../../components/RequireAuth";
 import { StatusBadge } from "../../../components/StatusBadge";
 
@@ -70,6 +71,17 @@ type Overview = {
   revenue: { currency: string; revenueCents: number }[];
 };
 
+type PendingOrder = {
+  id: string;
+  amountCents: number;
+  currency: string;
+  createdAt: string;
+  productTitle: string;
+  buyerDisplayName: string;
+  buyerEmail: string;
+  sellerDisplayName: string;
+};
+
 type Filters = {
   query: string;
   currency: string;
@@ -107,6 +119,23 @@ function AdminFinanceContent() {
   const runReconciliation = useMutation({
     mutationFn: () => apiFetch("/admin/reconciliation/run", { method: "POST" }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-reconciliation"] })
+  });
+  const pendingOrders = useQuery({
+    queryKey: ["admin-orders-pending"],
+    queryFn: () => apiFetch<{ orders: PendingOrder[] }>("/admin/orders/pending")
+  });
+  const confirmPayment = useMutation({
+    mutationFn: ({ orderId, reference }: { orderId: string; reference: string }) =>
+      apiFetch(`/admin/orders/${orderId}/confirm-payment`, {
+        method: "POST",
+        body: JSON.stringify({ reference: reference.trim() || undefined })
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-orders-pending"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-ledger"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-overview"] });
+    }
   });
 
   const entries = ledger.data?.entries ?? [];
@@ -203,6 +232,37 @@ function AdminFinanceContent() {
         <FinanceMetric icon={FileSearch} label="Строки журнала транзакций" value={txs.length} />
         <FinanceMetric icon={Scale} label="Проблемы сверки" value={mismatchCount} tone={mismatchCount ? "danger" : "ok"} />
         <FinanceMetric icon={Banknote} label="Доход платформы" value={formatRevenue(overview.data?.revenue ?? [])} />
+      </section>
+
+      <section className="app-card p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Clock3 className="h-5 w-5 text-brand" />
+            <h2 className="text-lg font-extrabold">Заказы, ожидающие оплаты</h2>
+          </div>
+          <button className="app-button-secondary" type="button" onClick={() => pendingOrders.refetch()}>
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
+        <p className="mt-1 text-sm text-muted">
+          Сюда попадает любой заказ без оплаты. Используй для подтверждения ручных переводов на карту — после
+          проверки поступления нажми "Подтвердить оплату".
+        </p>
+        <div className="mt-4 space-y-3">
+          {(pendingOrders.data?.orders ?? []).map((order) => (
+            <PendingOrderRow
+              key={order.id}
+              order={order}
+              onConfirm={(reference) => confirmPayment.mutate({ orderId: order.id, reference })}
+              isPending={confirmPayment.isPending}
+            />
+          ))}
+          {!pendingOrders.isLoading && !(pendingOrders.data?.orders ?? []).length ? (
+            <EmptyState text="Заказов, ожидающих оплаты, нет." />
+          ) : null}
+          {confirmPayment.error ? <p className="text-sm text-rose-600">{(confirmPayment.error as ApiError).message}</p> : null}
+        </div>
       </section>
 
       <section className="app-card p-5">
@@ -509,6 +569,42 @@ function MiniTotal({ label, value, danger }: { label: string; value: string; dan
       <p className="text-xs font-bold uppercase text-muted">{label}</p>
       <p className={`mt-1 font-black ${danger ? "text-rose-600 dark:text-rose-300" : ""}`}>{value}</p>
     </div>
+  );
+}
+
+function PendingOrderRow({
+  order,
+  onConfirm,
+  isPending
+}: {
+  order: PendingOrder;
+  onConfirm: (reference: string) => void;
+  isPending: boolean;
+}) {
+  const [reference, setReference] = useState("");
+  return (
+    <article className="rounded-lg border border-line bg-surface/50 p-4 sm:flex sm:items-center sm:justify-between sm:gap-4">
+      <div className="min-w-0">
+        <p className="font-black text-ink">{order.productTitle}</p>
+        <p className="mt-1 text-xs text-muted">
+          {order.buyerDisplayName} ({order.buyerEmail}) → {order.sellerDisplayName}
+        </p>
+        <p className="mt-1 font-mono text-xs text-muted">{shortId(order.id)} · {formatDate(order.createdAt)}</p>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-0">
+        <p className="font-black text-brand">{money(Number(order.amountCents), order.currency)}</p>
+        <input
+          className="app-input h-9 w-44"
+          placeholder="Комментарий (необязательно)"
+          value={reference}
+          onChange={(event) => setReference(event.target.value)}
+        />
+        <button className="app-button" type="button" disabled={isPending} onClick={() => onConfirm(reference)}>
+          <CheckCircle2 className="h-4 w-4" />
+          Подтвердить оплату
+        </button>
+      </div>
+    </article>
   );
 }
 

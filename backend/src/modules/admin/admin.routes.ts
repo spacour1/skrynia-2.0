@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { pool } from "../../db/pool.js";
-import { asyncHandler, notFound } from "../../common/errors.js";
+import { asyncHandler, badRequest, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
@@ -9,6 +9,10 @@ import { createReconciliationSnapshot } from "./reconciliation.service.js";
 import { enqueueJob, getJobQueue } from "../jobs/queue.js";
 import { disconnectUser } from "../chat/ws.service.js";
 import { cacheDel, cacheDelPattern } from "../../common/redis.js";
+import { lockEscrow } from "../orders/ledger.service.js";
+import { announceOrderPaid } from "../payments/payments.routes.js";
+import { paymentAttemptsTotal } from "../../common/metrics.js";
+import { logger } from "../../common/logger.js";
 
 const router = Router();
 
@@ -258,6 +262,55 @@ router.patch(
     );
     if (!result.rows[0]) throw notFound("Listing not found");
     res.json({ listing: result.rows[0] });
+  })
+);
+
+router.get(
+  "/orders/pending",
+  asyncHandler(async (_req: AuthedRequest, res) => {
+    const result = await pool.query(
+      `select o.id, o.amount_cents as "amountCents", o.currency, o.created_at as "createdAt",
+              p.title as "productTitle",
+              buyer.id as "buyerId", buyer.display_name as "buyerDisplayName", buyer.email as "buyerEmail",
+              seller.display_name as "sellerDisplayName"
+       from orders o
+       join products p on p.id = o.product_id
+       join users buyer on buyer.id = o.buyer_id
+       join users seller on seller.id = o.seller_id
+       where o.status = 'pending'
+       order by o.created_at desc
+       limit 200`
+    );
+    res.json({ orders: result.rows });
+  })
+);
+
+/**
+ * Manual bank-transfer confirmation: there's no webhook for this provider, so an admin
+ * reviewing the actual incoming transfer is what stands in for payment verification
+ * before escrow is locked.
+ */
+router.post(
+  "/orders/:id/confirm-payment",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const orderId = z.string().uuid().parse(req.params.id);
+    const { reference } = z.object({ reference: z.string().trim().max(200).optional() }).parse(req.body);
+
+    const orderRow = await pool.query(`select id, buyer_id from orders where id = $1`, [orderId]);
+    const order = orderRow.rows[0];
+    if (!order) throw notFound("Order not found");
+
+    let updated;
+    try {
+      updated = await lockEscrow(orderId, order.buyer_id, "manual", reference);
+      paymentAttemptsTotal.labels("manual", "captured").inc();
+    } catch (error) {
+      paymentAttemptsTotal.labels("manual", "failed").inc();
+      logger.warn({ orderId, error }, "manual_payment_confirm_failed");
+      throw badRequest("Could not confirm this order's payment");
+    }
+    await announceOrderPaid(updated, req.user.id);
+    res.json({ order: updated });
   })
 );
 

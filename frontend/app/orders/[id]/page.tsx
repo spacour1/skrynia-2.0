@@ -24,6 +24,7 @@ import { StatusBadge } from "../../../components/StatusBadge";
 import { useI18n } from "../../../lib/i18n";
 import { redirectToLiqpay, type LiqpayCheckout } from "../../../lib/liqpay";
 import { redirectToMonobank, type MonobankCheckout } from "../../../lib/monobank";
+import { ManualPaymentPanel } from "../../../components/ManualPaymentPanel";
 
 const statusSteps = [
   { key: "pending", label: "Создан", text: "Заказ ожидает оплаты или подтверждения." },
@@ -55,6 +56,7 @@ export default function OrderPage({ params }: { params: { id: string } }) {
   const [deliveryNote, setDeliveryNote] = useState("");
   const [disputeReason, setDisputeReason] = useState("");
   const [reviewComment, setReviewComment] = useState("");
+  const [showManualPayment, setShowManualPayment] = useState(false);
 
   const order = useQuery({
     queryKey: ["order", params.id],
@@ -274,9 +276,18 @@ export default function OrderPage({ params }: { params: { id: string } }) {
                     <CreditCard className="h-4 w-4" />
                     {payWithMonobank.isPending ? "Переходим к оплате..." : "Оплатить через Monobank"}
                   </button>
+                  <button className="app-button-secondary w-full" onClick={() => setShowManualPayment((value) => !value)}>
+                    <CreditCard className="h-4 w-4" />
+                    {showManualPayment ? "Скрыть реквизиты для перевода" : "Оплатить переводом"}
+                  </button>
                 </div>
                 {payWithLiqpay.error ? <p className="mt-2 text-sm text-rose-600">{payWithLiqpay.error.message}</p> : null}
                 {payWithMonobank.error ? <p className="mt-2 text-sm text-rose-600">{payWithMonobank.error.message}</p> : null}
+                {showManualPayment ? (
+                  <div className="mt-3">
+                    <ManualPaymentPanel orderId={params.id} />
+                  </div>
+                ) : null}
               </ActionCard>
             ) : null}
 

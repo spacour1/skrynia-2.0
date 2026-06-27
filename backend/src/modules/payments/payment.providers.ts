@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 
-export type PaymentProviderName = "mock" | "stripe" | "liqpay" | "fondy" | "monobank";
+export type PaymentProviderName = "mock" | "stripe" | "liqpay" | "fondy" | "monobank" | "manual";
 
 export type PaymentResult = {
   provider: PaymentProviderName;
@@ -89,12 +89,32 @@ class MonobankCaptureProvider implements PaymentProvider {
   }
 }
 
+/**
+ * There is no webhook for manual bank transfers — an admin reviews the incoming
+ * transfer themselves and confirms it from the admin panel, so capture() is only ever
+ * reached after that human review already happened.
+ */
+class ManualCaptureProvider implements PaymentProvider {
+  public name: PaymentProviderName = "manual";
+
+  async capture(input: {
+    orderId: string;
+    amountCents: number;
+    currency: string;
+    idempotencyKey: string;
+    externalReference?: string;
+  }): Promise<PaymentResult> {
+    return { provider: "manual", reference: input.externalReference || `manual:${input.orderId}`, status: "captured" };
+  }
+}
+
 const providers: Record<PaymentProviderName, PaymentProvider> = {
   mock: new SimulatedProvider("mock"),
   stripe: new SimulatedProvider("stripe"),
   liqpay: new LiqpayCaptureProvider(),
   fondy: new SimulatedProvider("fondy"),
-  monobank: new MonobankCaptureProvider()
+  monobank: new MonobankCaptureProvider(),
+  manual: new ManualCaptureProvider()
 };
 
 export function getPaymentProvider(name: PaymentProviderName) {

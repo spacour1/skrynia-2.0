@@ -85,6 +85,11 @@ export default function ProductPage({ params }: { params: { id: string } }) {
     onSuccess: redirectToMonobank
   });
 
+  const buyWithManualTransfer = useMutation({
+    mutationFn: () => createOrder(),
+    onSuccess: (order) => router.push(`/orders/${order.id}`)
+  });
+
   if (product.isLoading) return <p className="text-muted">{t("common.loading")}</p>;
   if (!product.data) return <p className="text-rose-600">{t("home.noListings")}</p>;
 
@@ -159,6 +164,10 @@ export default function ProductPage({ params }: { params: { id: string } }) {
                     <CreditCard className="h-5 w-5" />
                     {buyWithMonobank.isPending ? "Переходим к оплате..." : "Купить через Monobank"}
                   </button>
+                  <button className="app-button-secondary w-full py-3" disabled={buyWithManualTransfer.isPending} onClick={() => buyWithManualTransfer.mutate()}>
+                    <CreditCard className="h-5 w-5" />
+                    {buyWithManualTransfer.isPending ? "Создаём заказ..." : "Оплатить переводом"}
+                  </button>
                 </div>
               ) : (
                 <button className="app-button-action mt-5 w-full py-3" onClick={() => router.push("/login")}>
@@ -168,6 +177,7 @@ export default function ProductPage({ params }: { params: { id: string } }) {
               )}
               {buyWithLiqpay.error ? <p className="mt-2 text-sm text-rose-600">{buyWithLiqpay.error.message}</p> : null}
               {buyWithMonobank.error ? <p className="mt-2 text-sm text-rose-600">{buyWithMonobank.error.message}</p> : null}
+              {buyWithManualTransfer.error ? <p className="mt-2 text-sm text-rose-600">{buyWithManualTransfer.error.message}</p> : null}
             </div>
           </div>
         </section>

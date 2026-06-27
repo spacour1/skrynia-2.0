@@ -27,7 +27,7 @@ const walletTopupSchema = z.object({
   amount: z.string()
 });
 
-async function announceOrderPaid(order: { id: string; buyer_id: string; seller_id: string; payment_provider: string }, actorId: string) {
+export async function announceOrderPaid(order: { id: string; buyer_id: string; seller_id: string; payment_provider: string }, actorId: string) {
   notifyOrderEvent(order.seller_id, { type: "order_paid", orderId: order.id });
   notifyOrderEvent(order.buyer_id, { type: "order_paid", orderId: order.id });
   await createNotification({
@@ -132,6 +132,42 @@ router.post(
       redirectUrl: `${env.FRONTEND_URL}/orders/${order.id}?monobank=return`
     });
     res.json({ pageUrl: invoice.pageUrl, invoiceId: invoice.invoiceId });
+  })
+);
+
+/**
+ * Read-only: just hands the buyer the bank details and an order-specific comment to put
+ * in the transfer. Doesn't touch order state — only an admin confirming the transfer
+ * from the admin panel ever triggers lockEscrow for this provider.
+ */
+router.get(
+  "/orders/:orderId/manual/details",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const orderId = z.string().uuid().parse(req.params.orderId);
+    const result = await pool.query(
+      `select o.id, o.buyer_id, o.amount_cents, o.currency, p.title as product_title
+       from orders o
+       join products p on p.id = o.product_id
+       where o.id = $1`,
+      [orderId]
+    );
+    const order = result.rows[0];
+    if (!order) throw notFound("Order not found");
+    if (order.buyer_id !== req.user.id) throw forbidden("Only the buyer can view this order's payment details");
+
+    if (!env.MANUAL_PAYMENT_CARD_NUMBER || !env.MANUAL_PAYMENT_RECEIVER_NAME) {
+      throw badRequest("Manual transfer is not configured on this server");
+    }
+
+    res.json({
+      cardNumber: env.MANUAL_PAYMENT_CARD_NUMBER,
+      receiverName: env.MANUAL_PAYMENT_RECEIVER_NAME,
+      bank: env.MANUAL_PAYMENT_BANK ?? null,
+      amountCents: Number(order.amount_cents),
+      currency: order.currency,
+      comment: `SKRYNIA ${order.id.slice(0, 8)}`
+    });
   })
 );
 

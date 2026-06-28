@@ -43,7 +43,11 @@ const schema = z.object({
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().default("EscrowMarket <onboarding@resend.dev>"),
   METRICS_USER: z.string().default("metrics"),
-  METRICS_PASSWORD: z.string().default("dev-metrics-password-change-me")
+  METRICS_PASSWORD: z.string().default("dev-metrics-password-change-me"),
+  // Lets the dev/test payment-simulation endpoints (success/failure/wait_accept) run in a
+  // deployed-but-not-quite-production environment (e.g. a staging demo) without flipping
+  // NODE_ENV away from "production". Defaults closed everywhere else stays disabled.
+  ENABLE_TEST_PAYMENTS: z.coerce.boolean().default(false)
 }).superRefine((value, ctx) => {
   if (value.NODE_ENV !== "production") return;
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, Banknote, Headphones, ImageIcon, ListChecks, ShieldCheck, Users, WalletCards } from "lucide-react";
+import { Activity, AlertTriangle, Banknote, Flag, Headphones, ImageIcon, ListChecks, ShieldCheck, Users, WalletCards } from "lucide-react";
 import { apiFetch, money } from "../../lib/api";
 import { StatusBadge } from "../../components/StatusBadge";
 import { RequireAuth } from "../../components/RequireAuth";
@@ -129,6 +129,14 @@ function AdminContent() {
         <div>
           <p className="font-bold">Модерация изображений</p>
           <p className="text-sm text-muted">Проверка медиа товаров, скрытие нарушающих контент</p>
+        </div>
+      </Link>
+
+      <Link className="interactive-card flex items-center gap-4 p-5" href="/admin/reports">
+        <Flag className="h-6 w-6 text-brand" />
+        <div>
+          <p className="font-bold">Жалобы и модерация</p>
+          <p className="text-sm text-muted">Жалобы на пользователей и сообщения, скрытие сообщений</p>
         </div>
       </Link>
 

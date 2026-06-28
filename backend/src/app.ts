@@ -15,6 +15,7 @@ import userBlockRoutes from "./modules/users/blocks.routes.js";
 import marketplaceRoutes from "./modules/marketplace/marketplace.routes.js";
 import orderRoutes from "./modules/orders/orders.routes.js";
 import paymentRoutes from "./modules/payments/payments.routes.js";
+import testPaymentRoutes from "./modules/payments/test-payments.routes.js";
 import chatRoutes from "./modules/chat/chat.routes.js";
 import disputeRoutes from "./modules/disputes/disputes.routes.js";
 import reportRoutes from "./modules/reports/reports.routes.js";
@@ -51,6 +52,7 @@ export function createApp() {
   app.use("/marketplace", marketplaceRoutes);
   app.use("/orders", orderRoutes);
   app.use("/payments", paymentRoutes);
+  app.use("/payments", testPaymentRoutes);
   app.use("/chat", chatRoutes);
   app.use("/disputes", disputeRoutes);
   app.use("/reports", reportRoutes);

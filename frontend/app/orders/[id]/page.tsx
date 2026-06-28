@@ -9,6 +9,7 @@ import {
   Clock3,
   CreditCard,
   FileText,
+  FlaskConical,
   Hash,
   type LucideIcon,
   PackageCheck,
@@ -16,16 +17,24 @@ import {
   ShieldCheck,
   Star,
   Truck,
-  UserRound
+  UserRound,
+  XCircle
 } from "lucide-react";
 import { apiFetch, money, type Order } from "../../../lib/api";
 import { useAuth } from "../../../lib/auth-store";
 import { StatusBadge } from "../../../components/StatusBadge";
 import { useI18n } from "../../../lib/i18n";
+import { showAppToast } from "../../../lib/toast-events";
 import { redirectToLiqpay, type LiqpayCheckout } from "../../../lib/liqpay";
 import { redirectToMonobank, type MonobankCheckout } from "../../../lib/monobank";
 import { ManualPaymentPanel } from "../../../components/ManualPaymentPanel";
 import { redirectToWayforpay, type WayforpayCheckout } from "../../../lib/wayforpay";
+
+// Mirrors the backend's NODE_ENV/ENABLE_TEST_PAYMENTS gate: hidden by default on a
+// production build (Vercel always builds with NODE_ENV=production) unless the deployment
+// opts in via NEXT_PUBLIC_ENABLE_TEST_PAYMENTS, same as the backend's ENABLE_TEST_PAYMENTS.
+const SHOW_TEST_PAYMENTS_PANEL =
+  process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_ENABLE_TEST_PAYMENTS === "true";
 
 const statusSteps = [
   { key: "pending", label: "Создан", text: "Заказ ожидает оплаты или подтверждения." },
@@ -88,6 +97,19 @@ export default function OrderPage({ params }: { params: { id: string } }) {
   const payWithWayforpay = useMutation({
     mutationFn: () => apiFetch<WayforpayCheckout>(`/payments/orders/${params.id}/wayforpay/checkout`, { method: "POST" }),
     onSuccess: redirectToWayforpay
+  });
+
+  const testSuccess = useMutation({
+    mutationFn: () => apiFetch(`/payments/test/orders/${params.id}/success`, { method: "POST" }),
+    onSuccess: refresh
+  });
+  const testFailure = useMutation({
+    mutationFn: () => apiFetch(`/payments/test/orders/${params.id}/failure`, { method: "POST" }),
+    onSuccess: refresh
+  });
+  const testWaitAccept = useMutation({
+    mutationFn: () => apiFetch(`/payments/test/orders/${params.id}/wait-accept`, { method: "POST" }),
+    onSuccess: () => showAppToast({ title: "Платеж в обработке", body: "Ожидаем подтверждения от платежной системы." })
   });
 
   // The buyer lands back here right after the checkout page; the provider's own
@@ -305,6 +327,28 @@ export default function OrderPage({ params }: { params: { id: string } }) {
               </ActionCard>
             ) : null}
 
+            {isBuyer && item.status === "pending" && SHOW_TEST_PAYMENTS_PANEL ? (
+              <ActionCard title="Тестовая оплата (dev)" text="Эмулирует ответ платежной системы без реальных денег — только для разработки.">
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <button className="app-button-action w-full" disabled={testSuccess.isPending} onClick={() => testSuccess.mutate()}>
+                    <CheckCircle2 className="h-4 w-4" />
+                    Success
+                  </button>
+                  <button className="app-button-danger w-full" disabled={testFailure.isPending} onClick={() => testFailure.mutate()}>
+                    <XCircle className="h-4 w-4" />
+                    Failure
+                  </button>
+                  <button className="app-button-secondary w-full" disabled={testWaitAccept.isPending} onClick={() => testWaitAccept.mutate()}>
+                    <FlaskConical className="h-4 w-4" />
+                    Wait accept
+                  </button>
+                </div>
+                {testSuccess.error ? <p className="mt-2 text-sm text-rose-600">{testSuccess.error.message}</p> : null}
+                {testFailure.error ? <p className="mt-2 text-sm text-rose-600">{testFailure.error.message}</p> : null}
+                {testWaitAccept.error ? <p className="mt-2 text-sm text-rose-600">{testWaitAccept.error.message}</p> : null}
+              </ActionCard>
+            ) : null}
+
             {isSeller && item.status === "paid" ? (
               <ActionCard title="Начать выполнение" text="Покупатель увидит, что заказ принят в работу.">
                 <button className="app-button-action w-full" disabled={postAction.isPending} onClick={() => postAction.mutate({ path: `/orders/${params.id}/start` })}>
@@ -431,5 +475,6 @@ function getNextHint(status: string, isBuyer: boolean, isSeller: boolean) {
   if (status === "completed") return "Сделка завершена. История заказа и чат остаются доступны для просмотра.";
   if (status === "disputed") return "По заказу открыт спор. Администратор проверит историю сделки и сообщения.";
   if (status === "refunded") return "Заказ был возвращен покупателю. Подробности можно посмотреть в истории сделки.";
+  if (status === "canceled") return "Оплата по заказу не прошла. Можно создать новый заказ и попробовать снова.";
   return "Следите за статусом заказа и используйте чат для уточнений.";
 }

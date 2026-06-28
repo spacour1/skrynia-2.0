@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { useAuth } from "../lib/auth-store";
 import { useI18n } from "../lib/i18n";
@@ -14,6 +15,7 @@ export function RequireAuth({
 }) {
   const { user, hydrated, hydrate } = useAuth();
   const { t } = useI18n();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (!hydrated) hydrate();
@@ -25,7 +27,7 @@ export function RequireAuth({
       <div className="app-card p-6">
         <h1 className="text-xl font-bold">{t("auth.loginRequired")}</h1>
         <p className="mt-2 text-sm text-muted">{t("auth.loginRequiredText")}</p>
-        <Link className="app-button mt-4" href="/login">
+        <Link className="app-button mt-4" href={`/login?next=${encodeURIComponent(pathname)}`}>
           {t("nav.login")}
         </Link>
       </div>

@@ -1,20 +1,17 @@
-import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Router } from "express";
-import jwt from "jsonwebtoken";
-import type { Secret, SignOptions } from "jsonwebtoken";
-import { nanoid } from "nanoid";
 import { z } from "zod";
 import { env } from "../../config/env.js";
 import { pool } from "../../db/pool.js";
-import { asyncHandler, badRequest } from "../../common/errors.js";
+import { ApiError, asyncHandler, badRequest, forbidden, serviceUnavailable } from "../../common/errors.js";
 import { getRedis } from "../../common/redis.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { authRateLimit } from "../../common/middleware/security.js";
-import { ACCESS_COOKIE, REFRESH_COOKIE, setAuthCookies, clearAuthCookies } from "../../common/cookies.js";
-import type { AuthedRequest, Role } from "../../common/types.js";
-import { disconnectSession } from "../chat/ws.service.js";
+import { REFRESH_COOKIE, setAuthCookies, clearAuthCookies } from "../../common/cookies.js";
+import type { AuthedRequest } from "../../common/types.js";
+import { disconnectUser } from "../chat/ws.service.js";
 import { verifyTelegramAuth } from "./telegram.service.js";
+import { hashRefreshToken, issueSession, revokeAllUserSessions, revokeRefreshToken, revokeSession } from "./session.service.js";
 import {
   consumeEmailVerificationToken,
   createPasswordResetToken,
@@ -52,33 +49,6 @@ const telegramSchema = z.object({
 const emailVerifyConfirmSchema = z.object({ token: z.string().min(1) });
 const passwordForgotSchema = z.object({ email: z.string().email() });
 const passwordResetSchema = z.object({ token: z.string().min(1), password: z.string().min(8) });
-
-function hashRefreshToken(token: string) {
-  return crypto.createHash("sha256").update(token).digest("hex");
-}
-
-async function issueSession(userId: string, role: Role) {
-  const jti = nanoid();
-  const csrfToken = nanoid(32);
-  const accessOptions: SignOptions = { expiresIn: `${env.ACCESS_TOKEN_TTL_MIN}m` as SignOptions["expiresIn"] };
-  const accessToken = jwt.sign({ sub: userId, role, jti }, env.JWT_SECRET as Secret, accessOptions);
-
-  const refreshToken = crypto.randomBytes(32).toString("base64url");
-  const refreshTtlSeconds = env.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60;
-
-  const redis = getRedis();
-  if (!redis) throw badRequest("Sessions are unavailable right now, try again shortly");
-  await redis.set(`session:${jti}`, userId, "EX", env.ACCESS_TOKEN_TTL_MIN * 60);
-  await redis.set(`refresh:${hashRefreshToken(refreshToken)}`, userId, "EX", refreshTtlSeconds);
-
-  return { accessToken, refreshToken, csrfToken, jti };
-}
-
-async function revokeRefreshToken(token: string | undefined) {
-  if (!token) return;
-  const redis = getRedis();
-  if (redis) await redis.del(`refresh:${hashRefreshToken(token)}`);
-}
 
 router.post(
   "/register",
@@ -128,7 +98,7 @@ router.post(
     );
     const user = result.rows[0];
     if (!user?.password_hash) throw badRequest("Invalid email or password");
-    if (user.isBanned) throw badRequest("Account is banned");
+    if (user.isBanned) throw forbidden("Account is banned");
 
     const ok = await bcrypt.compare(input.password, user.password_hash);
     if (!ok) throw badRequest("Invalid email or password");
@@ -171,19 +141,26 @@ router.post(
   "/refresh",
   asyncHandler(async (req, res) => {
     const refreshToken = req.cookies?.[REFRESH_COOKIE];
-    if (!refreshToken) throw badRequest("Missing refresh token");
+    if (!refreshToken) throw new ApiError(401, "Missing refresh token", "unauthorized");
 
     const redis = getRedis();
-    if (!redis) throw badRequest("Sessions are unavailable right now, try again shortly");
+    if (!redis) throw serviceUnavailable("Sessions are unavailable right now, try again shortly");
 
     const tokenHash = hashRefreshToken(refreshToken);
-    const userId = await redis.get(`refresh:${tokenHash}`);
+    let userId: string | null;
+    try {
+      userId = await redis.get(`refresh:${tokenHash}`);
+    } catch (error) {
+      // A connection blip is not the same thing as "this token is invalid" - don't clear
+      // cookies or sign the user out over it, just ask the client to retry shortly.
+      logger.warn({ error }, "refresh_token_lookup_failed_redis_unavailable");
+      throw serviceUnavailable("Sessions are unavailable right now, try again shortly");
+    }
+
     if (!userId) {
       clearAuthCookies(res);
-      throw badRequest("Refresh token is invalid or expired");
+      throw new ApiError(401, "Refresh token is invalid or expired", "refresh_token_invalid");
     }
-    // Rotate: the old refresh token can never be redeemed again.
-    await redis.del(`refresh:${tokenHash}`);
 
     const result = await pool.query(
       `select id, email, display_name as "displayName", role, is_banned as "isBanned",
@@ -192,12 +169,22 @@ router.post(
       [userId]
     );
     const user = result.rows[0];
-    if (!user || user.isBanned) {
+    if (!user) {
       clearAuthCookies(res);
-      throw badRequest("Account is unavailable");
+      throw new ApiError(401, "Account is unavailable", "unauthorized");
+    }
+    if (user.isBanned) {
+      clearAuthCookies(res);
+      throw forbidden("Account is banned");
     }
 
+    // Issue the replacement session *before* revoking the one being redeemed: if anything
+    // below fails, the caller's existing refresh token must remain usable rather than
+    // leaving them with no valid session at all.
     const session = await issueSession(user.id, user.role);
+    if (env.REFRESH_ROTATION_ENABLED) {
+      await revokeRefreshToken(refreshToken, user.id);
+    }
     setAuthCookies(res, session);
     delete user.isBanned;
     res.json({ user });
@@ -215,19 +202,10 @@ router.get(
 router.post(
   "/logout",
   authenticate,
-  asyncHandler(async (req, res) => {
-    const accessToken = req.cookies?.[ACCESS_COOKIE];
+  asyncHandler(async (req: AuthedRequest, res) => {
     const refreshToken = req.cookies?.[REFRESH_COOKIE];
-
-    if (accessToken) {
-      const payload = jwt.decode(accessToken) as { jti?: string } | null;
-      if (payload?.jti) {
-        const redis = getRedis();
-        if (redis) await redis.del(`session:${payload.jti}`);
-        disconnectSession(payload.jti);
-      }
-    }
-    await revokeRefreshToken(refreshToken);
+    await revokeSession(req.sessionId, req.user.id);
+    await revokeRefreshToken(refreshToken, req.user.id);
 
     clearAuthCookies(res);
     res.status(204).send();
@@ -314,6 +292,10 @@ router.post(
     const userId = await consumePasswordResetToken(input.token);
     const passwordHash = await bcrypt.hash(input.password, 12);
     await pool.query(`update users set password_hash = $2, updated_at = now() where id = $1`, [userId, passwordHash]);
+    // The password changed via an out-of-band email link, not from inside any active
+    // session - every existing session (this device or any other) must re-authenticate.
+    await revokeAllUserSessions(userId);
+    disconnectUser(userId);
     res.json({ status: "reset" });
   })
 );

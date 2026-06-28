@@ -11,6 +11,7 @@ import type { AuthedRequest } from "../../common/types.js";
 import { isUserOnline } from "../chat/ws.service.js";
 import { requestWithdrawal } from "./wallet.service.js";
 import { createAndSendVerificationEmail, fireAndForget } from "../auth/verification.service.js";
+import { revokeAllUserSessions } from "../auth/session.service.js";
 
 const router = Router();
 
@@ -105,6 +106,9 @@ router.post(
     if (!ok) throw badRequest("Current password is incorrect");
     const nextHash = await bcrypt.hash(input.newPassword, 12);
     await pool.query(`update users set password_hash = $2, updated_at = now() where id = $1`, [req.user.id, nextHash]);
+    // Kill every other session on a password change, but keep the tab that just made the
+    // change logged in - it just proved it knows the new password.
+    await revokeAllUserSessions(req.user.id, { exceptJti: req.sessionId });
     res.json({ ok: true });
   })
 );

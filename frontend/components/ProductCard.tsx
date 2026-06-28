@@ -7,9 +7,11 @@ import type { Product } from "../lib/api";
 import { money } from "../lib/api";
 import { GameIcon } from "./GameIcon";
 import { firstProductMedia } from "../lib/product-media";
+import { useI18n } from "../lib/i18n";
 
 export function ProductCard({ product }: { product: Product }) {
   const router = useRouter();
+  const { t } = useI18n();
   const imageUrl = firstProductMedia(product);
   const discount =
     product.oldPriceCents && Number(product.oldPriceCents) > Number(product.priceCents)
@@ -38,7 +40,7 @@ export function ProductCard({ product }: { product: Product }) {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap gap-2 text-xs font-bold">
-              {product.isHot ? <span className="rounded-full bg-brand px-2 py-1 text-white dark:text-stone-950">ХИТ</span> : null}
+              {product.isHot ? <span className="rounded-full bg-brand px-2 py-1 text-white dark:text-stone-950">{t("nav.hot")}</span> : null}
               {discount ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-rose-500 px-2 py-1 text-white">
                   <BadgePercent className="h-3 w-3" />-{discount}%
@@ -46,7 +48,7 @@ export function ProductCard({ product }: { product: Product }) {
               ) : null}
               {product.deliveryType === "instant" ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-emerald-500">
-                  <Timer className="h-3 w-3" /> instant
+                  <Timer className="h-3 w-3" /> {t("product.instant")}
                 </span>
               ) : null}
             </div>
@@ -75,7 +77,7 @@ export function ProductCard({ product }: { product: Product }) {
             </p>
             <p className="mt-1 flex items-center justify-end gap-1 text-xs font-bold text-muted">
               <span className={`h-2.5 w-2.5 rounded-full ${product.sellerOnline ? "bg-emerald-400 shadow-[0_0_0_4px_rgba(52,211,153,0.16)]" : "bg-muted"}`} />
-              {product.sellerOnline ? "Онлайн" : "Не в сети"}
+              {product.sellerOnline ? t("product.online") : t("product.offline")}
             </p>
           </div>
         </div>

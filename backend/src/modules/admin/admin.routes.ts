@@ -8,6 +8,7 @@ import type { AuthedRequest } from "../../common/types.js";
 import { createReconciliationSnapshot } from "./reconciliation.service.js";
 import { enqueueJob, getJobQueue } from "../jobs/queue.js";
 import { disconnectUser } from "../chat/ws.service.js";
+import { revokeAllUserSessions } from "../auth/session.service.js";
 import { cacheDel, cacheDelPattern } from "../../common/redis.js";
 import { lockEscrow } from "../orders/ledger.service.js";
 import { announceOrderPaid } from "../payments/payments.routes.js";
@@ -75,7 +76,13 @@ router.patch(
       [id, body.role, body.isBanned]
     );
     if (!result.rows[0]) throw notFound("User not found");
-    if (body.isBanned) disconnectUser(id);
+    if (body.isBanned) {
+      // Belt-and-suspenders: revoke the Redis-tracked sessions/refresh tokens immediately
+      // (rather than waiting for the next authenticate() call to notice is_banned) and close
+      // any live websocket connections regardless of which session token they used.
+      await revokeAllUserSessions(id);
+      disconnectUser(id);
+    }
     res.json({ user: result.rows[0] });
   })
 );

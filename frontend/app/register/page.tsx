@@ -2,19 +2,22 @@
 
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { apiFetch, type User } from "../../lib/api";
+import { apiFetch, ApiError, type User } from "../../lib/api";
 import { useAuth } from "../../lib/auth-store";
 import { useI18n } from "../../lib/i18n";
+import { consumeReturnPath } from "../../lib/return-path";
 
 export default function RegisterPage() {
   const router = useRouter();
   const setUser = useAuth((s) => s.setUser);
   const { t } = useI18n();
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setSubmitting(true);
     const form = new FormData(event.currentTarget);
     try {
       const response = await apiFetch<{ user: User }>("/auth/register", {
@@ -26,9 +29,11 @@ export default function RegisterPage() {
         })
       });
       setUser(response.user);
-      router.push("/dashboard");
+      router.push(consumeReturnPath());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Registration failed");
+      setError(err instanceof ApiError ? err.message : t("common.somethingWentWrong"));
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -39,17 +44,29 @@ export default function RegisterPage() {
           <h1 className="text-xl font-semibold">{t("auth.registerTitle")}</h1>
         </div>
         <form className="space-y-4 p-6" onSubmit={submit}>
-        <input className="app-input w-full" name="displayName" placeholder={t("auth.displayName")} />
-        <input className="app-input w-full" name="email" type="email" placeholder={t("auth.email")} />
-        <input
-          className="app-input w-full"
-          name="password"
-          type="password"
-          placeholder={t("auth.password")}
-        />
-        {error && <p className="text-sm text-rose-600">{error}</p>}
-        <button className="app-button w-full">{t("nav.register")}</button>
-      </form>
+          <input className="app-input w-full" name="displayName" placeholder={t("auth.displayName")} autoComplete="name" required minLength={2} />
+          <input
+            className="app-input w-full"
+            name="email"
+            type="email"
+            placeholder={t("auth.email")}
+            autoComplete="email"
+            required
+          />
+          <input
+            className="app-input w-full"
+            name="password"
+            type="password"
+            placeholder={t("auth.password")}
+            autoComplete="new-password"
+            required
+            minLength={8}
+          />
+          {error && <p className="text-sm text-rose-600">{error}</p>}
+          <button className="app-button w-full disabled:cursor-not-allowed disabled:opacity-60" disabled={submitting}>
+            {submitting ? t("auth.creatingAccount") : t("nav.register")}
+          </button>
+        </form>
       </div>
     </div>
   );

@@ -10,7 +10,11 @@ const schema = z.object({
   REDIS_URL: z.string().optional(),
   JWT_SECRET: z.string().min(24).default("dev-secret-change-me-for-production"),
   ACCESS_TOKEN_TTL_MIN: z.coerce.number().int().min(1).default(15),
-  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).default(30),
+  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).default(90),
+  // Reserved for a future opt-in "stay signed in on this device" toggle; until that ships,
+  // every login is persistent and REFRESH_TOKEN_TTL_DAYS alone governs session lifetime.
+  SESSION_REMEMBER_ME_DAYS: z.coerce.number().int().min(1).default(90),
+  REFRESH_ROTATION_ENABLED: z.coerce.boolean().default(true),
   COOKIE_DOMAIN: z.string().optional(),
   FRONTEND_URL: z.string().default("http://localhost:3000"),
   PLATFORM_FEE_BPS: z.coerce.number().int().min(500).max(1500).default(1000),

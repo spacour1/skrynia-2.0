@@ -28,14 +28,14 @@ import { showAppToast } from "../../../lib/toast-events";
 
 const HIDDEN_METADATA_KEYS = new Set(["catalogKind", "shortDescription", "region", "rank"]);
 
-const productTypeLabels: Record<string, string> = {
-  account: "Аккаунт",
-  key: "Ключ / код",
-  topup: "Пополнение",
-  boosting: "Бустинг",
-  service: "Услуга",
-  item: "Предмет",
-  currency: "Валюта"
+const PRODUCT_TYPE_KEYS: Record<string, string> = {
+  account: "product.type.account",
+  key: "product.type.key",
+  topup: "product.type.topup",
+  boosting: "product.type.boosting",
+  service: "product.type.service",
+  item: "product.type.item",
+  currency: "product.type.currency"
 };
 
 type ProductReview = {
@@ -71,7 +71,7 @@ export function ProductPageClient({ id }: { id: string }) {
   const blockSeller = useMutation({
     mutationFn: () => apiFetch(`/users/${productItem!.sellerId}/block`, { method: "POST" }),
     onSuccess: () => {
-      showAppToast({ title: "Пользователь заблокирован" });
+      showAppToast({ title: t("product.userBlocked") });
       queryClient.invalidateQueries({ queryKey: ["blocked-users"] });
     }
   });
@@ -117,8 +117,8 @@ export function ProductPageClient({ id }: { id: string }) {
     item.platform,
     item.server,
     typeof metadata.region === "string" ? metadata.region : null,
-    item.deliveryType === "instant" ? "Мгновенная доставка" : "Ручная доставка",
-    productTypeLabels[item.productType ?? ""] ?? item.productType
+    item.deliveryType === "instant" ? t("seller.instantDelivery") : t("seller.manualDelivery"),
+    productTypeLabel(t, item.productType)
   ].filter(Boolean) as string[];
 
   return (
@@ -134,8 +134,8 @@ export function ProductPageClient({ id }: { id: string }) {
               <p className="mt-3 max-w-3xl text-sm leading-6 text-muted">{shortText(item)}</p>
 
               <div className="mt-5 flex flex-wrap gap-2 text-xs font-bold">
-                {item.isHot ? <Pill className="bg-action text-stone-950">Хит продаж</Pill> : null}
-                {item.isRecommended ? <Pill className="bg-brand/10 text-brand">Рекомендовано SKRYNIA</Pill> : null}
+                {item.isHot ? <Pill className="bg-action text-stone-950">{t("product.hotBadge")}</Pill> : null}
+                {item.isRecommended ? <Pill className="bg-brand/10 text-brand">{t("product.recommendedBadge")}</Pill> : null}
                 {discount ? (
                   <Pill className="bg-rose-500 text-white">
                     <BadgePercent className="h-3.5 w-3.5" />-{discount}%
@@ -144,33 +144,33 @@ export function ProductPageClient({ id }: { id: string }) {
                 {item.deliveryType === "instant" ? (
                   <Pill className="bg-emerald-500/10 text-emerald-400">
                     <Timer className="h-3.5 w-3.5" />
-                    Мгновенно
+                    {t("product.instant")}
                   </Pill>
                 ) : null}
               </div>
             </div>
 
             <div className="border-t border-line bg-panel/40 p-5 lg:border-l lg:border-t-0">
-              <p className="text-sm text-muted">Цена лота</p>
+              <p className="text-sm text-muted">{t("product.lotPrice")}</p>
               {item.oldPriceCents ? <p className="mt-2 text-sm font-semibold text-muted line-through">{money(item.oldPriceCents, item.currency)}</p> : null}
               <p className="mt-1 text-3xl font-black text-brand">{money(item.priceCents, item.currency)}</p>
               <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-                <MiniFact icon={PackageCheck} label="В наличии" value={`${item.stock} шт.`} />
-                <MiniFact icon={Truck} label="Доставка" value={item.deliveryType === "instant" ? "Сразу" : "Ручная"} />
+                <MiniFact icon={PackageCheck} label={t("product.inStock")} value={`${item.stock} ${t("product.unitsShort")}`} />
+                <MiniFact icon={Truck} label={t("product.delivery")} value={item.deliveryType === "instant" ? t("product.instant") : t("product.deliveryManualShort")} />
               </div>
               {isOwn ? null : item.stock < 1 ? (
-                <p className="mt-5 rounded-lg bg-panel/35 p-3 text-center text-sm text-muted">Лот распродан</p>
+                <p className="mt-5 rounded-lg bg-panel/35 p-3 text-center text-sm text-muted">{t("product.soldOut")}</p>
               ) : user ? (
                 <div className="mt-5 grid gap-2">
                   <button className="app-button-action w-full py-3" disabled={buySecurely.isPending} onClick={() => buySecurely.mutate()}>
                     <CreditCard className="h-5 w-5" />
-                    {buySecurely.isPending ? "Создаём заказ..." : "Купить безопасно"}
+                    {buySecurely.isPending ? t("product.buying") : t("product.buySecurely")}
                   </button>
                 </div>
               ) : (
                 <button className="app-button-action mt-5 w-full py-3" onClick={() => router.push("/login")}>
                   <CreditCard className="h-5 w-5" />
-                  Войти и купить
+                  {t("product.loginAndBuy")}
                 </button>
               )}
               {buyError ? (
@@ -192,8 +192,8 @@ export function ProductPageClient({ id }: { id: string }) {
               <Tag className="h-5 w-5" />
             </span>
             <div>
-              <h2 className="text-xl font-black text-ink">Описание лота</h2>
-              <p className="text-sm text-muted">Основные детали, которые стоит проверить перед покупкой.</p>
+              <h2 className="text-xl font-black text-ink">{t("product.descriptionTitle")}</h2>
+              <p className="text-sm text-muted">{t("product.descriptionSubtitle")}</p>
             </div>
           </div>
           <div className="mt-5 rounded-lg border border-line bg-panel/35 p-4">
@@ -203,24 +203,24 @@ export function ProductPageClient({ id }: { id: string }) {
 
         <section className="grid gap-5 lg:grid-cols-[1fr_1fr]">
           <div className="app-card p-5">
-            <h2 className="text-lg font-black text-ink">Характеристики</h2>
+            <h2 className="text-lg font-black text-ink">{t("product.specsTitle")}</h2>
             <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-              <Spec label="Игра" value={item.gameName} />
-              <Spec label="Раздел" value={item.sectionName ?? item.categoryName} />
-              <Spec label="Тип товара" value={productTypeLabels[item.productType ?? ""] ?? item.productType} />
-              <Spec label="Сервер" value={item.server} />
-              <Spec label="Платформа" value={item.platform} />
-              <Spec label="Регион" value={typeof metadata.region === "string" ? metadata.region : undefined} />
-              <Spec label="Ранг / уровень" value={typeof metadata.rank === "string" ? metadata.rank : undefined} />
+              <Spec label={t("product.specGame")} value={item.gameName} />
+              <Spec label={t("product.specSection")} value={item.sectionName ?? item.categoryName} />
+              <Spec label={t("product.specType")} value={productTypeLabel(t, item.productType)} />
+              <Spec label={t("product.specServer")} value={item.server} />
+              <Spec label={t("product.specPlatform")} value={item.platform} />
+              <Spec label={t("product.specRegion")} value={typeof metadata.region === "string" ? metadata.region : undefined} />
+              <Spec label={t("product.specRank")} value={typeof metadata.rank === "string" ? metadata.rank : undefined} />
               {extraSpecs.map(([key, value]) => (
                 <Spec key={key} label={fieldLabel(key)} value={formatFieldValue(key, value)} />
               ))}
-              <Spec label="Продано" value={String(item.salesCount ?? 0)} />
+              <Spec label={t("product.specSold")} value={String(item.salesCount ?? 0)} />
             </dl>
           </div>
 
           <div className="app-card p-5">
-            <h2 className="text-lg font-black text-ink">Теги</h2>
+            <h2 className="text-lg font-black text-ink">{t("product.tagsTitle")}</h2>
             <div className="mt-4 flex flex-wrap gap-2">
               {tags.map((tag) => (
                 <span key={tag} className="rounded-full border border-line bg-panel px-3 py-1.5 text-sm font-semibold text-muted">
@@ -234,18 +234,18 @@ export function ProductPageClient({ id }: { id: string }) {
 
       <aside className="space-y-4 xl:sticky xl:top-28 xl:self-start">
         <section className="rounded-xl border border-line bg-card p-4">
-          <p className="text-sm text-muted">Продавец</p>
+          <p className="text-sm text-muted">{t("product.sellerLabel")}</p>
           <Link className="mt-3 flex items-center gap-3 rounded-xl bg-panel/45 p-3 transition hover:bg-brand/10" href={`/sellers/${item.sellerId}`}>
             <span className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-brand/10 text-xl font-black text-brand">{item.sellerDisplayName.slice(0, 1).toUpperCase()}</span>
             <span className="min-w-0">
               <span className="block truncate font-black text-ink">{item.sellerDisplayName}</span>
               <span className="mt-1 flex items-center gap-1 text-sm text-muted">
                 <Star className="h-4 w-4 fill-action text-action" />
-                {Number(item.sellerRating ?? 0).toFixed(1)} / {item.sellerReviewCount ?? 0} отзывов
+                {Number(item.sellerRating ?? 0).toFixed(1)} / {item.sellerReviewCount ?? 0} {t("product.reviews")}
               </span>
               <span className="mt-1 flex items-center gap-1 text-xs font-bold text-muted">
                 <span className={`h-2.5 w-2.5 rounded-full ${item.sellerOnline ? "bg-emerald-400 shadow-[0_0_0_4px_rgba(52,211,153,0.16)]" : "bg-muted"}`} />
-                {item.sellerOnline ? "Онлайн" : "Не в сети"}
+                {item.sellerOnline ? t("product.online") : t("product.offline")}
               </span>
             </span>
           </Link>
@@ -256,16 +256,16 @@ export function ProductPageClient({ id }: { id: string }) {
                 className="inline-flex items-center gap-1 hover:text-ink"
                 onClick={() => {
                   if (isBlocked) return;
-                  if (window.confirm("Заблокировать пользователя? Он не сможет писать вам в личные сообщения.")) blockSeller.mutate();
+                  if (window.confirm(t("product.blockUserConfirm"))) blockSeller.mutate();
                 }}
                 disabled={isBlocked || blockSeller.isPending}
               >
                 <ShieldOff className="h-3.5 w-3.5" />
-                {isBlocked ? "Пользователь заблокирован" : "Заблокировать пользователя"}
+                {isBlocked ? t("product.userBlocked") : t("product.blockUser")}
               </button>
               <button className="inline-flex items-center gap-1 hover:text-ink" onClick={() => setReportOpen(true)}>
                 <Flag className="h-3.5 w-3.5" />
-                Пожаловаться
+                {t("product.report")}
               </button>
             </div>
           ) : null}
@@ -277,8 +277,8 @@ export function ProductPageClient({ id }: { id: string }) {
                 <MessageCircle className="h-5 w-5" />
               </span>
               <div>
-                <p className="font-black text-ink">Чат с продавцом</p>
-                <p className="text-xs text-muted">Уточните детали по этому лоту.</p>
+                <p className="font-black text-ink">{t("product.chatWithSeller")}</p>
+                <p className="text-xs text-muted">{t("product.chatSubtitle")}</p>
               </div>
             </div>
             {startChat.data?.conversationId ? (
@@ -286,21 +286,21 @@ export function ProductPageClient({ id }: { id: string }) {
                 <ChatPanel
                   conversationId={startChat.data.conversationId}
                   compact
-                  disabledNotice={isBlocked ? "Вы заблокировали пользователя. Он не сможет писать вам в личные сообщения." : undefined}
+                  disabledNotice={isBlocked ? t("product.blockedChatNotice") : undefined}
                 />
               </div>
             ) : startChat.isPending ? (
               <div className="mt-3 grid min-h-[130px] place-items-center rounded-lg bg-panel/35 text-sm text-muted">
-                Открываем мини-чат...
+                {t("product.openingChat")}
               </div>
             ) : !user ? (
               <button className="app-button-secondary mt-3 w-full py-3" onClick={() => router.push("/login")}>
                 <MessageCircle className="h-5 w-5" />
-                Войти и написать продавцу
+                {t("product.loginAndMessage")}
               </button>
             ) : isOwn ? (
               <div className="mt-3 rounded-lg bg-panel/35 p-3 text-sm text-muted">
-                Это ваш лот. Покупатели смогут написать вам со страницы товара.
+                {t("product.ownListingChatNotice")}
               </div>
             ) : (
               <button
@@ -308,7 +308,7 @@ export function ProductPageClient({ id }: { id: string }) {
                 onClick={() => startChat.mutate()}
               >
                 <MessageCircle className="h-5 w-5" />
-                Написать продавцу
+                {t("product.messageSeller")}
               </button>
             )}
           {startChat.error ? (
@@ -325,8 +325,8 @@ export function ProductPageClient({ id }: { id: string }) {
         <section className="app-card p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="font-black text-ink">Отзывы о продавце</h2>
-              <p className="mt-1 text-xs text-muted">Последние оценки после завершенных сделок.</p>
+              <h2 className="font-black text-ink">{t("product.sellerReviewsTitle")}</h2>
+              <p className="mt-1 text-xs text-muted">{t("product.sellerReviewsSubtitle")}</p>
             </div>
             <span className="inline-flex items-center gap-1 rounded-full bg-panel px-3 py-1 text-xs font-bold text-muted">
               <Star className="h-3.5 w-3.5 fill-action text-action" />
@@ -339,7 +339,7 @@ export function ProductPageClient({ id }: { id: string }) {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-black text-ink">{review.buyerDisplayName}</p>
-                    <p className="mt-1 truncate text-xs text-muted">{review.productTitle ?? "Заказ"}</p>
+                    <p className="mt-1 truncate text-xs text-muted">{review.productTitle ?? t("product.orderFallback")}</p>
                   </div>
                   <span className="inline-flex items-center gap-1 text-sm font-black text-brand">
                     <Star className="h-4 w-4 fill-action text-action" />
@@ -349,7 +349,7 @@ export function ProductPageClient({ id }: { id: string }) {
                 {review.comment ? <p className="mt-2 line-clamp-3 text-sm leading-6 text-muted">{review.comment}</p> : null}
               </article>
             ))}
-            {!reviews.length ? <p className="rounded-lg border border-line bg-panel/35 p-3 text-sm text-muted">У продавца пока нет отзывов.</p> : null}
+            {!reviews.length ? <p className="rounded-lg border border-line bg-panel/35 p-3 text-sm text-muted">{t("product.noSellerReviews")}</p> : null}
           </div>
         </section>
 
@@ -381,6 +381,12 @@ function Spec({ label, value }: { label: string; value?: string | null }) {
       <dd className="mt-1 font-black text-ink">{value || "-"}</dd>
     </div>
   );
+}
+
+function productTypeLabel(t: (key: string) => string, productType?: string | null) {
+  if (!productType) return undefined;
+  const key = PRODUCT_TYPE_KEYS[productType];
+  return key ? t(key) : productType;
 }
 
 function shortText(item: Product) {

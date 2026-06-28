@@ -518,6 +518,7 @@ function MarketProductCard({
   onToggleLike: () => void;
 }) {
   const router = useRouter();
+  const { t } = useI18n();
   const visual = productVisuals[index % productVisuals.length];
   const imageUrl = firstProductMedia(product);
   const discount =
@@ -542,7 +543,7 @@ function MarketProductCard({
         {imageUrl ? <img className="absolute inset-0 h-full w-full object-cover" src={imageUrl} alt={product.title} /> : null}
         {imageUrl ? <div className="absolute inset-0 bg-black/25" /> : null}
         <div className="absolute left-3 top-3 flex max-w-[75%] flex-wrap gap-2">
-          {product.isHot ? <span className="rounded-full bg-brand px-2 py-1 text-xs font-bold text-white dark:text-stone-950">ХИТ</span> : null}
+          {product.isHot ? <span className="rounded-full bg-brand px-2 py-1 text-xs font-bold text-white dark:text-stone-950">{t("nav.hot")}</span> : null}
           {product.isRecommended ? <span className="rounded-full bg-white/90 px-2 py-1 text-xs font-bold text-slate-800">SKRYNIA</span> : null}
           {discount ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-rose-500 px-2 py-1 text-xs font-bold text-white">
@@ -550,7 +551,7 @@ function MarketProductCard({
             </span>
           ) : null}
           {!product.isHot && !product.isRecommended && !discount ? (
-            <span className="rounded-full bg-brand px-2 py-1 text-xs font-bold text-white dark:text-stone-950">TOP</span>
+            <span className="rounded-full bg-brand px-2 py-1 text-xs font-bold text-white dark:text-stone-950">{t("product.top")}</span>
           ) : null}
         </div>
         <button
@@ -562,7 +563,7 @@ function MarketProductCard({
             event.stopPropagation();
             onToggleLike();
           }}
-          aria-label={liked ? "Убрать из избранного" : "Добавить в избранное"}
+          aria-label={liked ? t("product.removeFavorite") : t("product.addFavorite")}
         >
           <Heart className={`h-4 w-4 ${liked ? "fill-current" : ""}`} />
         </button>
@@ -580,7 +581,7 @@ function MarketProductCard({
         </Link>
         <p className="mt-1 flex items-center gap-1 text-xs font-bold text-muted">
           <span className={`h-2.5 w-2.5 rounded-full ${product.sellerOnline ? "bg-emerald-400 shadow-[0_0_0_4px_rgba(52,211,153,0.16)]" : "bg-muted"}`} />
-          {product.sellerOnline ? "Онлайн" : "Не в сети"}
+          {product.sellerOnline ? t("product.online") : t("product.offline")}
         </p>
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
           {product.gameName ? (
@@ -593,7 +594,7 @@ function MarketProductCard({
           {product.deliveryType === "instant" ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 font-bold text-emerald-500">
               <Timer className="h-3 w-3" />
-              моментально
+              {t("product.instant")}
             </span>
           ) : null}
         </div>

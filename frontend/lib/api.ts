@@ -268,16 +268,90 @@ function rawFetch(path: string, options: RequestInit) {
   return fetch(`${API_URL}${path}`, { ...options, headers, credentials: "include" });
 }
 
-let refreshInFlight: Promise<boolean> | null = null;
+// Cross-tab coordination: cookies (and therefore the session) are shared by every tab on
+// this origin, so two tabs racing their own /auth/refresh calls around the same time is a
+// real scenario (e.g. both notice a 401 within the same second). Without coordination, the
+// second tab's call redeems the refresh token tab A already rotated away, gets rejected,
+// and clears cookies tab A just set - a spurious logout caused purely by the race, not by
+// anything actually being wrong with the session.
+const AUTH_SYNC_CHANNEL = "auth-session-sync";
+const REFRESH_LOCK_NAME = "auth-refresh-lock";
+const RECENT_REFRESH_KEY = "auth_last_refresh_at";
+const RECENT_REFRESH_WINDOW_MS = 3000;
 
-function refreshSession(): Promise<boolean> {
+let authChannel: BroadcastChannel | null = null;
+function getAuthChannel(): BroadcastChannel | null {
+  if (typeof BroadcastChannel === "undefined") return null;
+  if (!authChannel) authChannel = new BroadcastChannel(AUTH_SYNC_CHANNEL);
+  return authChannel;
+}
+
+/** Tells every other open tab that the session just ended (explicit logout or a refresh that was genuinely rejected), so they drop their cached user instead of finding out the hard way on their next request. */
+export function broadcastSessionEnded() {
+  getAuthChannel()?.postMessage({ type: "session-ended" });
+}
+
+export function onSessionEnded(handler: () => void): () => void {
+  const channel = getAuthChannel();
+  if (!channel) return () => undefined;
+  const listener = (event: MessageEvent) => {
+    if ((event.data as { type?: string } | undefined)?.type === "session-ended") handler();
+  };
+  channel.addEventListener("message", listener);
+  return () => channel.removeEventListener("message", listener);
+}
+
+function recentlyRefreshedElsewhere() {
+  if (typeof window === "undefined") return false;
+  const last = Number(window.localStorage.getItem(RECENT_REFRESH_KEY) ?? 0);
+  return Date.now() - last < RECENT_REFRESH_WINDOW_MS;
+}
+
+/** Fired on a successful silent refresh, so long-lived connections (the chat WebSocket) that don't go through apiFetch can notice their access-token cookie just changed and reconnect proactively instead of waiting to be dropped. */
+export const AUTH_REFRESHED_EVENT = "auth-refreshed";
+
+function markRefreshed() {
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(RECENT_REFRESH_KEY, String(Date.now()));
+    window.dispatchEvent(new CustomEvent(AUTH_REFRESHED_EVENT));
+  }
+}
+
+type RefreshOutcome = "ok" | "invalid" | "retry-later";
+
+async function performRefresh(): Promise<RefreshOutcome> {
+  // Another tab may have refreshed (and rotated the cookie) just before this one acquired
+  // the lock - trust that instead of redeeming the now-already-rotated token ourselves.
+  if (recentlyRefreshedElsewhere()) return "ok";
+  try {
+    const response = await rawFetch("/auth/refresh", { method: "POST" });
+    if (response.ok) {
+      markRefreshed();
+      return "ok";
+    }
+    // 401/403 means the refresh token itself was rejected (expired, revoked, banned) -
+    // that's a real logout. Anything else (503 while Redis is unreachable, a network
+    // blip, a rate limit) is not: the session may still be perfectly valid.
+    return response.status === 401 || response.status === 403 ? "invalid" : "retry-later";
+  } catch {
+    return "retry-later";
+  }
+}
+
+async function runExclusiveRefresh(): Promise<RefreshOutcome> {
+  if (typeof navigator !== "undefined" && "locks" in navigator) {
+    return await navigator.locks.request(REFRESH_LOCK_NAME, performRefresh);
+  }
+  return performRefresh();
+}
+
+let refreshInFlight: Promise<RefreshOutcome> | null = null;
+
+function refreshSession(): Promise<RefreshOutcome> {
   if (!refreshInFlight) {
-    refreshInFlight = rawFetch("/auth/refresh", { method: "POST" })
-      .then((response) => response.ok)
-      .catch(() => false)
-      .finally(() => {
-        refreshInFlight = null;
-      });
+    refreshInFlight = runExclusiveRefresh().finally(() => {
+      refreshInFlight = null;
+    });
   }
   return refreshInFlight;
 }
@@ -289,11 +363,16 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, isRet
     // Only a previously-established session (csrf cookie present) is worth refreshing;
     // an anonymous 401 (e.g. /auth/me for a logged-out visitor) should just fail quietly.
     if (response.status === 401 && !isRetry && path !== "/auth/refresh" && readCookie("csrf_token")) {
-      const refreshed = await refreshSession();
-      if (refreshed) return apiFetch<T>(path, options, true);
-      if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-        window.location.assign("/login");
+      const outcome = await refreshSession();
+      if (outcome === "ok") return apiFetch<T>(path, options, true);
+      if (outcome === "invalid") {
+        broadcastSessionEnded();
+        if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+          window.location.assign("/login");
+        }
       }
+      // "retry-later": a transient backend hiccup, not a real logout - fall through and
+      // surface this one request's failure without redirecting anywhere.
     }
 
     const payload = await response.json().catch(() => ({}));

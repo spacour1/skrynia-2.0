@@ -4,6 +4,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { env } from "../../config/env.js";
 import { pool } from "../../db/pool.js";
 import { getRedis } from "../../common/redis.js";
+import { logger } from "../../common/logger.js";
 import { ACCESS_COOKIE } from "../../common/cookies.js";
 import { ApiError } from "../../common/errors.js";
 import { sendMessage } from "./chat.service.js";
@@ -33,7 +34,9 @@ type JwtPayload = {
 
 const clientsByUser = new Map<string, Set<Client>>();
 const clientsByConversation = new Map<string, Set<Client>>();
-const clientsByJti = new Map<string, Client>();
+// One jti can have several live connections (one per browser tab sharing the same cookies),
+// so this must track a set, not a single client - see disconnectSession/leaveAll below.
+const clientsByJti = new Map<string, Set<Client>>();
 
 async function authenticateSocket(token: string) {
   const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
@@ -41,8 +44,16 @@ async function authenticateSocket(token: string) {
 
   const redis = getRedis();
   if (redis) {
-    const exists = await redis.exists(`session:${payload.jti}`);
-    if (!exists) throw new Error("Session expired");
+    try {
+      const exists = await redis.exists(`session:${payload.jti}`);
+      if (!exists) throw new Error("Session expired");
+    } catch (error) {
+      if (error instanceof Error && error.message === "Session expired") throw error;
+      // Redis being briefly unreachable shouldn't refuse every WS connection in the
+      // building - fall back to trusting the JWT's own signature/expiry, same as the
+      // HTTP authenticate() middleware.
+      logger.warn({ error, jti: payload.jti }, "ws_session_revocation_check_failed_redis_unavailable");
+    }
   }
 
   const result = await pool.query<{ id: string; isBanned: boolean; emailVerified: boolean }>(
@@ -91,15 +102,22 @@ function leaveAll(client: Client) {
       }
     }
   }
-  if (client.jti) clientsByJti.delete(client.jti);
+  if (client.jti) {
+    const sameSession = clientsByJti.get(client.jti);
+    if (sameSession) {
+      sameSession.delete(client);
+      if (sameSession.size === 0) clientsByJti.delete(client.jti);
+    }
+  }
   for (const room of client.rooms ?? []) {
     clientsByConversation.get(room)?.delete(client);
   }
 }
 
 export function disconnectSession(jti: string) {
-  const client = clientsByJti.get(jti);
-  if (client) client.close(1008, "Session revoked");
+  const clients = clientsByJti.get(jti);
+  if (!clients) return;
+  for (const client of Array.from(clients)) client.close(1008, "Session revoked");
 }
 
 export function disconnectUser(userId: string) {
@@ -154,7 +172,9 @@ export function attachWebSocketServer(server: http.Server) {
       client.jti = jti;
       client.emailVerified = emailVerified;
       client.rooms = new Set();
-      clientsByJti.set(jti, client);
+      const sameSession = clientsByJti.get(jti) ?? new Set<Client>();
+      sameSession.add(client);
+      clientsByJti.set(jti, sameSession);
 
       const hadClients = (clientsByUser.get(client.userId)?.size ?? 0) > 0;
       const userClients = clientsByUser.get(client.userId) ?? new Set<Client>();

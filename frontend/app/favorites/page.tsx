@@ -9,6 +9,7 @@ import { RequireAuth } from "../../components/RequireAuth";
 import { apiFetch, money, type Product } from "../../lib/api";
 import { firstProductMedia } from "../../lib/product-media";
 import { showAppToast } from "../../lib/toast-events";
+import { useI18n } from "../../lib/i18n";
 
 export default function FavoritesPage() {
   return (
@@ -109,6 +110,7 @@ function FavoriteOfferRow({
   onRemove: () => void;
 }) {
   const router = useRouter();
+  const { t } = useI18n();
   const imageUrl = firstProductMedia(product);
   const discount =
     product.oldPriceCents && Number(product.oldPriceCents) > Number(product.priceCents)
@@ -145,7 +147,7 @@ function FavoriteOfferRow({
           {product.deliveryType === "instant" ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-emerald-500">
               <Timer className="h-3 w-3" />
-              Моментально
+              {t("product.instant")}
             </span>
           ) : null}
           {discount ? (
@@ -182,7 +184,7 @@ function FavoriteOfferRow({
         <p className="text-xl font-black text-ink">{money(Number(product.priceCents), product.currency)}</p>
         <p className="mt-1 inline-flex items-center gap-1 text-xs font-bold text-muted">
           <span className={`h-2.5 w-2.5 rounded-full ${product.sellerOnline ? "bg-emerald-400 shadow-[0_0_0_4px_rgba(52,211,153,0.16)]" : "bg-muted"}`} />
-          {product.sellerOnline ? "Онлайн" : "Не в сети"}
+          {product.sellerOnline ? t("product.online") : t("product.offline")}
         </p>
       </div>
 

@@ -25,6 +25,14 @@ export function badRequest(message = "Invalid request") {
   return new ApiError(400, message, "bad_request");
 }
 
+export function unauthorized(message = "Unauthorized") {
+  return new ApiError(401, message, "unauthorized");
+}
+
+export function serviceUnavailable(message = "Service temporarily unavailable") {
+  return new ApiError(503, message, "service_unavailable");
+}
+
 export function asyncHandler(
   handler: (req: any, res: Response, next: NextFunction) => Promise<unknown>
 ): RequestHandler {

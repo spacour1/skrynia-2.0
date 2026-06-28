@@ -3,7 +3,7 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Flag, FileText, ImageIcon, Loader2, Paperclip, Send, X } from "lucide-react";
-import { apiFetch, WS_URL } from "../lib/api";
+import { apiFetch, ApiError, AUTH_REFRESHED_EVENT, WS_URL } from "../lib/api";
 import { useAuth } from "../lib/auth-store";
 import { EmailNotVerifiedNotice } from "./EmailNotVerifiedNotice";
 import { ReportModal } from "./ReportModal";
@@ -56,33 +56,73 @@ export function ChatPanel({
 
   useEffect(() => {
     if (!user || !conversationId) return;
-    // The access token lives in an httpOnly cookie, so the browser authenticates the
-    // WS handshake automatically — no token needs to be readable by frontend JS.
-    const ws = new WebSocket(WS_URL);
-    socket.current = ws;
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
 
-    ws.addEventListener("open", () => {
-      setConnected(true);
-      setError("");
-      setEmailBlocked(false);
-      ws.send(JSON.stringify({ type: "join_conversation", conversationId }));
-    });
-    ws.addEventListener("close", () => setConnected(false));
-    ws.addEventListener("message", (event) => {
-      const payload = JSON.parse(event.data);
-      if (payload.type === "message") {
-        setMessages((current) => (current.some((item) => item.id === payload.message.id) ? current : [...current, payload.message]));
-      }
-      if (payload.type === "error") {
-        if (payload.code === "email_not_verified") {
-          setEmailBlocked(true);
-        } else {
-          setError(payload.message ?? "Chat error");
+    function connect() {
+      // The access token lives in an httpOnly cookie, so the browser authenticates the
+      // WS handshake automatically — no token needs to be readable by frontend JS.
+      const ws = new WebSocket(WS_URL);
+      socket.current = ws;
+
+      ws.addEventListener("open", () => {
+        attempt = 0;
+        setConnected(true);
+        setError("");
+        setEmailBlocked(false);
+        ws.send(JSON.stringify({ type: "join_conversation", conversationId }));
+      });
+      ws.addEventListener("close", () => {
+        setConnected(false);
+        if (cancelled) return;
+        // The connection may have dropped because the access token expired mid-session.
+        // A WS handshake can't refresh itself, so make a cheap authenticated request first
+        // - apiFetch's own 401 handling silently refreshes it - before retrying the socket.
+        attempt += 1;
+        const delay = Math.min(1000 * 2 ** (attempt - 1), 10_000);
+        retryTimer = setTimeout(async () => {
+          if (cancelled) return;
+          try {
+            await apiFetch("/auth/me");
+          } catch (refreshError) {
+            if (refreshError instanceof ApiError && (refreshError.status === 401 || refreshError.status === 403)) {
+              return; // session is genuinely gone - no point reconnecting
+            }
+          }
+          if (!cancelled) connect();
+        }, delay);
+      });
+      ws.addEventListener("message", (event) => {
+        const payload = JSON.parse(event.data);
+        if (payload.type === "message") {
+          setMessages((current) => (current.some((item) => item.id === payload.message.id) ? current : [...current, payload.message]));
         }
-      }
-    });
+        if (payload.type === "error") {
+          if (payload.code === "email_not_verified") {
+            setEmailBlocked(true);
+          } else {
+            setError(payload.message ?? "Chat error");
+          }
+        }
+      });
+    }
 
-    return () => ws.close();
+    connect();
+
+    // A refresh triggered by some *other* request still means the cookie just rotated -
+    // reconnect now instead of waiting for this socket to eventually drop on its own.
+    const onRefreshed = () => {
+      if (!cancelled) socket.current?.close();
+    };
+    window.addEventListener(AUTH_REFRESHED_EVENT, onRefreshed);
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      window.removeEventListener(AUTH_REFRESHED_EVENT, onRefreshed);
+      socket.current?.close();
+    };
   }, [conversationId, user]);
 
   async function uploadAttachment(event: ChangeEvent<HTMLInputElement>) {

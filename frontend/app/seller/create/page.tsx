@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   Check,
   ChevronDown,
   ChevronRight,
@@ -312,6 +313,15 @@ function SellerCreateContent() {
                 {gameDetail.isLoading ? <p className="text-sm text-muted">Загружаем варианты...</p> : null}
               </div>
             )}
+            {selectedSection?.categoryRiskLevel === "high" ? (
+              <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>
+                  Эта категория повышенного риска (аккаунты, бустинг, подарочные карты). Указывайте только проверенные
+                  данные и не передавайте доступы вне чата заказа — такие лоты проходят более строгую модерацию.
+                </p>
+              </div>
+            ) : null}
           </section>
 
           <section className="space-y-3">

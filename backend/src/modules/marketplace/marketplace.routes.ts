@@ -56,7 +56,9 @@ router.get(
   asyncHandler(async (_req, res) => {
     const rows = await cacheGet("categories");
     if (rows) return res.json({ categories: rows });
-    const result = await pool.query(`select id, slug, name, description from categories order by name`);
+    const result = await pool.query(
+      `select id, slug, name, description, risk_level as "riskLevel" from categories order by name`
+    );
     await cacheSet("categories", result.rows, 60 * 10);
     res.json({ categories: result.rows });
   })
@@ -194,7 +196,7 @@ router.get(
     const sections = await pool.query(
       `select gs.id, gs.slug, gs.name, gs.description, gs.sort_order as "sortOrder",
               gs.schema, gs.product_type as "productType", c.slug as "categorySlug", c.name as "categoryName",
-              count(p.id)::int as "lotCount"
+              c.risk_level as "categoryRiskLevel", count(p.id)::int as "lotCount"
        from game_sections gs
        left join categories c on c.id = gs.category_id
        left join products p on p.section_id = gs.id and p.status = 'active'

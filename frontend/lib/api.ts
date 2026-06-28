@@ -25,6 +25,7 @@ export type Category = {
   slug: string;
   name: string;
   description?: string;
+  riskLevel?: "low" | "medium" | "high";
 };
 
 export type Game = {
@@ -47,6 +48,7 @@ export type GameSection = {
   lotCount?: number;
   schema?: Record<string, unknown>;
   productType?: Product["productType"];
+  categoryRiskLevel?: "low" | "medium" | "high";
 };
 
 export type Product = {

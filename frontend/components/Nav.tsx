@@ -197,7 +197,7 @@ export function Nav() {
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
             <input
               className="focus-ring h-12 w-full rounded-2xl border border-line bg-card px-11 text-sm shadow-soft placeholder:text-muted"
-              placeholder={language === "ru" ? "Search games or products..." : "Search games or products..."}
+              placeholder={t("nav.searchPlaceholder")}
               value={search}
               onChange={(event) => {
                 setSearch(event.target.value);
@@ -227,15 +227,15 @@ export function Nav() {
               onClick={() => router.push(user ? "/wallet" : "/login")}
             >
               <WalletCards className="h-4 w-4 text-brand" />
-              {user ? money(wallet.data?.wallet?.availableCents ?? 0, wallet.data?.wallet?.currency ?? "UAH", { preserveCurrency: true }) : "Balance"}
+              {user ? money(wallet.data?.wallet?.availableCents ?? 0, wallet.data?.wallet?.currency ?? "UAH", { preserveCurrency: true }) : t("nav.balance")}
             </button>
 
             <div className="relative shrink-0">
               <button
                 className="relative grid h-11 w-11 place-items-center rounded-xl border border-line bg-card text-ink shadow-soft transition hover:border-brand/60 hover:bg-panel"
                 onClick={() => (user ? setNotificationsOpen((current) => !current) : router.push("/login"))}
-                aria-label="Notifications"
-                title="Notifications"
+                aria-label={t("nav.notifications")}
+                title={t("nav.notifications")}
               >
                 <Bell className="h-5 w-5" />
                 {notifications.data?.unreadCount ? (
@@ -345,11 +345,12 @@ function SideNavButton({ icon: Icon, label, active, onClick }: { icon: LucideIco
 }
 
 function CatalogMegaMenu({ games, onGame }: { games: Game[]; onGame: (slug: string) => void }) {
+  const { t } = useI18n();
   const groups = [
-    { title: "Games", text: "Accounts, items, keys, top ups", items: games.slice(0, 10), live: true },
-    { title: "Mobile", text: "Mobile games and app services", items: games.filter((game) => /mobile|genshin|roblox|brawl|clash/i.test(game.name)).slice(0, 6), live: true },
-    { title: "Services", text: "Boosting, coaching, support", items: [] as Game[], live: false },
-    { title: "Software", text: "Keys, licenses, accounts", items: [] as Game[], live: false }
+    { title: t("catalogMenu.games"), text: t("catalogMenu.gamesText"), items: games.slice(0, 10), live: true },
+    { title: t("catalogMenu.mobile"), text: t("catalogMenu.mobileText"), items: games.filter((game) => /mobile|genshin|roblox|brawl|clash/i.test(game.name)).slice(0, 6), live: true },
+    { title: t("catalogMenu.services"), text: t("catalogMenu.servicesText"), items: [] as Game[], live: false },
+    { title: t("catalogMenu.software"), text: t("catalogMenu.softwareText"), items: [] as Game[], live: false }
   ];
   const [active, setActive] = useState(groups[0].title);
   const activeGroup = groups.find((group) => group.title === active) ?? groups[0];
@@ -389,7 +390,7 @@ function CatalogMegaMenu({ games, onGame }: { games: Game[]; onGame: (slug: stri
               ))
             ) : (
               <button className="rounded-lg border border-line bg-panel px-3 py-3 text-left text-sm font-bold text-muted" onClick={() => document.getElementById("game-catalog")?.scrollIntoView({ behavior: "smooth" })}>
-                Coming soon
+                {t("nav.comingSoon")}
               </button>
             )}
           </div>
@@ -412,22 +413,23 @@ function ProfileDropdown({
   onLanguage: () => void;
   onLogout: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="absolute right-0 top-[calc(100%+10px)] z-50 w-[300px] overflow-hidden rounded-2xl border border-line bg-card shadow-lift">
       <div className="grid gap-2 p-3">
-        <MenuButton icon={UserCircle} label="Dashboard" onClick={onDashboard} />
-        <MenuButton icon={Settings} label="Settings" onClick={onSettings} />
+        <MenuButton icon={UserCircle} label={t("nav.dashboard")} onClick={onDashboard} />
+        <MenuButton icon={Settings} label={t("nav.settings")} onClick={onSettings} />
         <button className="flex h-11 items-center justify-between rounded-xl px-3 text-sm font-bold text-muted transition hover:bg-panel hover:text-ink" type="button" onClick={onLanguage}>
           <span className="inline-flex items-center gap-3">
             <Languages className="h-5 w-5" />
-            Language
+            {t("nav.language")}
           </span>
           <span className="text-xs text-brand">{languageLabel}</span>
         </button>
         <CurrencySwitcher />
       </div>
       <div className="border-t border-line p-3">
-        <MenuButton icon={LogOut} label="Logout" onClick={onLogout} danger />
+        <MenuButton icon={LogOut} label={t("nav.logout")} onClick={onLogout} danger />
       </div>
     </div>
   );
@@ -459,29 +461,30 @@ function SearchSuggest({
   onProduct: (product: SuggestProduct) => void;
   onSearch: (query: string) => void;
 }) {
+  const { t } = useI18n();
   const hasResults = games.length || products.length;
 
   return (
     <div className="absolute left-0 right-0 top-[calc(100%+10px)] z-50 overflow-hidden rounded-2xl border border-line bg-card shadow-lift">
       <div className="border-b border-line bg-panel/50 px-4 py-3">
-        <p className="text-xs font-bold uppercase text-muted">Quick search</p>
+        <p className="text-xs font-bold uppercase text-muted">{t("nav.quickSearch")}</p>
         <button className="mt-1 text-left text-sm font-bold text-ink hover:text-brand" type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onSearch(query)}>
-          Search "{query}" in all listings
+          {t("nav.searchFor")} "{query}"
         </button>
       </div>
 
       <div className="max-h-[520px] overflow-y-auto p-2">
-        {loading ? <p className="px-3 py-4 text-sm text-muted">Searching...</p> : null}
-        {!loading && !hasResults ? <p className="px-3 py-4 text-sm text-muted">No close matches yet.</p> : null}
+        {loading ? <p className="px-3 py-4 text-sm text-muted">{t("nav.searching")}</p> : null}
+        {!loading && !hasResults ? <p className="px-3 py-4 text-sm text-muted">{t("nav.noMatches")}</p> : null}
 
         {games.length ? (
-          <SuggestSection title="Games and services">
+          <SuggestSection title={t("nav.gamesAndServices")}>
             {games.map((game) => (
               <button key={game.id} className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition hover:bg-panel" type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onGame(game)}>
                 <GameIcon name={game.name} slug={game.slug} className="h-10 w-10 rounded-xl" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-black text-ink">{game.name}</span>
-                  <span className="block truncate text-xs text-muted">{game.publisher ?? "Game"} · {game.lotCount ?? 0} lots</span>
+                  <span className="block truncate text-xs text-muted">{game.publisher ?? t("nav.game")} · {game.lotCount ?? 0} {t("nav.lots")}</span>
                 </span>
                 <ChevronRight className="h-4 w-4 text-muted" />
               </button>
@@ -490,7 +493,7 @@ function SearchSuggest({
         ) : null}
 
         {products.length ? (
-          <SuggestSection title="Listings">
+          <SuggestSection title={t("nav.listings")}>
             {products.map((product) => {
               const image = firstProductMedia(product);
               return (
@@ -506,7 +509,7 @@ function SearchSuggest({
                   </span>
                   <span className="shrink-0 text-right">
                     <span className="block text-sm font-black text-brand">{money(product.priceCents, product.currency)}</span>
-                    {product.isHot ? <span className="text-xs font-bold text-action">Hot</span> : null}
+                    {product.isHot ? <span className="text-xs font-bold text-action">{t("nav.hot")}</span> : null}
                   </span>
                 </button>
               );
@@ -540,24 +543,25 @@ function NotificationDropdown({
   onOpen: (item: NotificationItem) => void;
   onReadAll: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="absolute right-0 top-[calc(100%+10px)] z-50 w-[360px] overflow-hidden rounded-2xl border border-line bg-card shadow-lift">
       <div className="flex items-center justify-between gap-3 border-b border-line bg-panel/55 px-4 py-3">
         <div>
-          <p className="font-black text-ink">Notifications</p>
-          <p className="text-xs text-muted">{unreadCount ? `${unreadCount} unread` : "All read"}</p>
+          <p className="font-black text-ink">{t("nav.notifications")}</p>
+          <p className="text-xs text-muted">{unreadCount ? `${unreadCount} ${t("nav.unread")}` : t("nav.allRead")}</p>
         </div>
         {unreadCount ? (
           <button className="text-xs font-bold text-brand hover:underline" type="button" onClick={onReadAll}>
-            Read all
+            {t("nav.readAll")}
           </button>
         ) : null}
       </div>
       <div className="max-h-[460px] overflow-y-auto p-2">
-        {loading ? <p className="px-3 py-4 text-sm text-muted">Loading notifications...</p> : null}
+        {loading ? <p className="px-3 py-4 text-sm text-muted">{t("nav.loadingNotifications")}</p> : null}
         {!loading && !items.length ? (
           <div className="grid min-h-[180px] place-items-center text-center">
-            <p className="max-w-[240px] text-sm leading-6 text-muted">No notifications yet. Orders, payments, delivery events, and disputes will appear here.</p>
+            <p className="max-w-[240px] text-sm leading-6 text-muted">{t("nav.noNotifications")}</p>
           </div>
         ) : null}
         {items.map((item) => (

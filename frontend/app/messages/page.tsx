@@ -10,12 +10,7 @@ import { RequireAuth } from "../../components/RequireAuth";
 import { ReportModal } from "../../components/ReportModal";
 import { apiFetch, money, type Conversation } from "../../lib/api";
 import { useAuth } from "../../lib/auth-store";
-
-const chatTabs = [
-  ["all", "All"],
-  ["active", "Active"],
-  ["finished", "Finished"]
-];
+import { useI18n } from "../../lib/i18n";
 
 const ACTIVE_ORDER_STATUSES = ["pending", "paid", "in_progress", "delivered", "disputed"];
 
@@ -29,6 +24,12 @@ export default function MessagesPage() {
 
 function MessagesContent() {
   const user = useAuth((state) => state.user);
+  const { t } = useI18n();
+  const chatTabs: Array<[string, string]> = [
+    ["all", t("messages.tabAll")],
+    ["active", t("messages.tabActive")],
+    ["finished", t("messages.tabFinished")]
+  ];
   const searchParams = useSearchParams();
   const [selectedConversationId, setSelectedConversationId] = useState(searchParams.get("conversation") ?? "");
   const [q, setQ] = useState("");
@@ -48,7 +49,7 @@ function MessagesContent() {
         !term ||
         title.includes(term) ||
         conversation.id.toLowerCase().includes(term) ||
-        participantName(conversation).toLowerCase().includes(term);
+        participantName(conversation, t("messages.participant")).toLowerCase().includes(term);
       const active = !conversation.orderStatus || ACTIVE_ORDER_STATUSES.includes(conversation.orderStatus);
       const matchesTab = tab === "all" || (tab === "active" && active) || (tab === "finished" && !active);
       return matchesSearch && matchesTab;
@@ -64,11 +65,11 @@ function MessagesContent() {
       <aside className="border-b border-line bg-card lg:border-b-0 lg:border-r">
         <div className="border-b border-line p-5">
           <div>
-            <h1 className="text-2xl font-black text-ink">Messages</h1>
+            <h1 className="text-2xl font-black text-ink">{t("messages.title")}</h1>
           </div>
           <div className="relative mt-5">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-            <input className="app-input h-12 w-full pl-10" value={q} onChange={(event) => setQ(event.target.value)} placeholder="Search order, product, or seller" />
+            <input className="app-input h-12 w-full pl-10" value={q} onChange={(event) => setQ(event.target.value)} placeholder={t("messages.searchPlaceholder")} />
           </div>
           <div className="mt-4 grid grid-cols-3 gap-2">
             {chatTabs.map(([value, label]) => (
@@ -99,7 +100,7 @@ function MessagesContent() {
                 <ParticipantAvatar conversation={conversation} index={index} size="md" />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center justify-between gap-3">
-                    <span className="truncate font-black text-ink">{participantName(conversation)}</span>
+                    <span className="truncate font-black text-ink">{participantName(conversation, t("messages.participant"))}</span>
                     <span className="flex items-center gap-2">
                       {conversation.unreadCount ? (
                         <span className="grid h-5 min-w-5 place-items-center rounded-full bg-brand px-1.5 text-[11px] font-black text-stone-950">
@@ -124,7 +125,7 @@ function MessagesContent() {
             <div className="grid min-h-[240px] place-items-center p-6 text-center">
               <div>
                 <MessageCircle className="mx-auto h-10 w-10 text-muted" />
-                <p className="mt-3 text-sm text-muted">No order chats found.</p>
+                <p className="mt-3 text-sm text-muted">{t("messages.noChats")}</p>
               </div>
             </div>
           ) : null}
@@ -138,17 +139,17 @@ function MessagesContent() {
               <div className="flex items-center justify-between gap-4">
                 <div className="flex min-w-0 items-center gap-4">
                   {selectedConversation.sellerId ? (
-                    <Link className="shrink-0 rounded-2xl focus:outline-none focus:ring-2 focus:ring-brand/60" href={`/sellers/${selectedConversation.sellerId}`} aria-label="Open seller profile">
+                    <Link className="shrink-0 rounded-2xl focus:outline-none focus:ring-2 focus:ring-brand/60" href={`/sellers/${selectedConversation.sellerId}`} aria-label={t("messages.openSellerProfile")}>
                       <ParticipantAvatar conversation={selectedConversation} index={0} size="lg" />
                     </Link>
                   ) : (
                     <ParticipantAvatar conversation={selectedConversation} index={0} size="lg" />
                   )}
                   <div className="min-w-0">
-                    <p className="truncate text-lg font-black text-ink">{selectedConversation.productTitle ?? "Сообщения"}</p>
+                    <p className="truncate text-lg font-black text-ink">{selectedConversation.productTitle ?? t("messages.title")}</p>
                     {selectedConversation.orderId ? (
                       <p className="mt-1 text-sm text-muted">
-                        Order #{selectedConversation.orderId.slice(0, 8)} ·{" "}
+                        {t("messages.order")} #{selectedConversation.orderId.slice(0, 8)} ·{" "}
                         {money(selectedConversation.amountCents ?? 0, selectedConversation.currency ?? "UAH", { preserveCurrency: true })}
                       </p>
                     ) : null}
@@ -160,11 +161,11 @@ function MessagesContent() {
                     onClick={() => setReportTargetUserId(otherParticipantId(selectedConversation, user?.id))}
                   >
                     <Flag className="h-4 w-4" />
-                    Пожаловаться
+                    {t("messages.report")}
                   </button>
                   {selectedConversation.orderId ? (
                     <Link className="app-button-secondary hidden h-10 px-3 text-sm sm:inline-flex" href={`/orders/${selectedConversation.orderId}`}>
-                      Open order
+                      {t("messages.openOrder")}
                       <ArrowUpRight className="h-4 w-4" />
                     </Link>
                   ) : null}
@@ -173,12 +174,12 @@ function MessagesContent() {
             </div>
             <ChatPanel
               conversationId={selected}
-              disabledNotice={selectedConversation.blocked ? "Вы заблокировали пользователя. Он не сможет писать вам в личные сообщения." : undefined}
+              disabledNotice={selectedConversation.blocked ? t("messages.blockedNotice") : undefined}
             />
           </div>
         ) : (
           <section className="grid min-h-[620px] place-items-center p-8 text-center text-muted">
-            Select an order to open its chat.
+            {t("messages.selectChat")}
           </section>
         )}
       </section>
@@ -210,8 +211,8 @@ function ParticipantAvatar({ conversation, index, size }: { conversation?: Conve
   );
 }
 
-function participantName(conversation?: Conversation) {
-  return conversation?.sellerDisplayName ?? conversation?.buyerDisplayName ?? "Participant";
+function participantName(conversation?: Conversation, fallback = "Participant") {
+  return conversation?.sellerDisplayName ?? conversation?.buyerDisplayName ?? fallback;
 }
 
 function avatarGradient(index: number) {

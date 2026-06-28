@@ -22,7 +22,7 @@ import {
 import { RequireAuth } from "../../../components/RequireAuth";
 import { GameIcon } from "../../../components/GameIcon";
 import { EmailNotVerifiedNotice } from "../../../components/EmailNotVerifiedNotice";
-import { apiFetch, isEmailNotVerifiedError, money, type Game, type GameSection, type Product } from "../../../lib/api";
+import { apiFetch, isEmailNotVerifiedError, money, type Game, type GameSection } from "../../../lib/api";
 import { useAuth } from "../../../lib/auth-store";
 import { BOOLEAN_FIELD_KEYS, fieldLabel } from "../../../lib/product-fields";
 
@@ -32,18 +32,6 @@ const catalogKinds = [
   { id: "services", title: "Сервисы", hint: "Пополнения и услуги" },
   { id: "software", title: "Программы", hint: "Ключи и лицензии" }
 ];
-
-function productTypeForSection(section?: GameSection): Product["productType"] {
-  if (!section) return "service";
-  const key = `${section.slug} ${section.name}`.toLowerCase();
-  if (/key|ключ/.test(key)) return "key";
-  if (/top.?up|пополнен/.test(key)) return "topup";
-  if (/boost|буст|mmr/.test(key)) return "boosting";
-  if (/account|аккаунт/.test(key)) return "account";
-  if (/currency|gold|points|v-bucks|валют/.test(key)) return "currency";
-  if (/item|skin|предмет|скин/.test(key)) return "item";
-  return "service";
-}
 
 function iconForSection(section: GameSection) {
   const key = `${section.slug} ${section.name}`.toLowerCase();
@@ -141,7 +129,9 @@ function SellerCreateContent() {
           currency: "UAH",
           stock: 1,
           deliveryType: autoDelivery ? "instant" : "manual",
-          productType: productTypeForSection(selectedSection),
+          // The server is authoritative on productType (derived from the section record);
+          // sending it here is just so the request body stays self-describing.
+          productType: selectedSection?.productType ?? "service",
           deliveryTemplate: autoDelivery ? "Автовыдача после оплаты. Данные будут отправлены в чат заказа." : null,
           metadata: { catalogKind: kind, ...params }
         })

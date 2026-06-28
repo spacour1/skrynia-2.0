@@ -193,7 +193,7 @@ router.get(
 
     const sections = await pool.query(
       `select gs.id, gs.slug, gs.name, gs.description, gs.sort_order as "sortOrder",
-              gs.schema, c.slug as "categorySlug", c.name as "categoryName",
+              gs.schema, gs.product_type as "productType", c.slug as "categorySlug", c.name as "categoryName",
               count(p.id)::int as "lotCount"
        from game_sections gs
        left join categories c on c.id = gs.category_id
@@ -491,14 +491,18 @@ async function replaceProductMedia(productId: string, urls: string[]) {
 }
 
 /**
- * The category a product belongs to must follow from its section, not from whatever
- * categoryId the client happened to send. When a sectionId is given, look up the section's
- * own game_id/category_id and use those, ignoring (and validating) any client-supplied values.
+ * The category — and product type — a product belongs to must follow from its section,
+ * not from whatever the client happened to send (the frontend used to guess productType
+ * from the section's name via regex; that guess can now disagree with the section's own
+ * record). When a sectionId is given, look up the section's own
+ * game_id/category_id/product_type and use those, ignoring (and validating) any
+ * client-supplied values.
  */
 async function resolveCategorization(input: { categoryId?: string | null; gameId?: string | null; sectionId?: string | null }) {
   if (input.sectionId) {
     const section = await pool.query(
-      `select id, game_id as "gameId", category_id as "categoryId" from game_sections where id = $1`,
+      `select id, game_id as "gameId", category_id as "categoryId", product_type as "productType"
+       from game_sections where id = $1`,
       [input.sectionId]
     );
     if (!section.rows[0]) throw notFound("Section not found");
@@ -508,11 +512,12 @@ async function resolveCategorization(input: { categoryId?: string | null; gameId
     return {
       categoryId: section.rows[0].categoryId as string,
       gameId: section.rows[0].gameId as string,
-      sectionId: section.rows[0].id as string
+      sectionId: section.rows[0].id as string,
+      productType: section.rows[0].productType as string
     };
   }
   if (!input.categoryId) throw badRequest("categoryId or sectionId is required");
-  return { categoryId: input.categoryId, gameId: input.gameId ?? null, sectionId: null };
+  return { categoryId: input.categoryId, gameId: input.gameId ?? null, sectionId: null, productType: null };
 }
 
 router.post(
@@ -541,7 +546,7 @@ router.post(
         input.currency.toUpperCase(),
         input.stock,
         input.deliveryType,
-        input.productType ?? "service",
+        categorization.productType ?? input.productType ?? "service",
         input.server ?? null,
         input.platform ?? null,
         input.deliveryTemplate ?? null,
@@ -570,7 +575,7 @@ router.patch(
     // otherwise leave category/game/section untouched rather than trusting a stray categoryId.
     const categorization = input.sectionId
       ? await resolveCategorization(input)
-      : { categoryId: input.categoryId, gameId: input.gameId, sectionId: undefined };
+      : { categoryId: input.categoryId, gameId: input.gameId, sectionId: undefined, productType: undefined };
 
     const priceCents = input.price === undefined ? undefined : moneyToCents(input.price);
     await pool.query(
@@ -604,7 +609,7 @@ router.patch(
         input.currency?.toUpperCase(),
         input.stock,
         input.deliveryType,
-        input.productType,
+        categorization.productType ?? input.productType,
         input.oldPrice === undefined ? undefined : input.oldPrice === null ? null : moneyToCents(input.oldPrice),
         input.server ?? undefined,
         input.platform ?? undefined,

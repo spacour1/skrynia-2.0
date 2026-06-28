@@ -46,6 +46,7 @@ export type GameSection = {
   categoryName?: string;
   lotCount?: number;
   schema?: Record<string, unknown>;
+  productType?: Product["productType"];
 };
 
 export type Product = {

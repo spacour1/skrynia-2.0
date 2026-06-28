@@ -123,6 +123,10 @@ export type Conversation = {
   amountCents?: number | null;
   currency?: string | null;
   lastMessageAt?: string | null;
+  lastMessageBody?: string | null;
+  unreadCount?: number;
+  blocked?: boolean;
+  canSendMessage?: boolean;
   createdAt?: string;
 };
 

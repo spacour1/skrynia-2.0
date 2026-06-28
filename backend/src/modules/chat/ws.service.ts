@@ -5,6 +5,8 @@ import { env } from "../../config/env.js";
 import { pool } from "../../db/pool.js";
 import { getRedis } from "../../common/redis.js";
 import { ACCESS_COOKIE } from "../../common/cookies.js";
+import { ApiError } from "../../common/errors.js";
+import { sendMessage } from "./chat.service.js";
 
 function readCookie(header: string | undefined, name: string): string | undefined {
   if (!header) return undefined;
@@ -68,34 +70,6 @@ async function canAccessConversation(conversationId: string, userId: string) {
     [conversationId, userId]
   );
   return Boolean(result.rows[0]);
-}
-
-async function saveMessage(input: { conversationId: string; senderId: string; body: string; attachmentUrl?: string }) {
-  const result = await pool.query(
-    `insert into messages(conversation_id, sender_id, body, attachment_url)
-     values ($1, $2, $3, $4)
-     returning id, conversation_id as "conversationId", sender_id as "senderId",
-               (select display_name from users where id = $2) as "senderDisplayName",
-               body, attachment_url as "attachmentUrl", created_at as "createdAt"`,
-    [input.conversationId, input.senderId, input.body, input.attachmentUrl ?? null]
-  );
-  return result.rows[0];
-}
-
-async function notifyMessageRecipient(input: { conversationId: string; senderId: string; body: string }) {
-  const conversation = await pool.query(`select buyer_id, seller_id from conversations where id = $1`, [input.conversationId]);
-  const row = conversation.rows[0] as { buyer_id: string; seller_id: string } | undefined;
-  if (!row) return;
-  const recipientId = row.buyer_id === input.senderId ? row.seller_id : row.buyer_id;
-  const sender = await pool.query(`select display_name from users where id = $1`, [input.senderId]);
-  const result = await pool.query(
-    `insert into notifications(user_id, type, title, body, conversation_id)
-     values ($1, 'message', 'Новое сообщение', $2, $3)
-     returning id, user_id as "userId", type, title, body, conversation_id as "conversationId",
-               read_at as "readAt", created_at as "createdAt"`,
-    [recipientId, `${sender.rows[0]?.display_name ?? "Участник"}: ${input.body.slice(0, 120)}`, input.conversationId]
-  );
-  notifyOrderEvent(recipientId, { type: "notification", notification: result.rows[0] });
 }
 
 function joinConversation(client: Client, conversationId: string) {
@@ -216,21 +190,22 @@ export function attachWebSocketServer(server: http.Server) {
               });
             }
             if (isSpam(client)) return sendJson(client, { type: "error", message: "Slow down" });
-            const body = (msg.body ?? "").trim();
-            if (!msg.conversationId || !body || body.length > 3000) {
+            if (!msg.conversationId) {
               return sendJson(client, { type: "error", message: "Invalid message" });
             }
-            if (!(await canAccessConversation(msg.conversationId, client.userId!))) {
-              return sendJson(client, { type: "error", message: "Cannot message this conversation" });
+            try {
+              const saved = await sendMessage({
+                conversationId: msg.conversationId,
+                senderId: client.userId!,
+                body: msg.body ?? "",
+                attachmentUrl: msg.attachmentUrl
+              });
+              broadcastConversation(msg.conversationId, { type: "message", message: saved });
+            } catch (sendError) {
+              const code = sendError instanceof ApiError ? sendError.code : undefined;
+              const message = sendError instanceof ApiError ? sendError.message : "Cannot message this conversation";
+              sendJson(client, { type: "error", code, message });
             }
-            const saved = await saveMessage({
-              conversationId: msg.conversationId,
-              senderId: client.userId!,
-              body,
-              attachmentUrl: msg.attachmentUrl
-            });
-            broadcastConversation(msg.conversationId, { type: "message", message: saved });
-            await notifyMessageRecipient({ conversationId: msg.conversationId, senderId: client.userId!, body });
           }
         } catch {
           sendJson(client, { type: "error", message: "Malformed websocket message" });

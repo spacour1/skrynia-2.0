@@ -4,10 +4,12 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, MessageCircle, Search } from "lucide-react";
+import { ArrowUpRight, Flag, MessageCircle, Search } from "lucide-react";
 import { ChatPanel } from "../../components/ChatPanel";
 import { RequireAuth } from "../../components/RequireAuth";
+import { ReportModal } from "../../components/ReportModal";
 import { apiFetch, money, type Conversation } from "../../lib/api";
+import { useAuth } from "../../lib/auth-store";
 
 const chatTabs = [
   ["all", "All"],
@@ -26,10 +28,12 @@ export default function MessagesPage() {
 }
 
 function MessagesContent() {
+  const user = useAuth((state) => state.user);
   const searchParams = useSearchParams();
   const [selectedConversationId, setSelectedConversationId] = useState(searchParams.get("conversation") ?? "");
   const [q, setQ] = useState("");
   const [tab, setTab] = useState("all");
+  const [reportTargetUserId, setReportTargetUserId] = useState<string | null>(null);
   const conversations = useQuery({
     queryKey: ["chat-conversations"],
     queryFn: () => apiFetch<{ conversations: Conversation[] }>("/chat/conversations")
@@ -96,9 +100,16 @@ function MessagesContent() {
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center justify-between gap-3">
                     <span className="truncate font-black text-ink">{participantName(conversation)}</span>
-                    <span className="text-xs text-muted">{formatTime(conversation.lastMessageAt ?? conversation.createdAt)}</span>
+                    <span className="flex items-center gap-2">
+                      {conversation.unreadCount ? (
+                        <span className="grid h-5 min-w-5 place-items-center rounded-full bg-brand px-1.5 text-[11px] font-black text-stone-950">
+                          {conversation.unreadCount}
+                        </span>
+                      ) : null}
+                      <span className="text-xs text-muted">{formatTime(conversation.lastMessageAt ?? conversation.createdAt)}</span>
+                    </span>
                   </span>
-                  <span className="mt-1 block truncate text-sm font-bold text-muted">{title}</span>
+                  <span className="mt-1 block truncate text-sm font-bold text-muted">{conversation.lastMessageBody || title}</span>
                   {conversation.orderStatus ? (
                     <span className="mt-2 flex items-center justify-between gap-2">
                       <span className="rounded-full bg-panel px-2 py-1 text-[11px] font-black uppercase text-muted">{conversation.orderStatus}</span>
@@ -143,15 +154,27 @@ function MessagesContent() {
                     ) : null}
                   </div>
                 </div>
-                {selectedConversation.orderId ? (
-                  <Link className="app-button-secondary hidden h-10 shrink-0 px-3 text-sm sm:inline-flex" href={`/orders/${selectedConversation.orderId}`}>
-                    Open order
-                    <ArrowUpRight className="h-4 w-4" />
-                  </Link>
-                ) : null}
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    className="app-button-secondary h-10 px-3 text-sm"
+                    onClick={() => setReportTargetUserId(otherParticipantId(selectedConversation, user?.id))}
+                  >
+                    <Flag className="h-4 w-4" />
+                    Пожаловаться
+                  </button>
+                  {selectedConversation.orderId ? (
+                    <Link className="app-button-secondary hidden h-10 px-3 text-sm sm:inline-flex" href={`/orders/${selectedConversation.orderId}`}>
+                      Open order
+                      <ArrowUpRight className="h-4 w-4" />
+                    </Link>
+                  ) : null}
+                </div>
               </div>
             </div>
-            <ChatPanel conversationId={selected} />
+            <ChatPanel
+              conversationId={selected}
+              disabledNotice={selectedConversation.blocked ? "Вы заблокировали пользователя. Он не сможет писать вам в личные сообщения." : undefined}
+            />
           </div>
         ) : (
           <section className="grid min-h-[620px] place-items-center p-8 text-center text-muted">
@@ -159,8 +182,15 @@ function MessagesContent() {
           </section>
         )}
       </section>
+
+      {reportTargetUserId ? <ReportModal kind="user" targetId={reportTargetUserId} onClose={() => setReportTargetUserId(null)} /> : null}
     </div>
   );
+}
+
+function otherParticipantId(conversation: Conversation, currentUserId?: string) {
+  if (!currentUserId) return conversation.sellerId ?? conversation.buyerId ?? "";
+  return conversation.buyerId === currentUserId ? conversation.sellerId ?? "" : conversation.buyerId ?? "";
 }
 
 function ParticipantAvatar({ conversation, index, size }: { conversation?: Conversation; index: number; size: "md" | "lg" }) {

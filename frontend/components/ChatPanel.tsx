@@ -2,10 +2,11 @@
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FileText, ImageIcon, Loader2, Paperclip, Send, X } from "lucide-react";
+import { Flag, FileText, ImageIcon, Loader2, Paperclip, Send, X } from "lucide-react";
 import { apiFetch, WS_URL } from "../lib/api";
 import { useAuth } from "../lib/auth-store";
 import { EmailNotVerifiedNotice } from "./EmailNotVerifiedNotice";
+import { ReportModal } from "./ReportModal";
 
 type Message = {
   id: string;
@@ -16,8 +17,17 @@ type Message = {
   createdAt: string;
 };
 
-export function ChatPanel({ conversationId, compact = false }: { conversationId: string; compact?: boolean }) {
+export function ChatPanel({
+  conversationId,
+  compact = false,
+  disabledNotice
+}: {
+  conversationId: string;
+  compact?: boolean;
+  disabledNotice?: string;
+}) {
   const user = useAuth((state) => state.user);
+  const [reportMessageId, setReportMessageId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [attachmentUrl, setAttachmentUrl] = useState("");
   const [attachmentLabel, setAttachmentLabel] = useState("");
@@ -123,14 +133,24 @@ export function ChatPanel({ conversationId, compact = false }: { conversationId:
         {messages.map((message) => {
           const mine = message.senderId === user?.id;
           return (
-            <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+            <div key={message.id} className={`group flex ${mine ? "justify-end" : "justify-start"}`}>
               <div className={`max-w-[78%] ${mine ? "items-end" : "items-start"} flex flex-col`}>
                 <div className={`rounded-2xl px-4 py-3 ${compact ? "" : "shadow-soft"} ${mine ? "rounded-br-md bg-brand text-stone-950" : `${compact ? "bg-panel/70" : "border border-line bg-card"} rounded-bl-md text-ink`}`}>
                   <p className="whitespace-pre-wrap text-sm leading-6">{message.body}</p>
                   {message.attachmentUrl ? <AttachmentPreview url={message.attachmentUrl} mine={mine} /> : null}
                 </div>
-                <p className="mt-1 px-1 text-xs text-muted">
+                <p className="mt-1 flex items-center gap-2 px-1 text-xs text-muted">
                   {message.senderDisplayName ?? (mine ? "You" : "Participant")} · {new Date(message.createdAt).toLocaleString("ru-RU")}
+                  {!mine ? (
+                    <button
+                      type="button"
+                      className="opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
+                      aria-label="Пожаловаться на сообщение"
+                      onClick={() => setReportMessageId(message.id)}
+                    >
+                      <Flag className="h-3 w-3" />
+                    </button>
+                  ) : null}
                 </p>
               </div>
             </div>
@@ -143,6 +163,11 @@ export function ChatPanel({ conversationId, compact = false }: { conversationId:
         ) : null}
       </div>
 
+      {disabledNotice ? (
+        <div className={`${compact ? "px-3 pb-3 pt-2" : "border-t border-line bg-card/95 p-4"}`}>
+          <p className="rounded-lg bg-panel/50 p-3 text-sm text-muted">{disabledNotice}</p>
+        </div>
+      ) : (
       <form ref={formRef} className={`${compact ? "bg-transparent px-3 pb-3 pt-2" : "border-t border-line bg-card/95 p-4"}`} onSubmit={submit}>
         {emailBlocked ? (
           <div className="mb-2">
@@ -190,6 +215,8 @@ export function ChatPanel({ conversationId, compact = false }: { conversationId:
           </button>
         </div>
       </form>
+      )}
+      {reportMessageId ? <ReportModal kind="message" targetId={reportMessageId} onClose={() => setReportMessageId(null)} /> : null}
     </section>
   );
 }

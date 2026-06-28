@@ -1,14 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BadgePercent,
   Clock,
   CreditCard,
+  Flag,
   MessageCircle,
   PackageCheck,
+  ShieldOff,
   Star,
   Tag,
   Timer,
@@ -16,10 +19,12 @@ import {
 } from "lucide-react";
 import { ChatPanel } from "../../../components/ChatPanel";
 import { EmailNotVerifiedNotice } from "../../../components/EmailNotVerifiedNotice";
+import { ReportModal } from "../../../components/ReportModal";
 import { apiFetch, isEmailNotVerifiedError, money, type Product } from "../../../lib/api";
 import { useAuth } from "../../../lib/auth-store";
 import { useI18n } from "../../../lib/i18n";
 import { fieldLabel, formatFieldValue } from "../../../lib/product-fields";
+import { showAppToast } from "../../../lib/toast-events";
 import { redirectToLiqpay, type LiqpayCheckout } from "../../../lib/liqpay";
 import { redirectToMonobank, type MonobankCheckout } from "../../../lib/monobank";
 import { redirectToWayforpay, type WayforpayCheckout } from "../../../lib/wayforpay";
@@ -47,8 +52,10 @@ type ProductReview = {
 
 export function ProductPageClient({ id }: { id: string }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const user = useAuth((state) => state.user);
   const { t } = useI18n();
+  const [reportOpen, setReportOpen] = useState(false);
 
   const product = useQuery({
     queryKey: ["product", id],
@@ -56,11 +63,25 @@ export function ProductPageClient({ id }: { id: string }) {
   });
 
   const productItem = product.data?.product;
-  const autoChat = useQuery({
-    queryKey: ["product-chat", id, user?.id],
-    queryFn: () => apiFetch<{ conversationId: string; existing: boolean }>(`/chat/products/${id}/start`, { method: "POST" }),
-    enabled: Boolean(user && productItem && user.id !== productItem.sellerId),
-    retry: false
+
+  const blockedUsers = useQuery({
+    queryKey: ["blocked-users"],
+    queryFn: () => apiFetch<{ blocked: { id: string }[] }>("/users/me/blocked"),
+    enabled: Boolean(user)
+  });
+  const isBlocked = Boolean(productItem && blockedUsers.data?.blocked.some((blocked) => blocked.id === productItem.sellerId));
+
+  const blockSeller = useMutation({
+    mutationFn: () => apiFetch(`/users/${productItem!.sellerId}/block`, { method: "POST" }),
+    onSuccess: () => {
+      showAppToast({ title: "Пользователь заблокирован" });
+      queryClient.invalidateQueries({ queryKey: ["blocked-users"] });
+    }
+  });
+
+  // Chat is opened only on an explicit click — never auto-created when the product page loads.
+  const startChat = useMutation({
+    mutationFn: () => apiFetch<{ conversationId: string; existing: boolean }>(`/chat/products/${id}/start`, { method: "POST" })
   });
 
   async function createOrder() {
@@ -268,6 +289,25 @@ export function ProductPageClient({ id }: { id: string }) {
             </span>
           </Link>
 
+          {!isOwn && user ? (
+            <div className="mt-3 flex items-center gap-3 text-xs font-bold text-muted">
+              <button
+                className="inline-flex items-center gap-1 hover:text-ink"
+                onClick={() => {
+                  if (isBlocked) return;
+                  if (window.confirm("Заблокировать пользователя? Он не сможет писать вам в личные сообщения.")) blockSeller.mutate();
+                }}
+                disabled={isBlocked || blockSeller.isPending}
+              >
+                <ShieldOff className="h-3.5 w-3.5" />
+                {isBlocked ? "Пользователь заблокирован" : "Заблокировать пользователя"}
+              </button>
+              <button className="inline-flex items-center gap-1 hover:text-ink" onClick={() => setReportOpen(true)}>
+                <Flag className="h-3.5 w-3.5" />
+                Пожаловаться
+              </button>
+            </div>
+          ) : null}
         </section>
 
         <section className="rounded-xl border border-line bg-card p-4">
@@ -280,11 +320,15 @@ export function ProductPageClient({ id }: { id: string }) {
                 <p className="text-xs text-muted">Уточните детали по этому лоту.</p>
               </div>
             </div>
-            {autoChat.data?.conversationId ? (
+            {startChat.data?.conversationId ? (
               <div className="mt-3 overflow-hidden rounded-lg bg-surface/35">
-                <ChatPanel conversationId={autoChat.data.conversationId} compact />
+                <ChatPanel
+                  conversationId={startChat.data.conversationId}
+                  compact
+                  disabledNotice={isBlocked ? "Вы заблокировали пользователя. Он не сможет писать вам в личные сообщения." : undefined}
+                />
               </div>
-            ) : autoChat.isLoading ? (
+            ) : startChat.isPending ? (
               <div className="mt-3 grid min-h-[130px] place-items-center rounded-lg bg-panel/35 text-sm text-muted">
                 Открываем мини-чат...
               </div>
@@ -300,19 +344,19 @@ export function ProductPageClient({ id }: { id: string }) {
             ) : (
               <button
                 className="app-button-secondary mt-3 w-full py-3"
-                onClick={() => autoChat.refetch()}
+                onClick={() => startChat.mutate()}
               >
                 <MessageCircle className="h-5 w-5" />
-                Открыть чат
+                Написать продавцу
               </button>
             )}
-          {autoChat.error ? (
-            isEmailNotVerifiedError(autoChat.error) ? (
+          {startChat.error ? (
+            isEmailNotVerifiedError(startChat.error) ? (
               <div className="mt-3">
                 <EmailNotVerifiedNotice />
               </div>
             ) : (
-              <p className="mt-2 text-sm text-rose-600">{autoChat.error.message}</p>
+              <p className="mt-2 text-sm text-rose-600">{startChat.error.message}</p>
             )
           ) : null}
         </section>
@@ -349,6 +393,8 @@ export function ProductPageClient({ id }: { id: string }) {
         </section>
 
       </aside>
+
+      {reportOpen ? <ReportModal kind="user" targetId={item.sellerId} onClose={() => setReportOpen(false)} /> : null}
     </div>
   );
 }

@@ -95,3 +95,15 @@ export async function getPlatformRevenue(currency = "UAH") {
   );
   return Number(result.rows[0]?.revenue_cents ?? 0);
 }
+
+export async function createConversation(buyerId: string, sellerId: string, productId: string | null = null) {
+  const result = await pool.query<{ id: string }>(
+    `insert into conversations(buyer_id, seller_id, product_id) values ($1, $2, $3) returning id`,
+    [buyerId, sellerId, productId]
+  );
+  return result.rows[0].id;
+}
+
+export async function blockUser(blockerId: string, blockedId: string) {
+  await pool.query(`insert into user_blocks(blocker_id, blocked_id) values ($1, $2)`, [blockerId, blockedId]);
+}

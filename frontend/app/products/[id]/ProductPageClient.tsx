@@ -25,9 +25,6 @@ import { useAuth } from "../../../lib/auth-store";
 import { useI18n } from "../../../lib/i18n";
 import { fieldLabel, formatFieldValue } from "../../../lib/product-fields";
 import { showAppToast } from "../../../lib/toast-events";
-import { redirectToLiqpay, type LiqpayCheckout } from "../../../lib/liqpay";
-import { redirectToMonobank, type MonobankCheckout } from "../../../lib/monobank";
-import { redirectToWayforpay, type WayforpayCheckout } from "../../../lib/wayforpay";
 
 const HIDDEN_METADATA_KEYS = new Set(["catalogKind", "shortDescription", "region", "rank"]);
 
@@ -84,44 +81,20 @@ export function ProductPageClient({ id }: { id: string }) {
     mutationFn: () => apiFetch<{ conversationId: string; existing: boolean }>(`/chat/products/${id}/start`, { method: "POST" })
   });
 
-  async function createOrder() {
-    const { order } = await apiFetch<{ order: { id: string } }>("/orders", {
-      method: "POST",
-      body: JSON.stringify({ productId: id, quantity: 1 })
-    });
-    return order;
-  }
-
-  const buyWithLiqpay = useMutation({
+  // Provider choice (LiqPay/Monobank/WayForPay/manual transfer) happens on the order page,
+  // not here — the product page only needs to create the order and hand off to checkout.
+  const buySecurely = useMutation({
     mutationFn: async () => {
-      const order = await createOrder();
-      return apiFetch<LiqpayCheckout>(`/payments/orders/${order.id}/liqpay/checkout`, { method: "POST" });
+      const { order } = await apiFetch<{ order: { id: string } }>("/orders", {
+        method: "POST",
+        body: JSON.stringify({ productId: id, quantity: 1 })
+      });
+      return order;
     },
-    onSuccess: redirectToLiqpay
-  });
-
-  const buyWithMonobank = useMutation({
-    mutationFn: async () => {
-      const order = await createOrder();
-      return apiFetch<MonobankCheckout>(`/payments/orders/${order.id}/monobank/checkout`, { method: "POST" });
-    },
-    onSuccess: redirectToMonobank
-  });
-
-  const buyWithWayforpay = useMutation({
-    mutationFn: async () => {
-      const order = await createOrder();
-      return apiFetch<WayforpayCheckout>(`/payments/orders/${order.id}/wayforpay/checkout`, { method: "POST" });
-    },
-    onSuccess: redirectToWayforpay
-  });
-
-  const buyWithManualTransfer = useMutation({
-    mutationFn: () => createOrder(),
     onSuccess: (order) => router.push(`/orders/${order.id}`)
   });
 
-  const buyError = buyWithLiqpay.error ?? buyWithMonobank.error ?? buyWithWayforpay.error ?? buyWithManualTransfer.error;
+  const buyError = buySecurely.error;
 
   if (product.isLoading) return <p className="text-muted">{t("common.loading")}</p>;
   if (!product.data) return <p className="text-rose-600">{t("home.noListings")}</p>;
@@ -189,21 +162,9 @@ export function ProductPageClient({ id }: { id: string }) {
                 <p className="mt-5 rounded-lg bg-panel/35 p-3 text-center text-sm text-muted">Лот распродан</p>
               ) : user ? (
                 <div className="mt-5 grid gap-2">
-                  <button className="app-button-action w-full py-3" disabled={buyWithLiqpay.isPending} onClick={() => buyWithLiqpay.mutate()}>
+                  <button className="app-button-action w-full py-3" disabled={buySecurely.isPending} onClick={() => buySecurely.mutate()}>
                     <CreditCard className="h-5 w-5" />
-                    {buyWithLiqpay.isPending ? "Переходим к оплате..." : "Купить через LiqPay"}
-                  </button>
-                  <button className="app-button-action w-full py-3" disabled={buyWithMonobank.isPending} onClick={() => buyWithMonobank.mutate()}>
-                    <CreditCard className="h-5 w-5" />
-                    {buyWithMonobank.isPending ? "Переходим к оплате..." : "Купить через Monobank"}
-                  </button>
-                  <button className="app-button-action w-full py-3" disabled={buyWithWayforpay.isPending} onClick={() => buyWithWayforpay.mutate()}>
-                    <CreditCard className="h-5 w-5" />
-                    {buyWithWayforpay.isPending ? "Переходим к оплате..." : "Купить через WayForPay"}
-                  </button>
-                  <button className="app-button-secondary w-full py-3" disabled={buyWithManualTransfer.isPending} onClick={() => buyWithManualTransfer.mutate()}>
-                    <CreditCard className="h-5 w-5" />
-                    {buyWithManualTransfer.isPending ? "Создаём заказ..." : "Оплатить переводом"}
+                    {buySecurely.isPending ? "Создаём заказ..." : "Купить безопасно"}
                   </button>
                 </div>
               ) : (

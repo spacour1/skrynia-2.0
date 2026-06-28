@@ -6,6 +6,8 @@ export type ModerationActionType =
   | "hide_message"
   | "restore_message"
   | "warn_user"
+  | "mute_user"
+  | "unmute_user"
   | "close_report"
   | "reject_report"
   | "lock_conversation"

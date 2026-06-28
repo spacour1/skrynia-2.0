@@ -23,6 +23,15 @@ function messagingBlocked() {
   return new ApiError(403, "You cannot message this user", "messaging_blocked");
 }
 
+function userMuted() {
+  return new ApiError(403, "Вы временно не можете отправлять сообщения — модератор ограничил доступ", "user_muted");
+}
+
+async function isMuted(userId: string): Promise<boolean> {
+  const result = await pool.query(`select 1 from users where id = $1 and muted_until > now()`, [userId]);
+  return Boolean(result.rows[0]);
+}
+
 async function getConversationParties(conversationId: string): Promise<ConversationParties> {
   const result = await pool.query(`select buyer_id as "buyerId", seller_id as "sellerId" from conversations where id = $1`, [
     conversationId
@@ -60,6 +69,7 @@ export async function assertConversationAccess(
 
 export async function assertCanSendMessage(conversationId: string, userId: string): Promise<ConversationParties> {
   const parties = await assertConversationAccess(conversationId, userId, "user");
+  if (await isMuted(userId)) throw userMuted();
   const otherId = parties.buyerId === userId ? parties.sellerId : parties.buyerId;
   if (await isBlockedPair(userId, otherId)) throw messagingBlocked();
   return parties;

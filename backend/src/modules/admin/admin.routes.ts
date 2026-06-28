@@ -15,6 +15,7 @@ import { paymentAttemptsTotal } from "../../common/metrics.js";
 import { logger } from "../../common/logger.js";
 import { listPayouts, completePayout, rejectPayout } from "../users/wallet.service.js";
 import { recordModerationAction } from "../reports/reports.service.js";
+import { createNotification } from "../notifications/notifications.service.js";
 
 const router = Router();
 
@@ -44,7 +45,8 @@ router.get(
   "/users",
   asyncHandler(async (_req: AuthedRequest, res) => {
     const result = await pool.query(
-      `select id, email, display_name as "displayName", role, is_banned as "isBanned", created_at as "createdAt"
+      `select id, email, display_name as "displayName", role, is_banned as "isBanned",
+              muted_until as "mutedUntil", created_at as "createdAt"
        from users
        order by created_at desc
        limit 200`
@@ -74,6 +76,71 @@ router.patch(
     );
     if (!result.rows[0]) throw notFound("User not found");
     if (body.isBanned) disconnectUser(id);
+    res.json({ user: result.rows[0] });
+  })
+);
+
+const warnUserSchema = z.object({ reason: z.string().trim().min(3).max(1000) });
+
+router.post(
+  "/users/:id/warn",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const id = z.string().uuid().parse(req.params.id);
+    const input = warnUserSchema.parse(req.body);
+    const target = await pool.query(`select id from users where id = $1`, [id]);
+    if (!target.rows[0]) throw notFound("User not found");
+
+    await recordModerationAction({ moderatorId: req.user.id, actionType: "warn_user", targetUserId: id, reason: input.reason });
+    await createNotification({
+      userId: id,
+      type: "account_warned",
+      title: "Предупреждение от модератора",
+      body: input.reason
+    });
+    res.json({ ok: true });
+  })
+);
+
+const muteUserSchema = z.object({
+  hours: z.coerce.number().int().min(1).max(24 * 30),
+  reason: z.string().trim().min(3).max(1000).optional()
+});
+
+router.post(
+  "/users/:id/mute",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const id = z.string().uuid().parse(req.params.id);
+    const input = muteUserSchema.parse(req.body);
+    const result = await pool.query(
+      `update users set muted_until = now() + ($2 || ' hours')::interval, updated_at = now()
+       where id = $1
+       returning id, muted_until as "mutedUntil"`,
+      [id, input.hours]
+    );
+    if (!result.rows[0]) throw notFound("User not found");
+
+    await recordModerationAction({ moderatorId: req.user.id, actionType: "mute_user", targetUserId: id, reason: input.reason });
+    await createNotification({
+      userId: id,
+      type: "account_muted",
+      title: "Временное ограничение на сообщения",
+      body: input.reason ?? `Вы не можете отправлять сообщения до ${new Date(result.rows[0].mutedUntil).toLocaleString("ru-RU")}.`
+    });
+    res.json({ user: result.rows[0] });
+  })
+);
+
+router.post(
+  "/users/:id/unmute",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const id = z.string().uuid().parse(req.params.id);
+    const result = await pool.query(
+      `update users set muted_until = null, updated_at = now() where id = $1 returning id, muted_until as "mutedUntil"`,
+      [id]
+    );
+    if (!result.rows[0]) throw notFound("User not found");
+
+    await recordModerationAction({ moderatorId: req.user.id, actionType: "unmute_user", targetUserId: id });
     res.json({ user: result.rows[0] });
   })
 );

@@ -107,3 +107,7 @@ export async function createConversation(buyerId: string, sellerId: string, prod
 export async function blockUser(blockerId: string, blockedId: string) {
   await pool.query(`insert into user_blocks(blocker_id, blocked_id) values ($1, $2)`, [blockerId, blockedId]);
 }
+
+export async function muteUser(userId: string, hours = 1) {
+  await pool.query(`update users set muted_until = now() + ($2 || ' hours')::interval where id = $1`, [userId, hours]);
+}

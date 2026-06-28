@@ -6,7 +6,7 @@ import {
   markConversationRead,
   sendMessage
 } from "../src/modules/chat/chat.service.js";
-import { blockUser, closeDb, createConversation, createProduct, createUser, resetDb } from "./fixtures.js";
+import { blockUser, closeDb, createConversation, createProduct, createUser, muteUser, resetDb } from "./fixtures.js";
 
 beforeEach(resetDb);
 afterAll(closeDb);
@@ -52,6 +52,16 @@ describe("assertCanSendMessage", () => {
     await blockUser(buyer, seller);
 
     await expect(assertCanSendMessage(conversationId, seller)).rejects.toMatchObject({ code: "messaging_blocked" });
+  });
+
+  it("throws user_muted for a sender currently muted by a moderator", async () => {
+    const seller = await createUser("seller");
+    const buyer = await createUser();
+    const conversationId = await createConversation(buyer, seller);
+    await muteUser(buyer);
+
+    await expect(assertCanSendMessage(conversationId, buyer)).rejects.toMatchObject({ code: "user_muted" });
+    await expect(assertCanSendMessage(conversationId, seller)).resolves.toBeDefined();
   });
 });
 

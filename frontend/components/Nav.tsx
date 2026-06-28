@@ -123,7 +123,6 @@ export function Nav() {
     { label: t("nav.myPurchases"), href: "/orders?role=buyer", icon: ShoppingBag, auth: true, match: "/orders" },
     { label: t("nav.mySales"), href: "/seller/sales", icon: Store, auth: true, match: "/seller/sales" },
     { label: t("nav.wallet"), href: "/wallet", icon: WalletCards, auth: true },
-    { label: t("nav.createListing"), href: "/seller/create", icon: PackagePlus, auth: true },
     { label: t("nav.support"), href: "/support", icon: Headphones },
     { label: t("nav.settings"), href: "/settings", icon: Settings, auth: true },
     ...(user?.role === "admin" ? [{ label: t("nav.admin"), href: "/admin", icon: Gauge, auth: true }] : [])
@@ -289,6 +288,13 @@ export function Nav() {
       </header>
 
       <aside className="fixed bottom-0 left-[max(1rem,calc((100vw-1440px)/2+1rem))] top-[86px] z-30 hidden w-56 py-5 lg:block">
+        <button
+          className="mb-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-action px-3 text-sm font-black text-stone-950 shadow-lift ring-2 ring-action/30 transition hover:brightness-95"
+          onClick={() => openRoute("/seller/create", true)}
+        >
+          <PackagePlus className="h-5 w-5" />
+          <span>{t("nav.createListing")}</span>
+        </button>
         <nav className="grid gap-1">
           {navItems.map((item) => (
             <div

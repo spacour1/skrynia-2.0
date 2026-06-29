@@ -49,7 +49,7 @@ function MessagesContent() {
         !term ||
         title.includes(term) ||
         conversation.id.toLowerCase().includes(term) ||
-        participantName(conversation, t("messages.participant")).toLowerCase().includes(term);
+        participantName(conversation, user?.id, t("messages.participant")).toLowerCase().includes(term);
       const active = !conversation.orderStatus || ACTIVE_ORDER_STATUSES.includes(conversation.orderStatus);
       const matchesTab = tab === "all" || (tab === "active" && active) || (tab === "finished" && !active);
       return matchesSearch && matchesTab;
@@ -97,10 +97,10 @@ function MessagesContent() {
                 }`}
                 onClick={() => setSelectedConversationId(conversation.id)}
               >
-                <ParticipantAvatar conversation={conversation} index={index} size="md" />
+                <ParticipantAvatar conversation={conversation} currentUserId={user?.id} index={index} size="md" />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center justify-between gap-3">
-                    <span className="truncate font-black text-ink">{participantName(conversation, t("messages.participant"))}</span>
+                    <span className="truncate font-black text-ink">{participantName(conversation, user?.id, t("messages.participant"))}</span>
                     <span className="flex items-center gap-2">
                       {conversation.unreadCount ? (
                         <span className="grid h-5 min-w-5 place-items-center rounded-full bg-brand px-1.5 text-[11px] font-black text-stone-950">
@@ -138,15 +138,20 @@ function MessagesContent() {
             <div className="border-b border-line bg-card px-5 py-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex min-w-0 items-center gap-4">
-                  {selectedConversation.sellerId ? (
-                    <Link className="shrink-0 rounded-2xl focus:outline-none focus:ring-2 focus:ring-brand/60" href={`/sellers/${selectedConversation.sellerId}`} aria-label={t("messages.openSellerProfile")}>
-                      <ParticipantAvatar conversation={selectedConversation} index={0} size="lg" />
+                  {otherParticipantId(selectedConversation, user?.id) ? (
+                    <Link
+                      className="shrink-0 rounded-2xl focus:outline-none focus:ring-2 focus:ring-brand/60"
+                      href={`/sellers/${otherParticipantId(selectedConversation, user?.id)}`}
+                      aria-label={t("messages.openSellerProfile")}
+                    >
+                      <ParticipantAvatar conversation={selectedConversation} currentUserId={user?.id} index={0} size="lg" />
                     </Link>
                   ) : (
-                    <ParticipantAvatar conversation={selectedConversation} index={0} size="lg" />
+                    <ParticipantAvatar conversation={selectedConversation} currentUserId={user?.id} index={0} size="lg" />
                   )}
                   <div className="min-w-0">
-                    <p className="truncate text-lg font-black text-ink">{selectedConversation.productTitle ?? t("messages.title")}</p>
+                    <p className="truncate text-base font-black text-ink">{participantName(selectedConversation, user?.id, t("messages.participant"))}</p>
+                    <p className="truncate text-sm text-muted">{selectedConversation.productTitle ?? t("messages.title")}</p>
                     {selectedConversation.orderId ? (
                       <p className="mt-1 text-sm text-muted">
                         {t("messages.order")} #{selectedConversation.orderId.slice(0, 8)} ·{" "}
@@ -194,9 +199,20 @@ function otherParticipantId(conversation: Conversation, currentUserId?: string) 
   return conversation.buyerId === currentUserId ? conversation.sellerId ?? "" : conversation.buyerId ?? "";
 }
 
-function ParticipantAvatar({ conversation, index, size }: { conversation?: Conversation; index: number; size: "md" | "lg" }) {
-  const avatarUrl = conversation?.sellerAvatarUrl ?? null;
-  const name = participantName(conversation);
+function ParticipantAvatar({
+  conversation,
+  currentUserId,
+  index,
+  size
+}: {
+  conversation?: Conversation;
+  currentUserId?: string;
+  index: number;
+  size: "md" | "lg";
+}) {
+  const isBuyer = conversation?.buyerId === currentUserId;
+  const avatarUrl = (isBuyer ? conversation?.sellerAvatarUrl : conversation?.buyerAvatarUrl) ?? null;
+  const name = participantName(conversation, currentUserId);
   const box = size === "lg" ? "h-14 w-14 text-lg" : "h-12 w-12 text-sm";
 
   return (
@@ -211,8 +227,10 @@ function ParticipantAvatar({ conversation, index, size }: { conversation?: Conve
   );
 }
 
-function participantName(conversation?: Conversation, fallback = "Participant") {
-  return conversation?.sellerDisplayName ?? conversation?.buyerDisplayName ?? fallback;
+function participantName(conversation?: Conversation, currentUserId?: string, fallback = "Participant") {
+  if (!conversation) return fallback;
+  const isBuyer = conversation.buyerId === currentUserId;
+  return (isBuyer ? conversation.sellerDisplayName : conversation.buyerDisplayName) ?? fallback;
 }
 
 function avatarGradient(index: number) {

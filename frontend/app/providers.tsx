@@ -2,11 +2,11 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { usePathname } from "next/navigation";
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useEffect, useLayoutEffect, useState } from "react";
 import { ToastCenter } from "../components/ToastCenter";
 import { LanguageGate } from "../components/LanguageGate";
 import { GlobalTranslator } from "../components/GlobalTranslator";
-import { useAuth } from "../lib/auth-store";
+import { readCachedUser, useAuth } from "../lib/auth-store";
 import { apiFetch, DISPLAY_CURRENCY_EVENT, setCurrencyRates, type CurrencyRatesResponse } from "../lib/api";
 import { useLanguageStore } from "../lib/i18n";
 import { useThemeStore } from "../lib/theme-store";
@@ -21,6 +21,15 @@ export function Providers({ children }: { children: ReactNode }) {
   // usePathname alone (no useSearchParams) so this stays compatible with static rendering;
   // the query string is read straight from window.location inside the effect instead.
   const pathname = usePathname();
+
+  // Runs synchronously before the browser paints the hydrated frame, so the cached profile
+  // (if any) is already applied by the time anything is visible - this avoids both a flash
+  // of "logged out" and a hydration mismatch (the SSR/initial-client render still produced
+  // the same `user: null` markup; this just corrects it pre-paint, not pre-hydration).
+  useLayoutEffect(() => {
+    const cached = readCachedUser();
+    if (cached) useAuth.setState({ user: cached });
+  }, []);
 
   useEffect(() => {
     hydrate();

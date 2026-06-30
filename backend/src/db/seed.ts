@@ -5,6 +5,7 @@ const passwordHash = await bcrypt.hash("Password123!", 12);
 
 const baseUsers = [
   ["admin@example.com", "Admin", "admin", null],
+  ["moderator@example.com", "Moderator", "moderator", null],
   ["buyer@example.com", "Demo Buyer", "user", null]
 ];
 
@@ -92,10 +93,9 @@ async function getSection(gameId: string | null, slug: string) {
 for (const seller of sellers) {
   const user = await pool.query<{ id: string }>(
     `insert into users(email, password_hash, display_name, role, avatar_url, settings)
-     values ($1, $2, $3, 'seller', $4, $5::jsonb)
+     values ($1, $2, $3, 'user', $4, $5::jsonb)
      on conflict (email) do update set
        display_name = excluded.display_name,
-       role = 'seller',
        avatar_url = excluded.avatar_url,
        settings = excluded.settings,
        updated_at = now()

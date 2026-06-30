@@ -1,19 +1,26 @@
 import { ApiError, badRequest, forbidden, notFound } from "../../common/errors.js";
+import type { DbClient } from "../../db/pool.js";
 import { pool } from "../../db/pool.js";
 import { createNotification } from "../notifications/notifications.service.js";
+import { broadcastConversation } from "./ws.service.js";
 
 export type ConversationParties = { buyerId: string; sellerId: string };
 
 export type Message = {
   id: string;
   conversationId: string;
-  senderId: string;
+  senderId: string | null;
   senderDisplayName: string;
   body: string;
   attachmentUrl: string | null;
   createdAt: string;
   hidden?: boolean;
+  kind?: "user" | "system";
+  systemType?: string | null;
+  metadata?: Record<string, unknown>;
 };
+
+const SYSTEM_SENDER_DISPLAY_NAME = "Система";
 
 const MIN_MESSAGE_LENGTH = 1;
 const MAX_MESSAGE_LENGTH = 3000;
@@ -163,12 +170,13 @@ export async function getMessages(
 
   const result = await pool.query(
     `select m.id, m.conversation_id as "conversationId", m.sender_id as "senderId",
-            u.display_name as "senderDisplayName",
+            coalesce(u.display_name, '${SYSTEM_SENDER_DISPLAY_NAME}') as "senderDisplayName",
             case when m.hidden_at is not null and not $${adminParamIndex} then '${HIDDEN_BODY_PLACEHOLDER}' else m.body end as body,
             m.attachment_url as "attachmentUrl", m.created_at as "createdAt",
-            (m.hidden_at is not null) as hidden
+            (m.hidden_at is not null) as hidden,
+            m.kind, m.system_type as "systemType", m.metadata
      from messages m
-     join users u on u.id = m.sender_id
+     left join users u on u.id = m.sender_id
      where m.conversation_id = $1 ${beforeClause}
      order by m.created_at desc
      limit $${limitParamIndex}`,
@@ -185,6 +193,52 @@ export async function markConversationRead(conversationId: string, userId: strin
      where id = $1`,
     [conversationId, userId]
   );
+}
+
+/**
+ * Posts a system message (sender_id null, kind = 'system') into an order's chat. Used for
+ * the order lifecycle timeline (created/paid/started/delivered/disputed/resolved/...) so
+ * buyers and sellers see those events inline in the same thread they're already chatting in,
+ * instead of only in the separate order_events log.
+ */
+export async function createSystemMessage(
+  input: { conversationId: string; type: string; body: string; metadata?: Record<string, unknown> },
+  client: DbClient = pool
+): Promise<Message> {
+  const result = await client.query(
+    `insert into messages(conversation_id, sender_id, kind, system_type, body, metadata)
+     values ($1, null, 'system', $2, $3, $4)
+     returning id, conversation_id as "conversationId", sender_id as "senderId",
+               '${SYSTEM_SENDER_DISPLAY_NAME}' as "senderDisplayName",
+               body, attachment_url as "attachmentUrl", created_at as "createdAt",
+               kind, system_type as "systemType", metadata`,
+    [input.conversationId, input.type, input.body, JSON.stringify(input.metadata ?? {})]
+  );
+  return result.rows[0] as Message;
+}
+
+export async function getConversationIdForOrder(orderId: string): Promise<string | null> {
+  const result = await pool.query(`select id from conversations where order_id = $1`, [orderId]);
+  return result.rows[0]?.id ?? null;
+}
+
+/**
+ * Convenience wrapper for order lifecycle routes, which only ever have an orderId on hand:
+ * looks up the order's conversation, posts the system message, and broadcasts it over the
+ * conversation's websocket room so an open chat updates live. A no-op for orders that predate
+ * the order-chat feature and so have no conversation row.
+ */
+export async function postOrderSystemMessage(
+  orderId: string,
+  type: string,
+  body: string,
+  metadata?: Record<string, unknown>
+): Promise<Message | null> {
+  const conversationId = await getConversationIdForOrder(orderId);
+  if (!conversationId) return null;
+  const message = await createSystemMessage({ conversationId, type, body, metadata });
+  broadcastConversation(conversationId, { type: "message", message });
+  return message;
 }
 
 export async function getUserConversations(userId: string, role: string) {

@@ -47,6 +47,25 @@ export async function issueSession(userId: string, role: Role) {
   return { accessToken, refreshToken, csrfToken, jti };
 }
 
+const TWO_FACTOR_PENDING_TTL_MIN = 5;
+
+/**
+ * A short-lived bridge token between "password verified" and "session issued" for 2FA
+ * accounts. Deliberately not a real session: no jti, not tracked in Redis, can't be used
+ * for anything except POST /auth/2fa/verify, and expires in minutes rather than days.
+ */
+export function issueTwoFactorPendingToken(userId: string): string {
+  return jwt.sign({ sub: userId, purpose: "2fa_pending" }, env.JWT_SECRET as Secret, {
+    expiresIn: `${TWO_FACTOR_PENDING_TTL_MIN}m` as SignOptions["expiresIn"]
+  });
+}
+
+export function verifyTwoFactorPendingToken(token: string): string {
+  const payload = jwt.verify(token, env.JWT_SECRET as Secret) as { sub: string; purpose?: string };
+  if (payload.purpose !== "2fa_pending") throw new Error("Invalid token purpose");
+  return payload.sub;
+}
+
 export async function revokeRefreshToken(token: string | undefined, userId?: string) {
   if (!token) return;
   const redis = getRedis();

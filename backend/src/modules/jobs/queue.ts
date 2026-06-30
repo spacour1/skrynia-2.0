@@ -5,8 +5,14 @@ import { jobProcessedTotal } from "../../common/metrics.js";
 import { pool } from "../../db/pool.js";
 import { releaseEscrow } from "../orders/ledger.service.js";
 import { notifyOrderEvent } from "../chat/ws.service.js";
+import { createReconciliationSnapshot } from "../admin/reconciliation.service.js";
+import { createNotification } from "../notifications/notifications.service.js";
+import { getNotificationPreferences } from "../notifications/preferences.service.js";
+import { getTelegramChatId } from "../users/telegram-link.service.js";
+import { sendEmail, renderBrandedEmail } from "../../common/mailer.js";
+import { sendTelegramMessage } from "../../common/telegram-bot.js";
 
-export type MarketplaceJobName = "escrow_release" | "payout" | "dispute_timer" | "email_notification";
+export type MarketplaceJobName = "escrow_release" | "payout" | "dispute_timer" | "email_notification" | "reconciliation_daily";
 
 export type MarketplaceJobPayload = {
   orderId?: string;
@@ -66,6 +72,7 @@ export async function enqueueJob(name: MarketplaceJobName, data: MarketplaceJobP
 export async function scheduleRecurringJobs() {
   await enqueueJob("escrow_release", {}, { jobId: "escrow-release-sweep", repeat: { every: 60_000 } });
   await enqueueJob("dispute_timer", {}, { jobId: "dispute-timer-sweep", repeat: { every: 5 * 60_000 } });
+  await enqueueJob("reconciliation_daily", {}, { jobId: "reconciliation-daily", repeat: { pattern: "0 3 * * *" } });
 }
 
 async function processEscrowRelease(orderId?: string) {
@@ -114,8 +121,85 @@ async function processPayout(userId?: string) {
   logger.info({ userId }, "payout_job_placeholder");
 }
 
+/**
+ * Delivers a notification over every channel the user has enabled. Named "email" for
+ * historical reasons (createNotification has always enqueued it as "email_notification"),
+ * but it now also handles Telegram - splitting it into two job types would only mean two
+ * lookups of the same user/preferences for no real benefit.
+ */
 async function processEmail(data: MarketplaceJobPayload) {
-  logger.info({ to: data.email, subject: data.subject }, "email_notification_placeholder");
+  if (!data.userId) {
+    logger.warn({ data }, "notification_job_missing_user_id");
+    return;
+  }
+  const userResult = await pool.query<{ email: string; displayName: string }>(
+    `select email, display_name as "displayName" from users where id = $1`,
+    [data.userId]
+  );
+  const user = userResult.rows[0];
+  if (!user) return;
+
+  const preferences = await getNotificationPreferences(data.userId);
+  const subject = data.subject ?? "Уведомление SKRYNIA";
+  const body = data.body ?? "";
+  // subject/body often embed user-generated content (e.g. a chat message preview), so they
+  // must be escaped before going into either HTML email or Telegram's HTML parse_mode.
+  const safeSubject = escapeHtml(subject);
+  const safeBody = escapeHtml(body);
+
+  if (preferences.emailEnabled) {
+    const sent = await sendEmail({
+      to: user.email,
+      subject,
+      text: body,
+      html: renderBrandedEmail({
+        title: safeSubject,
+        bodyHtml: `<p>${safeBody}</p>`,
+        ctaText: "Открыть SKRYNIA",
+        ctaUrl: env.FRONTEND_URL,
+        footerNote: "Вы получили это письмо, потому что включены уведомления на email в настройках аккаунта."
+      })
+    });
+    if (!sent) logger.info({ userId: data.userId, subject }, "email_notification_not_sent");
+  }
+
+  if (preferences.telegramEnabled) {
+    const chatId = await getTelegramChatId(data.userId);
+    if (chatId) await sendTelegramMessage(chatId, `<b>${safeSubject}</b>\n${safeBody}`);
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case "&": return "&amp;";
+      case "<": return "&lt;";
+      case ">": return "&gt;";
+      case '"': return "&quot;";
+      default: return "&#39;";
+    }
+  });
+}
+
+/** Runs the reconciliation snapshot and pages every admin if any currency comes out mismatched. */
+async function processReconciliationDaily() {
+  const snapshots = await createReconciliationSnapshot();
+  const mismatches = snapshots.filter((snapshot) => snapshot.status === "mismatch");
+  if (!mismatches.length) return;
+
+  logger.error({ mismatches }, "reconciliation_mismatch_detected");
+  const admins = await pool.query<{ id: string }>(`select id from users where role = 'admin'`);
+  const summary = mismatches.map((m) => `${m.currency}: ${m.differenceCents}`).join(", ");
+  await Promise.all(
+    admins.rows.map((admin) =>
+      createNotification({
+        userId: admin.id,
+        type: "reconciliation_mismatch",
+        title: "Расхождение в сверке баланса",
+        body: `Обнаружено расхождение в ledger/wallet: ${summary}. Проверьте /admin/finance.`
+      })
+    )
+  );
 }
 
 export function startJobWorker() {
@@ -130,6 +214,7 @@ export function startJobWorker() {
       if (job.name === "dispute_timer") await processDisputeTimers(job.data.disputeId);
       if (job.name === "payout") await processPayout(job.data.userId);
       if (job.name === "email_notification") await processEmail(job.data);
+      if (job.name === "reconciliation_daily") await processReconciliationDaily();
     },
     { connection: redis, concurrency: 5 }
   );

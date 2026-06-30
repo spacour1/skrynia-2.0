@@ -245,6 +245,48 @@ export async function recordWalletWithdrawalReversalLedger(params: {
   });
 }
 
+/**
+ * Books a manual correction against a user's payable balance, balanced against an equity
+ * account rather than another user's money - the whole point of a manual adjustment is that
+ * it didn't come from a real counterparty transaction, so there's no other liability account
+ * to net it against.
+ */
+export async function recordManualAdjustmentLedger(params: {
+  client: DbClient;
+  adjustmentId: string;
+  userId: string;
+  amountCents: number;
+  currency: string;
+  adminId: string;
+  reason: string;
+}) {
+  const magnitude = Math.abs(params.amountCents);
+  const isCredit = params.amountCents >= 0;
+  await postLedgerEntry(params.client, {
+    idempotencyKey: `manual_adjustment:${params.adjustmentId}`,
+    entryType: "adjustment",
+    currency: params.currency,
+    metadata: { kind: "manual_adjustment", adminId: params.adminId, reason: params.reason },
+    lines: [
+      {
+        accountCode: accountCode("equity:manual-adjustment", params.currency),
+        accountName: `${params.currency} manual adjustment equity`,
+        accountType: "equity",
+        debitCents: isCredit ? magnitude : undefined,
+        creditCents: isCredit ? undefined : magnitude
+      },
+      {
+        accountCode: ledgerAccountCodes.userPayable(params.currency, params.userId),
+        accountName: `${params.currency} user payable liability`,
+        accountType: "liability",
+        userId: params.userId,
+        creditCents: isCredit ? magnitude : undefined,
+        debitCents: isCredit ? undefined : magnitude
+      }
+    ]
+  });
+}
+
 export async function recordRefundLedger(params: {
   client: DbClient;
   orderId: string;

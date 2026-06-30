@@ -5,7 +5,8 @@ import { ArrowDownToLine, ArrowUpFromLine, CircleDollarSign, Hourglass, LockKeyh
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RequireAuth } from "../../components/RequireAuth";
 import { EmailNotVerifiedNotice } from "../../components/EmailNotVerifiedNotice";
-import { ApiError, apiFetch, isEmailNotVerifiedError, money } from "../../lib/api";
+import { PhoneNotVerifiedNotice } from "../../components/PhoneNotVerifiedNotice";
+import { ApiError, apiFetch, isEmailNotVerifiedError, isPhoneNotVerifiedError, money } from "../../lib/api";
 import { redirectToLiqpay, type LiqpayCheckout } from "../../lib/liqpay";
 import { redirectToMonobank, type MonobankCheckout } from "../../lib/monobank";
 import { redirectToWayforpay, type WayforpayCheckout } from "../../lib/wayforpay";
@@ -258,6 +259,10 @@ function WalletContent() {
                   isEmailNotVerifiedError(withdraw.error) ? (
                     <div className="mt-2">
                       <EmailNotVerifiedNotice />
+                    </div>
+                  ) : isPhoneNotVerifiedError(withdraw.error) ? (
+                    <div className="mt-2">
+                      <PhoneNotVerifiedNotice />
                     </div>
                   ) : (
                     <p className="mt-2 text-sm text-rose-600">{(withdraw.error as ApiError).message}</p>

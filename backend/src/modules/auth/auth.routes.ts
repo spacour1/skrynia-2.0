@@ -11,7 +11,16 @@ import { REFRESH_COOKIE, setAuthCookies, clearAuthCookies } from "../../common/c
 import type { AuthedRequest } from "../../common/types.js";
 import { disconnectUser } from "../chat/ws.service.js";
 import { verifyTelegramAuth } from "./telegram.service.js";
-import { hashRefreshToken, issueSession, revokeAllUserSessions, revokeRefreshToken, revokeSession } from "./session.service.js";
+import {
+  hashRefreshToken,
+  issueSession,
+  issueTwoFactorPendingToken,
+  revokeAllUserSessions,
+  revokeRefreshToken,
+  revokeSession,
+  verifyTwoFactorPendingToken
+} from "./session.service.js";
+import { verifyTwoFactorCode } from "./twofa.service.js";
 import {
   consumeEmailVerificationToken,
   createPasswordResetToken,
@@ -49,6 +58,7 @@ const telegramSchema = z.object({
 const emailVerifyConfirmSchema = z.object({ token: z.string().min(1) });
 const passwordForgotSchema = z.object({ email: z.string().email() });
 const passwordResetSchema = z.object({ token: z.string().min(1), password: z.string().min(8) });
+const twoFactorVerifySchema = z.object({ twoFactorToken: z.string().min(1), code: z.string().min(4).max(16) });
 
 router.post(
   "/register",
@@ -92,6 +102,7 @@ router.post(
     const input = loginSchema.parse(req.body);
     const result = await pool.query(
       `select id, email, password_hash, display_name as "displayName", role, is_banned as "isBanned",
+              two_factor_enabled as "twoFactorEnabled",
               (email_verified_at is not null or telegram_id is not null) as "emailVerified"
        from users where email = $1`,
       [input.email.toLowerCase()]
@@ -103,9 +114,45 @@ router.post(
     const ok = await bcrypt.compare(input.password, user.password_hash);
     if (!ok) throw badRequest("Invalid email or password");
 
+    if (user.twoFactorEnabled) {
+      const twoFactorToken = issueTwoFactorPendingToken(user.id);
+      return res.json({ twoFactorRequired: true, twoFactorToken });
+    }
+
     const session = await issueSession(user.id, user.role);
     setAuthCookies(res, session);
     delete user.password_hash;
+    res.json({ user });
+  })
+);
+
+router.post(
+  "/2fa/verify",
+  authRateLimit,
+  asyncHandler(async (req, res) => {
+    const input = twoFactorVerifySchema.parse(req.body);
+    let userId: string;
+    try {
+      userId = verifyTwoFactorPendingToken(input.twoFactorToken);
+    } catch {
+      throw badRequest("Two-factor session has expired, log in again");
+    }
+
+    const result = await pool.query(
+      `select id, email, display_name as "displayName", role, is_banned as "isBanned",
+              (email_verified_at is not null or telegram_id is not null) as "emailVerified"
+       from users where id = $1`,
+      [userId]
+    );
+    const user = result.rows[0];
+    if (!user) throw badRequest("Account not found");
+    if (user.isBanned) throw forbidden("Account is banned");
+
+    const valid = await verifyTwoFactorCode(userId, input.code);
+    if (!valid) throw badRequest("Invalid two-factor code");
+
+    const session = await issueSession(user.id, user.role);
+    setAuthCookies(res, session);
     res.json({ user });
   })
 );

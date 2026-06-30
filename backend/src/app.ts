@@ -23,6 +23,7 @@ import adminRoutes from "./modules/admin/admin.routes.js";
 import storageRoutes from "./modules/storage/storage.routes.js";
 import supportRoutes from "./modules/support/support.routes.js";
 import notificationRoutes from "./modules/notifications/notifications.routes.js";
+import telegramWebhookRoutes from "./modules/notifications/telegram-webhook.routes.js";
 import currencyRoutes from "./modules/currencies/currencies.routes.js";
 
 export function createApp() {
@@ -60,6 +61,7 @@ export function createApp() {
   app.use("/storage", storageRoutes);
   app.use("/support", supportRoutes);
   app.use("/notifications", notificationRoutes);
+  app.use("/telegram", telegramWebhookRoutes);
   app.use("/currencies", currencyRoutes);
 
   app.use(errorHandler);

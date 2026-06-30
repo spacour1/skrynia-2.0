@@ -4,7 +4,7 @@
 export const API_URL = "/api";
 export const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4000/ws";
 
-export type Role = "user" | "seller" | "admin";
+export type Role = "user" | "moderator" | "admin";
 
 export type User = {
   id: string;
@@ -18,6 +18,9 @@ export type User = {
   createdAt?: string;
   online?: boolean;
   emailVerified?: boolean;
+  phone?: string | null;
+  phoneVerified?: boolean;
+  telegramConnected?: boolean;
 };
 
 export type Category = {
@@ -243,6 +246,10 @@ export class ApiError extends Error {
 
 export function isEmailNotVerifiedError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 403 && error.code === "email_not_verified";
+}
+
+export function isPhoneNotVerifiedError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403 && error.code === "phone_not_verified";
 }
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);

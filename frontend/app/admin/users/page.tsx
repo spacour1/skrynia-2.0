@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../../../lib/api";
 import { RequireAuth } from "../../../components/RequireAuth";
 import { useI18n } from "../../../lib/i18n";
+import { useAuth } from "../../../lib/auth-store";
 
 type AdminUser = {
   id: string;
@@ -18,7 +19,7 @@ type AdminUser = {
 
 export default function AdminUsersPage() {
   return (
-    <RequireAuth roles={["admin"]}>
+    <RequireAuth roles={["admin", "moderator"]}>
       <AdminUsersContent />
     </RequireAuth>
   );
@@ -27,6 +28,8 @@ export default function AdminUsersPage() {
 function AdminUsersContent() {
   const client = useQueryClient();
   const { t } = useI18n();
+  const { user: currentUser } = useAuth();
+  const isAdmin = currentUser?.role === "admin";
   const users = useQuery({
     queryKey: ["admin-users"],
     queryFn: () => apiFetch<{ users: AdminUser[] }>("/admin/users")
@@ -92,14 +95,19 @@ function AdminUsersContent() {
                 <td>{user.displayName}</td>
                 <td>{user.email}</td>
                 <td>
-                  <select
-                    className="app-input py-1"
-                    value={user.role === "seller" ? "user" : user.role}
-                    onChange={(event) => update.mutate({ id: user.id, role: event.target.value })}
-                  >
-                    <option value="user">user</option>
-                    <option value="admin">admin</option>
-                  </select>
+                  {isAdmin ? (
+                    <select
+                      className="app-input py-1"
+                      value={user.role}
+                      onChange={(event) => update.mutate({ id: user.id, role: event.target.value })}
+                    >
+                      <option value="user">user</option>
+                      <option value="moderator">moderator</option>
+                      <option value="admin">admin</option>
+                    </select>
+                  ) : (
+                    user.role
+                  )}
                 </td>
                 <td>
                   {user.isBanned ? t("common.banned") : t("common.active")}
@@ -123,12 +131,14 @@ function AdminUsersContent() {
                         Замьютить
                       </button>
                     )}
-                    <button
-                      className="rounded-md border border-line px-3 py-1 transition hover:bg-panel"
-                      onClick={() => update.mutate({ id: user.id, isBanned: !user.isBanned })}
-                    >
-                      {user.isBanned ? t("admin.unban") : t("admin.ban")}
-                    </button>
+                    {isAdmin ? (
+                      <button
+                        className="rounded-md border border-line px-3 py-1 transition hover:bg-panel"
+                        onClick={() => update.mutate({ id: user.id, isBanned: !user.isBanned })}
+                      >
+                        {user.isBanned ? t("admin.unban") : t("admin.ban")}
+                      </button>
+                    ) : null}
                   </div>
                 </td>
               </tr>

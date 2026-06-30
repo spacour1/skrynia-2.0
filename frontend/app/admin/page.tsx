@@ -6,6 +6,7 @@ import { Activity, AlertTriangle, Banknote, Flag, Headphones, ImageIcon, ListChe
 import { apiFetch, money } from "../../lib/api";
 import { StatusBadge } from "../../components/StatusBadge";
 import { RequireAuth } from "../../components/RequireAuth";
+import { useAuth } from "../../lib/auth-store";
 
 type Overview = {
   users: number;
@@ -38,7 +39,7 @@ type Transaction = {
 
 export default function AdminPage() {
   return (
-    <RequireAuth roles={["admin"]}>
+    <RequireAuth roles={["admin", "moderator"]}>
       <AdminContent />
     </RequireAuth>
   );
@@ -46,6 +47,8 @@ export default function AdminPage() {
 
 function AdminContent() {
   const client = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const overview = useQuery({
     queryKey: ["admin-overview"],
     queryFn: () => apiFetch<Overview>("/admin/overview")
@@ -56,7 +59,8 @@ function AdminContent() {
   });
   const transactions = useQuery({
     queryKey: ["admin-transactions"],
-    queryFn: () => apiFetch<{ transactions: Transaction[] }>("/admin/transactions")
+    queryFn: () => apiFetch<{ transactions: Transaction[] }>("/admin/transactions"),
+    enabled: isAdmin
   });
   const moderate = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
@@ -100,29 +104,35 @@ function AdminContent() {
         </div>
       </Link>
 
-      <Link className="interactive-card flex items-center gap-4 p-5" href="/admin/ops">
-        <Activity className="h-6 w-6 text-brand" />
-        <div>
-          <p className="font-bold">Центр операций</p>
-          <p className="text-sm text-muted">Журнал аудита, очереди, сверка, метрики</p>
-        </div>
-      </Link>
+      {isAdmin ? (
+        <Link className="interactive-card flex items-center gap-4 p-5" href="/admin/ops">
+          <Activity className="h-6 w-6 text-brand" />
+          <div>
+            <p className="font-bold">Центр операций</p>
+            <p className="text-sm text-muted">Журнал аудита, очереди, сверка, метрики</p>
+          </div>
+        </Link>
+      ) : null}
 
-      <Link className="interactive-card flex items-center gap-4 p-5" href="/admin/finance">
-        <Banknote className="h-6 w-6 text-brand" />
-        <div>
-          <p className="font-bold">Финансовый контроль</p>
-          <p className="text-sm text-muted">Главная книга, эскроу, сверка, журнал транзакций</p>
-        </div>
-      </Link>
+      {isAdmin ? (
+        <Link className="interactive-card flex items-center gap-4 p-5" href="/admin/finance">
+          <Banknote className="h-6 w-6 text-brand" />
+          <div>
+            <p className="font-bold">Финансовый контроль</p>
+            <p className="text-sm text-muted">Главная книга, эскроу, сверка, журнал транзакций</p>
+          </div>
+        </Link>
+      ) : null}
 
-      <Link className="interactive-card flex items-center gap-4 p-5" href="/admin/payouts">
-        <WalletCards className="h-6 w-6 text-brand" />
-        <div>
-          <p className="font-bold">Выплаты продавцам</p>
-          <p className="text-sm text-muted">Подтверждение и отклонение заявок на вывод средств</p>
-        </div>
-      </Link>
+      {isAdmin ? (
+        <Link className="interactive-card flex items-center gap-4 p-5" href="/admin/payouts">
+          <WalletCards className="h-6 w-6 text-brand" />
+          <div>
+            <p className="font-bold">Выплаты продавцам</p>
+            <p className="text-sm text-muted">Подтверждение и отклонение заявок на вывод средств</p>
+          </div>
+        </Link>
+      ) : null}
 
       <Link className="interactive-card flex items-center gap-4 p-5" href="/admin/media">
         <ImageIcon className="h-6 w-6 text-brand" />
@@ -140,33 +150,35 @@ function AdminContent() {
         </div>
       </Link>
 
-      <section className="app-card p-5">
-        <h2 className="text-xl font-extrabold">Последние транзакции</h2>
-        <div className="table-shell mt-4 overflow-x-auto shadow-none">
-          <table className="min-w-[760px]">
-            <thead>
-              <tr>
-                <th>Пользователь</th>
-                <th>Тип</th>
-                <th>Направление</th>
-                <th className="text-right">Сумма</th>
-                <th className="text-right">Создано</th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.data?.transactions.slice(0, 12).map((tx) => (
-                <tr key={tx.id} className="border-b border-line transition last:border-b-0 hover:bg-panel/60">
-                  <td>{tx.displayName ?? "-"}</td>
-                  <td>{tx.type.replace("_", " ")}</td>
-                  <td>{tx.direction}</td>
-                  <td className="text-right">{money(Number(tx.amountCents), tx.currency)}</td>
-                  <td className="text-right">{new Date(tx.createdAt).toLocaleString("ru-RU")}</td>
+      {isAdmin ? (
+        <section className="app-card p-5">
+          <h2 className="text-xl font-extrabold">Последние транзакции</h2>
+          <div className="table-shell mt-4 overflow-x-auto shadow-none">
+            <table className="min-w-[760px]">
+              <thead>
+                <tr>
+                  <th>Пользователь</th>
+                  <th>Тип</th>
+                  <th>Направление</th>
+                  <th className="text-right">Сумма</th>
+                  <th className="text-right">Создано</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+              </thead>
+              <tbody>
+                {transactions.data?.transactions.slice(0, 12).map((tx) => (
+                  <tr key={tx.id} className="border-b border-line transition last:border-b-0 hover:bg-panel/60">
+                    <td>{tx.displayName ?? "-"}</td>
+                    <td>{tx.type.replace("_", " ")}</td>
+                    <td>{tx.direction}</td>
+                    <td className="text-right">{money(Number(tx.amountCents), tx.currency)}</td>
+                    <td className="text-right">{new Date(tx.createdAt).toLocaleString("ru-RU")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       <section className="app-card p-5">
         <h2 className="text-xl font-extrabold">Модерация товаров</h2>

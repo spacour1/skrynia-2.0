@@ -77,7 +77,7 @@ function DashboardContent() {
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              {user.role === "admin" ? (
+              {user.role === "admin" || user.role === "moderator" ? (
                 <Link className="app-button" href="/admin">
                   Админ-панель
                 </Link>
@@ -207,6 +207,7 @@ function OrderHint({ status, isBuyer }: { status: string; isBuyer: boolean }) {
 
 function roleLabel(role: string) {
   if (role === "admin") return "Администратор";
+  if (role === "moderator") return "Модератор";
   return "Пользователь";
 }
 

@@ -9,8 +9,9 @@ import { cacheDel, cacheDelPattern, cacheGet, cacheSet } from "../../common/redi
 import type { AuthedRequest } from "../../common/types.js";
 import { releaseEscrow } from "./ledger.service.js";
 import { recordOrderEvent } from "./order-events.service.js";
-import { notifyOrderEvent } from "../chat/ws.service.js";
+import { notifyOrderEvent, broadcastConversation } from "../chat/ws.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
+import { createSystemMessage, postOrderSystemMessage } from "../chat/chat.service.js";
 
 const router = Router();
 
@@ -39,7 +40,7 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = createOrderSchema.parse(req.body);
 
-    const order = await inTx(async (client) => {
+    const { order, conversationId, systemMessage } = await inTx(async (client) => {
       const productResult = await client.query(
         `select p.id, p.seller_id, p.price_cents, p.currency, p.stock, p.status, u.is_banned
          from products p
@@ -54,15 +55,40 @@ router.post(
       if (product.stock < input.quantity) throw badRequest("Not enough stock");
 
       const amountCents = Number(product.price_cents) * input.quantity;
-      const result = await client.query(
+      const orderResult = await client.query(
         `insert into orders(buyer_id, seller_id, product_id, quantity, amount_cents, currency)
          values ($1, $2, $3, $4, $5, $6)
          returning *`,
         [req.user.id, product.seller_id, product.id, input.quantity, amountCents, product.currency]
       );
-      return result.rows[0];
+      const createdOrder = orderResult.rows[0];
+
+      // Every order gets its own chat: reuse the buyer/seller/product conversation if one
+      // already exists (e.g. they chatted about the listing first, or bought it before),
+      // and attach this order to it if it isn't already tied to an earlier one.
+      const conversationResult = await client.query(
+        `insert into conversations(buyer_id, seller_id, product_id, order_id)
+         values ($1, $2, $3, $4)
+         on conflict (buyer_id, seller_id, product_id) where product_id is not null
+         do update set order_id = coalesce(conversations.order_id, excluded.order_id)
+         returning id`,
+        [req.user.id, product.seller_id, product.id, createdOrder.id]
+      );
+      const newConversationId = conversationResult.rows[0].id as string;
+
+      const message = await createSystemMessage(
+        {
+          conversationId: newConversationId,
+          type: "order_created",
+          body: "Заказ создан. Следующий шаг - оплата."
+        },
+        client
+      );
+
+      return { order: createdOrder, conversationId: newConversationId, systemMessage: message };
     });
 
+    broadcastConversation(conversationId, { type: "message", message: systemMessage });
     await createNotification({
       userId: order.seller_id,
       type: "order_created",
@@ -81,7 +107,7 @@ router.post(
     await cacheDelPattern(`orders:${req.user.id}:*`);
     await cacheDelPattern(`orders:${order.seller_id}:*`);
 
-    res.status(201).json({ order });
+    res.status(201).json({ order, conversationId });
   })
 );
 
@@ -204,6 +230,7 @@ router.post(
       title: "Продавец начал выполнение",
       body: "Заказ принят в работу."
     });
+    await postOrderSystemMessage(id, "seller_started", "Продавец начал выполнение заказа.");
     res.json({ order: result.rows[0] });
   })
 );
@@ -246,6 +273,7 @@ router.post(
       title: "Результат передан",
       body: "Продавец отметил заказ доставленным и добавил данные доставки."
     });
+    await postOrderSystemMessage(id, "delivery_sent", "Продавец передал результат заказа. Проверьте и подтвердите доставку.");
     res.json({ order: result.rows[0] });
   })
 );
@@ -278,6 +306,7 @@ router.post(
       title: "Покупатель подтвердил доставку",
       body: "Сделка завершена, средства выплачены продавцу."
     });
+    await postOrderSystemMessage(id, "escrow_released", "Покупатель подтвердил доставку. Средства выплачены продавцу.");
     res.json({ order: updated });
   })
 );

@@ -33,7 +33,7 @@ const STATUS_FILTERS: Array<["" | Report["status"], string]> = [
 
 export default function AdminReportsPage() {
   return (
-    <RequireAuth roles={["admin"]}>
+    <RequireAuth roles={["admin", "moderator"]}>
       <AdminReportsContent />
     </RequireAuth>
   );

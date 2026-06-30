@@ -41,11 +41,20 @@ const schema = z.object({
   WAYFORPAY_MERCHANT_SECRET_KEY: z.string().optional(),
   WAYFORPAY_SERVICE_URL: z.string().optional(),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
+  // Used to build the t.me/<username>?start=<token> deep link for the notification-linking
+  // flow (separate from the Telegram login widget, which doesn't need a bot at all).
+  TELEGRAM_BOT_USERNAME: z.string().optional(),
+  TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
   // SMTP is intentionally not used: most PaaS hosts (Railway included) block outbound
   // SMTP ports (25/465/587) at the network level, which makes mail silently time out
   // regardless of credentials. Resend's HTTP API runs over plain HTTPS (443) instead.
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().default("EscrowMarket <onboarding@resend.dev>"),
+  // Twilio Verify handles phone-number OTP codes - same "warn, don't fail startup" treatment
+  // as Resend above, since phone verification is optional everywhere except wallet withdrawal.
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_VERIFY_SERVICE_SID: z.string().optional(),
   METRICS_USER: z.string().default("metrics"),
   METRICS_PASSWORD: z.string().default("dev-metrics-password-change-me"),
   // Lets the dev/test payment-simulation endpoints (success/failure/wait_accept) run in a
@@ -93,4 +102,8 @@ export const env = schema.parse(process.env);
 // verify-email/password-reset just no-op (see common/mailer.ts) until Resend is configured.
 if (env.NODE_ENV === "production" && !env.RESEND_API_KEY) {
   console.warn("RESEND_API_KEY is not configured - verification and password-reset emails will not be sent");
+}
+
+if (env.NODE_ENV === "production" && !(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID)) {
+  console.warn("Twilio Verify is not fully configured - phone verification codes will not be sent");
 }

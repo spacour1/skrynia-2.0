@@ -12,7 +12,9 @@ import {
   MailCheck,
   MailWarning,
   Moon,
+  Phone,
   Save,
+  Send,
   ShieldCheck,
   Sun,
   Trash2,
@@ -31,7 +33,6 @@ type ProfileState = {
   avatarUrl: string;
   profileDescription: string;
   pushEnabled: boolean;
-  twoFactorEnabled: boolean;
 };
 
 const emptyProfile: ProfileState = {
@@ -39,8 +40,7 @@ const emptyProfile: ProfileState = {
   email: "",
   avatarUrl: "",
   profileDescription: "",
-  pushEnabled: false,
-  twoFactorEnabled: false
+  pushEnabled: false
 };
 
 export default function SettingsPage() {
@@ -73,8 +73,7 @@ function SettingsContent() {
       email: me.data.user.email,
       avatarUrl: me.data.user.avatarUrl ?? "",
       profileDescription: typeof me.data.user.settings?.profileDescription === "string" ? me.data.user.settings.profileDescription : "",
-      pushEnabled: Boolean(me.data.user.pushEnabled),
-      twoFactorEnabled: Boolean(me.data.user.twoFactorEnabled)
+      pushEnabled: Boolean(me.data.user.pushEnabled)
     });
   }, [me.data]);
 
@@ -135,6 +134,98 @@ function SettingsContent() {
         response.status === "already_verified" ? "Email уже подтвержден" : "Письмо отправлено — проверьте почту (и папку спам)"
       ),
     onError: (err) => setVerifyMessage(err instanceof Error ? err.message : "Не удалось отправить письмо")
+  });
+
+  const [phoneInput, setPhoneInput] = useState("");
+  const [phoneCode, setPhoneCode] = useState("");
+  const [phoneStep, setPhoneStep] = useState<"enter" | "code_sent">("enter");
+  const [phoneMessage, setPhoneMessage] = useState("");
+
+  const requestPhoneCode = useMutation({
+    mutationFn: () => apiFetch<{ status: string }>("/users/me/phone/request", { method: "POST", body: JSON.stringify({ phone: phoneInput.trim() }) }),
+    onSuccess: () => {
+      setPhoneStep("code_sent");
+      setPhoneMessage("Код отправлен по SMS");
+    },
+    onError: (err) => setPhoneMessage(err instanceof Error ? err.message : "Не удалось отправить код")
+  });
+
+  const confirmPhoneCode = useMutation({
+    mutationFn: () => apiFetch<{ status: string }>("/users/me/phone/confirm", { method: "POST", body: JSON.stringify({ code: phoneCode.trim() }) }),
+    onSuccess: () => {
+      setPhoneMessage("Телефон подтвержден");
+      setPhoneStep("enter");
+      setPhoneCode("");
+      queryClient.invalidateQueries({ queryKey: ["me-settings"] });
+    },
+    onError: (err) => setPhoneMessage(err instanceof Error ? err.message : "Неверный или просроченный код")
+  });
+
+  const preferences = useQuery({
+    queryKey: ["notification-preferences"],
+    queryFn: () => apiFetch<{ preferences: { emailEnabled: boolean; telegramEnabled: boolean } }>("/users/me/notifications/preferences")
+  });
+  const [telegramMessage, setTelegramMessage] = useState("");
+
+  const updatePreferences = useMutation({
+    mutationFn: (payload: { emailEnabled?: boolean; telegramEnabled?: boolean }) =>
+      apiFetch("/users/me/notifications/preferences", { method: "PATCH", body: JSON.stringify(payload) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notification-preferences"] })
+  });
+
+  const [twoFaStep, setTwoFaStep] = useState<"idle" | "setup" | "backupCodes">("idle");
+  const [twoFaSetup, setTwoFaSetup] = useState<{ secret: string; otpauthUri: string } | null>(null);
+  const [twoFaCode, setTwoFaCode] = useState("");
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
+  const [twoFaMessage, setTwoFaMessage] = useState("");
+  const [disablePassword, setDisablePassword] = useState("");
+  const [showDisablePrompt, setShowDisablePrompt] = useState(false);
+
+  const startTwoFactorSetup = useMutation({
+    mutationFn: () => apiFetch<{ secret: string; otpauthUri: string }>("/users/me/2fa/setup", { method: "POST" }),
+    onSuccess: (data) => {
+      setTwoFaSetup(data);
+      setTwoFaStep("setup");
+      setTwoFaMessage("");
+    },
+    onError: (err) => setTwoFaMessage(err instanceof Error ? err.message : "Не удалось начать настройку 2FA")
+  });
+
+  const confirmTwoFactorSetup = useMutation({
+    mutationFn: () => apiFetch<{ backupCodes: string[] }>("/users/me/2fa/enable", { method: "POST", body: JSON.stringify({ code: twoFaCode.trim() }) }),
+    onSuccess: ({ backupCodes: codes }) => {
+      setBackupCodes(codes);
+      setTwoFaStep("backupCodes");
+      setTwoFaCode("");
+      queryClient.invalidateQueries({ queryKey: ["me-settings"] });
+    },
+    onError: (err) => setTwoFaMessage(err instanceof Error ? err.message : "Неверный код")
+  });
+
+  const disableTwoFactorMutation = useMutation({
+    mutationFn: () => apiFetch("/users/me/2fa/disable", { method: "POST", body: JSON.stringify({ currentPassword: disablePassword }) }),
+    onSuccess: () => {
+      setShowDisablePrompt(false);
+      setDisablePassword("");
+      setTwoFaStep("idle");
+      setTwoFaSetup(null);
+      queryClient.invalidateQueries({ queryKey: ["me-settings"] });
+    },
+    onError: (err) => setTwoFaMessage(err instanceof Error ? err.message : "Не удалось отключить 2FA")
+  });
+
+  const connectTelegram = useMutation({
+    mutationFn: () => apiFetch<{ link: string }>("/users/me/telegram/connect", { method: "POST" }),
+    onSuccess: ({ link }) => window.open(link, "_blank", "noopener,noreferrer"),
+    onError: (err) => setTelegramMessage(err instanceof Error ? err.message : "Не удалось получить ссылку для подключения")
+  });
+
+  const disconnectTelegram = useMutation({
+    mutationFn: () => apiFetch("/users/me/telegram/disconnect", { method: "POST" }),
+    onSuccess: () => {
+      setTelegramMessage("Telegram отключен");
+      queryClient.invalidateQueries({ queryKey: ["me-settings"] });
+    }
   });
 
   function pickAvatar(file?: File) {
@@ -256,13 +347,6 @@ function SettingsContent() {
                     checked={profile.pushEnabled}
                     onChange={(checked) => setProfile({ ...profile, pushEnabled: checked })}
                   />
-                  <Toggle
-                    icon={ShieldCheck}
-                    title="Двухфакторная защита"
-                    text="MVP-переключатель под будущий OTP/Telegram."
-                    checked={profile.twoFactorEnabled}
-                    onChange={(checked) => setProfile({ ...profile, twoFactorEnabled: checked })}
-                  />
                 </div>
               </div>
             </div>
@@ -315,6 +399,94 @@ function SettingsContent() {
           </form>
 
           <section className="app-card overflow-hidden">
+            <SectionHeader icon={ShieldCheck} title="Двухфакторная аутентификация" text="Код из приложения-аутентификатора (Google Authenticator, Authy и т.п.) при каждом входе." />
+            <div className="space-y-4 p-5">
+              {me.data?.user.twoFactorEnabled ? (
+                <>
+                  <div className="flex items-center gap-3 rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-4 text-sm text-emerald-700 dark:text-emerald-300">
+                    <CheckCircle2 className="h-5 w-5 shrink-0" />
+                    <span className="font-bold">2FA включена</span>
+                  </div>
+                  {showDisablePrompt ? (
+                    <div className="space-y-3">
+                      <input
+                        className="app-input w-full"
+                        type="password"
+                        placeholder="Текущий пароль"
+                        value={disablePassword}
+                        onChange={(event) => setDisablePassword(event.target.value)}
+                      />
+                      <button
+                        className="app-button-danger w-full"
+                        type="button"
+                        disabled={!disablePassword || disableTwoFactorMutation.isPending}
+                        onClick={() => disableTwoFactorMutation.mutate()}
+                      >
+                        Подтвердить отключение
+                      </button>
+                    </div>
+                  ) : (
+                    <button className="app-button-danger w-full" type="button" onClick={() => setShowDisablePrompt(true)}>
+                      Отключить 2FA
+                    </button>
+                  )}
+                </>
+              ) : twoFaStep === "backupCodes" ? (
+                <>
+                  <p className="text-sm leading-6 text-muted">
+                    2FA включена. Сохраните backup-коды — каждый можно использовать один раз вместо кода из приложения, если телефон недоступен.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-panel/40 p-4 font-mono text-sm">
+                    {backupCodes.map((code) => (
+                      <span key={code}>{code}</span>
+                    ))}
+                  </div>
+                  <button className="app-button w-full" type="button" onClick={() => setTwoFaStep("idle")}>
+                    Готово
+                  </button>
+                </>
+              ) : twoFaStep === "setup" && twoFaSetup ? (
+                <>
+                  <p className="text-sm leading-6 text-muted">Отсканируйте в приложении-аутентификаторе или введите секрет вручную, затем введите код для подтверждения.</p>
+                  <div className="rounded-lg border border-line bg-panel/40 p-4">
+                    <p className="break-all font-mono text-xs text-muted">{twoFaSetup.otpauthUri}</p>
+                    <p className="mt-2 text-sm">
+                      Секрет: <span className="font-mono font-bold">{twoFaSetup.secret}</span>
+                    </p>
+                  </div>
+                  <input
+                    className="app-input w-full"
+                    inputMode="numeric"
+                    placeholder="Код из приложения"
+                    value={twoFaCode}
+                    onChange={(event) => setTwoFaCode(event.target.value)}
+                  />
+                  <button
+                    className="app-button w-full"
+                    type="button"
+                    disabled={!twoFaCode.trim() || confirmTwoFactorSetup.isPending}
+                    onClick={() => confirmTwoFactorSetup.mutate()}
+                  >
+                    {confirmTwoFactorSetup.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                    Подтвердить и включить
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="app-button-secondary w-full"
+                  type="button"
+                  disabled={startTwoFactorSetup.isPending}
+                  onClick={() => startTwoFactorSetup.mutate()}
+                >
+                  {startTwoFactorSetup.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                  Включить 2FA
+                </button>
+              )}
+              <StatusMessage message={twoFaMessage} />
+            </div>
+          </section>
+
+          <section className="app-card overflow-hidden">
             <SectionHeader icon={Mail} title="Подтверждение email" text="Защитите аккаунт и разблокируйте уведомления о заказах на почту." />
             <div className="space-y-4 p-5">
               {me.data?.user.emailVerified ? (
@@ -344,6 +516,120 @@ function SettingsContent() {
                 </>
               )}
               <StatusMessage message={verifyMessage} />
+            </div>
+          </section>
+
+          <section className="app-card overflow-hidden">
+            <SectionHeader icon={Phone} title="Подтверждение телефона" text="Нужно для вывода средств. Подтверждение необязательно для остальных действий на сайте." />
+            <div className="space-y-4 p-5">
+              {me.data?.user.phoneVerified ? (
+                <div className="flex items-center gap-3 rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-4 text-sm text-emerald-700 dark:text-emerald-300">
+                  <CheckCircle2 className="h-5 w-5 shrink-0" />
+                  <span className="font-bold">Телефон подтвержден: {me.data.user.phone}</span>
+                </div>
+              ) : phoneStep === "enter" ? (
+                <>
+                  <label className="block space-y-2">
+                    <span className="block text-xs font-bold text-muted">Номер телефона</span>
+                    <input
+                      className="app-input h-11 w-full"
+                      type="tel"
+                      placeholder="+380501234567"
+                      value={phoneInput}
+                      onChange={(event) => setPhoneInput(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    className="app-button-secondary w-full"
+                    type="button"
+                    disabled={!phoneInput.trim() || requestPhoneCode.isPending}
+                    onClick={() => requestPhoneCode.mutate()}
+                  >
+                    {requestPhoneCode.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4" />}
+                    Отправить код по SMS
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm leading-6 text-muted">
+                    Код отправлен на <strong>{phoneInput}</strong>. Введите его ниже.
+                  </p>
+                  <label className="block space-y-2">
+                    <span className="block text-xs font-bold text-muted">Код из SMS</span>
+                    <input
+                      className="app-input h-11 w-full"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="482913"
+                      value={phoneCode}
+                      onChange={(event) => setPhoneCode(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    className="app-button-secondary w-full"
+                    type="button"
+                    disabled={!phoneCode.trim() || confirmPhoneCode.isPending}
+                    onClick={() => confirmPhoneCode.mutate()}
+                  >
+                    {confirmPhoneCode.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                    Подтвердить код
+                  </button>
+                  <button
+                    className="w-full text-center text-sm font-bold text-muted underline underline-offset-2 transition hover:text-ink"
+                    type="button"
+                    onClick={() => setPhoneStep("enter")}
+                  >
+                    Изменить номер
+                  </button>
+                </>
+              )}
+              <StatusMessage message={phoneMessage} />
+            </div>
+          </section>
+
+          <section className="app-card overflow-hidden">
+            <SectionHeader icon={Send} title="Уведомления" text="Куда присылать заказы, сообщения, споры и другие важные события." />
+            <div className="space-y-4 p-5">
+              <Toggle
+                icon={Mail}
+                title="Email уведомления"
+                text="Письма о ключевых событиях по заказам."
+                checked={preferences.data?.preferences.emailEnabled ?? true}
+                onChange={(checked) => updatePreferences.mutate({ emailEnabled: checked })}
+              />
+              <Toggle
+                icon={Send}
+                title="Telegram уведомления"
+                text="Требует подключения Telegram-бота ниже."
+                checked={preferences.data?.preferences.telegramEnabled ?? true}
+                onChange={(checked) => updatePreferences.mutate({ telegramEnabled: checked })}
+              />
+              {me.data?.user.telegramConnected ? (
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-4 text-sm text-emerald-700 dark:text-emerald-300">
+                  <span className="flex items-center gap-2 font-bold">
+                    <CheckCircle2 className="h-5 w-5 shrink-0" />
+                    Telegram подключен
+                  </span>
+                  <button
+                    className="text-xs font-bold text-muted underline underline-offset-2 transition hover:text-ink"
+                    type="button"
+                    onClick={() => disconnectTelegram.mutate()}
+                  >
+                    Отключить
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="app-button-secondary w-full"
+                  type="button"
+                  disabled={connectTelegram.isPending}
+                  onClick={() => connectTelegram.mutate()}
+                >
+                  {connectTelegram.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  Подключить Telegram
+                </button>
+              )}
+              <StatusMessage message={telegramMessage} />
             </div>
           </section>
 

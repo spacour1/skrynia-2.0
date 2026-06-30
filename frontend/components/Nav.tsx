@@ -125,7 +125,7 @@ export function Nav() {
     { label: t("nav.wallet"), href: "/wallet", icon: WalletCards, auth: true },
     { label: t("nav.support"), href: "/support", icon: Headphones },
     { label: t("nav.settings"), href: "/settings", icon: Settings, auth: true },
-    ...(user?.role === "admin" ? [{ label: t("nav.admin"), href: "/admin", icon: Gauge, auth: true }] : [])
+    ...(user?.role === "admin" || user?.role === "moderator" ? [{ label: t("nav.admin"), href: "/admin", icon: Gauge, auth: true }] : [])
   ];
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
@@ -598,6 +598,6 @@ function formatNotificationTime(value: string) {
 function roleLabel(role: string, language: string) {
   if (language !== "ru") return role;
   if (role === "admin") return "admin";
-  if (role === "seller") return "seller";
+  if (role === "moderator") return "moderator";
   return "user";
 }

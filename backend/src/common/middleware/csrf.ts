@@ -13,12 +13,14 @@ const EXEMPT_PATHS = new Set([
   "/auth/login",
   "/auth/register",
   "/auth/telegram",
+  "/auth/2fa/verify",
   "/auth/verify-email/confirm",
   "/auth/password/forgot",
   "/auth/password/reset",
   "/payments/liqpay/callback",
   "/payments/monobank/callback",
-  "/payments/wayforpay/callback"
+  "/payments/wayforpay/callback",
+  "/telegram/webhook"
 ]);
 
 function timingSafeEqual(a: string, b: string) {

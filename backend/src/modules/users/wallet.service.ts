@@ -4,10 +4,12 @@ import { badRequest, notFound } from "../../common/errors.js";
 import { cacheDel } from "../../common/redis.js";
 import { ensureWallet } from "../orders/ledger.service.js";
 import {
+  recordManualAdjustmentLedger,
   recordWalletTopupLedger,
   recordWalletWithdrawalLedger,
   recordWalletWithdrawalReversalLedger
 } from "../orders/accounting.service.js";
+import { nanoid } from "nanoid";
 import type { PayoutDestination } from "../payments/payout.providers.js";
 import { getPayoutProvider } from "../payments/payout.providers.js";
 
@@ -110,6 +112,63 @@ export async function requestWithdrawal(
     );
     await cacheDel(`user:${userId}:wallet`);
     return payout.rows[0];
+  });
+}
+
+/**
+ * Admin-only manual correction to a user's wallet balance (e.g. fixing a support case the
+ * automated flows couldn't handle). Always requires a reason, which is recorded both on the
+ * transaction and in the ledger entry's metadata so it shows up in every audit trail.
+ */
+export async function postManualAdjustment(input: {
+  userId: string;
+  amountCents: number;
+  currency: string;
+  reason: string;
+  adminId: string;
+}) {
+  if (input.amountCents === 0) throw badRequest("Adjustment amount cannot be zero");
+  return inSerializableTx(async (client) => {
+    const walletId = await ensureWallet(client, input.userId, input.currency);
+    if (input.amountCents < 0) {
+      const walletResult = await client.query<{ available_cents: number }>(
+        `select available_cents from wallets where id = $1 for update`,
+        [walletId]
+      );
+      if (Number(walletResult.rows[0].available_cents) < Math.abs(input.amountCents)) {
+        throw badRequest("Insufficient balance for a negative adjustment");
+      }
+    }
+
+    await client.query(
+      `update wallets set available_cents = available_cents + $2, updated_at = now() where id = $1`,
+      [walletId, input.amountCents]
+    );
+    const adjustmentId = nanoid();
+    const tx = await client.query(
+      `insert into transactions(wallet_id, user_id, type, direction, amount_cents, currency, status, metadata)
+       values ($1, $2, 'manual_adjustment', $3, $4, $5, 'posted', $6)
+       returning id`,
+      [
+        walletId,
+        input.userId,
+        input.amountCents >= 0 ? "credit" : "debit",
+        Math.abs(input.amountCents),
+        input.currency,
+        { adminId: input.adminId, reason: input.reason }
+      ]
+    );
+    await recordManualAdjustmentLedger({
+      client,
+      adjustmentId,
+      userId: input.userId,
+      amountCents: input.amountCents,
+      currency: input.currency,
+      adminId: input.adminId,
+      reason: input.reason
+    });
+    await cacheDel(`user:${input.userId}:wallet`);
+    return { transactionId: tx.rows[0].id, walletId, amountCents: input.amountCents, currency: input.currency };
   });
 }
 

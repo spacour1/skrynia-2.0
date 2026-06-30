@@ -1,6 +1,6 @@
 import type { Request } from "express";
 
-export type Role = "user" | "seller" | "admin";
+export type Role = "user" | "moderator" | "admin";
 
 export type AuthUser = {
   id: string;
@@ -9,6 +9,7 @@ export type AuthUser = {
   role: Role;
   isBanned: boolean;
   emailVerified: boolean;
+  phoneVerified: boolean;
 };
 
 declare global {

@@ -11,7 +11,7 @@ export function RequireAuth({
   roles
 }: {
   children: React.ReactNode;
-  roles?: Array<"user" | "seller" | "admin">;
+  roles?: Array<"user" | "moderator" | "admin">;
 }) {
   const { user, hydrated, hydrate } = useAuth();
   const { t } = useI18n();

@@ -11,6 +11,7 @@ import { lockEscrow } from "../orders/ledger.service.js";
 import { recordOrderEvent } from "../orders/order-events.service.js";
 import { notifyOrderEvent } from "../chat/ws.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
+import { postOrderSystemMessage } from "../chat/chat.service.js";
 import { paymentAttemptsTotal } from "../../common/metrics.js";
 import { webhookRateLimit } from "../../common/middleware/security.js";
 import { logger } from "../../common/logger.js";
@@ -64,6 +65,7 @@ export async function announceOrderPaid(order: { id: string; buyer_id: string; s
     body: "Оплата зарезервирована в escrow.",
     metadata: { provider: order.payment_provider }
   });
+  await postOrderSystemMessage(order.id, "payment_received", "Оплата получена и зарезервирована в escrow.");
 }
 
 router.post(

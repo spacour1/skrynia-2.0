@@ -10,11 +10,12 @@ import { ReportModal } from "./ReportModal";
 
 type Message = {
   id: string;
-  senderId: string;
+  senderId: string | null;
   senderDisplayName?: string;
   body: string;
   attachmentUrl?: string;
   createdAt: string;
+  kind?: "user" | "system";
 };
 
 export function ChatPanel({
@@ -171,6 +172,15 @@ export function ChatPanel({
     <section className={`flex h-full ${compact ? "min-h-[230px]" : "min-h-[620px]"} flex-col bg-surface/35`}>
       <div ref={listRef} className={`${compact ? "max-h-[170px] min-h-[110px] px-3 py-3" : "min-h-[420px] flex-1 px-5 py-5"} space-y-4 overflow-y-auto`}>
         {messages.map((message) => {
+          if (message.kind === "system") {
+            return (
+              <div key={message.id} className="flex justify-center">
+                <p className="max-w-[90%] rounded-full bg-panel/60 px-4 py-1.5 text-center text-xs font-medium text-muted">
+                  {message.body} · {new Date(message.createdAt).toLocaleString("ru-RU")}
+                </p>
+              </div>
+            );
+          }
           const mine = message.senderId === user?.id;
           return (
             <div key={message.id} className={`group flex ${mine ? "justify-end" : "justify-start"}`}>

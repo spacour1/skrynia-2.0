@@ -5,6 +5,8 @@ import { pool } from "../../db/pool.js";
 import { asyncHandler, badRequest, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
+import { requirePhoneVerified } from "../../common/middleware/require-phone-verified.js";
+import { authRateLimit } from "../../common/middleware/security.js";
 import { cacheGet, cacheSet } from "../../common/redis.js";
 import { moneyToCents } from "../../common/validation.js";
 import type { AuthedRequest } from "../../common/types.js";
@@ -12,6 +14,11 @@ import { isUserOnline } from "../chat/ws.service.js";
 import { requestWithdrawal } from "./wallet.service.js";
 import { createAndSendVerificationEmail, fireAndForget } from "../auth/verification.service.js";
 import { revokeAllUserSessions } from "../auth/session.service.js";
+import { checkPhoneResendRateLimit } from "./phone-verification.service.js";
+import { sendPhoneVerificationCode, checkPhoneVerificationCode } from "../../common/sms.js";
+import { createTelegramConnectToken, disconnectTelegram } from "./telegram-link.service.js";
+import { getNotificationPreferences, updateNotificationPreferences } from "../notifications/preferences.service.js";
+import { confirmTwoFactor, disableTwoFactor, setupTwoFactor } from "../auth/twofa.service.js";
 
 const router = Router();
 
@@ -20,7 +27,9 @@ const updateMeSchema = z.object({
   email: z.string().email().optional(),
   avatarUrl: z.string().url().or(z.literal("")).optional().nullable(),
   pushEnabled: z.coerce.boolean().optional(),
-  twoFactorEnabled: z.coerce.boolean().optional(),
+  // twoFactorEnabled is intentionally NOT settable here - it used to be a bare client-writable
+  // flag with no actual login-time check behind it ("fake 2FA"). It can only flip on/off
+  // through /me/2fa/enable and /me/2fa/disable, which require a real confirmed TOTP code.
   settings: z.record(z.string(), z.unknown()).optional()
 });
 
@@ -34,12 +43,16 @@ router.get(
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
     const result = await pool.query(
-      `select id, email, display_name as "displayName", role,
-              avatar_url as "avatarUrl", push_enabled as "pushEnabled",
-              two_factor_enabled as "twoFactorEnabled", settings,
-              created_at as "createdAt",
-              (email_verified_at is not null or telegram_id is not null) as "emailVerified"
-       from users where id = $1`,
+      `select u.id, u.email, u.display_name as "displayName", u.role,
+              u.avatar_url as "avatarUrl", u.push_enabled as "pushEnabled",
+              u.two_factor_enabled as "twoFactorEnabled", u.settings,
+              u.created_at as "createdAt",
+              (u.email_verified_at is not null or u.telegram_id is not null) as "emailVerified",
+              u.phone, (u.phone_verified_at is not null) as "phoneVerified",
+              (ta.connected_at is not null) as "telegramConnected"
+       from users u
+       left join telegram_accounts ta on ta.user_id = u.id
+       where u.id = $1`,
       [req.user.id]
     );
     res.json({ user: result.rows[0] });
@@ -63,22 +76,21 @@ router.patch(
            email = coalesce($3, email),
            avatar_url = coalesce($4, avatar_url),
            push_enabled = coalesce($5, push_enabled),
-           two_factor_enabled = coalesce($6, two_factor_enabled),
-           settings = coalesce($7, settings),
-           email_verified_at = case when $8 then null else email_verified_at end,
+           settings = coalesce($6, settings),
+           email_verified_at = case when $7 then null else email_verified_at end,
            updated_at = now()
        where id = $1
        returning id, email, display_name as "displayName", role,
                  avatar_url as "avatarUrl", push_enabled as "pushEnabled",
                  two_factor_enabled as "twoFactorEnabled", settings,
-                 (email_verified_at is not null or telegram_id is not null) as "emailVerified"`,
+                 (email_verified_at is not null or telegram_id is not null) as "emailVerified",
+                 phone, (phone_verified_at is not null) as "phoneVerified"`,
       [
         req.user.id,
         input.displayName,
         input.email?.toLowerCase(),
         input.avatarUrl === "" ? null : input.avatarUrl,
         input.pushEnabled,
-        input.twoFactorEnabled,
         input.settings,
         emailChanged
       ]
@@ -157,12 +169,138 @@ router.post(
   "/me/wallet/withdraw",
   authenticate,
   requireEmailVerified,
+  requirePhoneVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = withdrawSchema.parse(req.body);
     const amountCents = moneyToCents(input.amount);
     if (amountCents < 100) throw badRequest("Minimum withdrawal amount is 1.00");
     const payout = await requestWithdrawal(req.user.id, amountCents, input.currency.toUpperCase(), input.destination);
     res.status(201).json({ payout });
+  })
+);
+
+const phoneRequestSchema = z.object({
+  phone: z
+    .string()
+    .regex(/^\+[1-9]\d{7,14}$/, "Phone must be in international format, e.g. +380501234567")
+});
+const phoneConfirmSchema = z.object({ code: z.string().min(4).max(8) });
+
+router.post(
+  "/me/phone/request",
+  authenticate,
+  authRateLimit,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const input = phoneRequestSchema.parse(req.body);
+    await checkPhoneResendRateLimit(req.user.id);
+
+    const existing = await pool.query(`select id from users where phone = $1 and id != $2`, [input.phone, req.user.id]);
+    if (existing.rows[0]) throw badRequest("This phone number is already linked to another account");
+
+    const sent = await sendPhoneVerificationCode(input.phone);
+    if (!sent) throw badRequest("Could not send the verification code right now, try again later");
+
+    await pool.query(`update users set phone = $1, phone_verified_at = null where id = $2`, [input.phone, req.user.id]);
+    res.json({ status: "sent" });
+  })
+);
+
+router.post(
+  "/me/phone/confirm",
+  authenticate,
+  authRateLimit,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const input = phoneConfirmSchema.parse(req.body);
+    const result = await pool.query(`select phone from users where id = $1`, [req.user.id]);
+    const phone = result.rows[0]?.phone;
+    if (!phone) throw badRequest("Request a code first");
+
+    const approved = await checkPhoneVerificationCode(phone, input.code);
+    if (!approved) throw badRequest("Invalid or expired code");
+
+    await pool.query(`update users set phone_verified_at = now() where id = $1`, [req.user.id]);
+    res.json({ status: "verified" });
+  })
+);
+
+router.post(
+  "/me/2fa/setup",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { secret, otpauthUri } = await setupTwoFactor(req.user.id, req.user.email);
+    res.json({ secret, otpauthUri });
+  })
+);
+
+const twoFactorEnableSchema = z.object({ code: z.string().min(4).max(16) });
+
+router.post(
+  "/me/2fa/enable",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const input = twoFactorEnableSchema.parse(req.body);
+    const backupCodes = await confirmTwoFactor(req.user.id, input.code);
+    res.json({ backupCodes });
+  })
+);
+
+const twoFactorDisableSchema = z.object({ currentPassword: z.string().min(1) });
+
+router.post(
+  "/me/2fa/disable",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const input = twoFactorDisableSchema.parse(req.body);
+    const result = await pool.query(`select password_hash from users where id = $1`, [req.user.id]);
+    const hash = result.rows[0]?.password_hash;
+    if (!hash) throw badRequest("Password login is not enabled for this account");
+    const ok = await bcrypt.compare(input.currentPassword, hash);
+    if (!ok) throw badRequest("Current password is incorrect");
+    await disableTwoFactor(req.user.id);
+    res.json({ ok: true });
+  })
+);
+
+router.post(
+  "/me/telegram/connect",
+  authenticate,
+  authRateLimit,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { token, link } = await createTelegramConnectToken(req.user.id);
+    res.json({ token, link });
+  })
+);
+
+router.post(
+  "/me/telegram/disconnect",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    await disconnectTelegram(req.user.id);
+    res.json({ ok: true });
+  })
+);
+
+const notificationPreferencesSchema = z.object({
+  emailEnabled: z.boolean().optional(),
+  telegramEnabled: z.boolean().optional()
+});
+
+router.get(
+  "/me/notifications/preferences",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const preferences = await getNotificationPreferences(req.user.id);
+    res.json({ preferences });
+  })
+);
+
+router.patch(
+  "/me/notifications/preferences",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const input = notificationPreferencesSchema.parse(req.body);
+    const preferences = await updateNotificationPreferences(req.user.id, input);
+    res.json({ preferences });
   })
 );
 

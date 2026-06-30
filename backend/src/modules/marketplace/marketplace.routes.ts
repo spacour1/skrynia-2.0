@@ -562,12 +562,36 @@ router.post(
   })
 );
 
+const productPatchSchema = productSchema.partial().extend({
+  status: z.enum(["active", "paused"]).optional(),
+  // Overridden without the base schema's `.default({})`: a PATCH that omits metadata must
+  // leave it untouched, not silently wipe it back to {} on every unrelated field update.
+  metadata: z.record(z.string(), z.unknown()).optional().nullable()
+});
+
+/**
+ * Builds an `update ... set col = $n, ...` clause distinguishing three states per field:
+ * undefined (omitted by the client) leaves the column untouched, null explicitly clears it,
+ * and any other value overwrites it. `coalesce($n, column)` can't express "clear to null"
+ * since coalesce always falls back to the existing value when given null.
+ */
+function buildDynamicUpdate(id: string, fields: Record<string, unknown>) {
+  const values: unknown[] = [id];
+  const sets: string[] = [];
+  for (const [column, value] of Object.entries(fields)) {
+    if (value === undefined) continue;
+    values.push(value);
+    sets.push(`${column} = $${values.length}`);
+  }
+  return { sets, values };
+}
+
 router.patch(
   "/products/:id",
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
-    const input = productSchema.partial().extend({ status: z.enum(["active", "paused"]).optional() }).parse(req.body);
+    const input = productPatchSchema.parse(req.body);
 
     const existing = await pool.query(`select seller_id from products where id = $1 and status != 'deleted'`, [id]);
     if (!existing.rows[0]) throw notFound("Product not found");
@@ -575,51 +599,45 @@ router.patch(
 
     // Only re-derive categorization when the caller is actually changing the section;
     // otherwise leave category/game/section untouched rather than trusting a stray categoryId.
-    const categorization = input.sectionId
-      ? await resolveCategorization(input)
-      : { categoryId: input.categoryId, gameId: input.gameId, sectionId: undefined, productType: undefined };
+    // sectionId === null is a deliberate "detach from this section" request and needs its
+    // own categoryId to fall back to, same as creating a sectionless listing does.
+    let categorization: { categoryId?: string | null; gameId?: string | null; sectionId?: string | null; productType?: string | null };
+    if (input.sectionId) {
+      categorization = await resolveCategorization(input);
+    } else if (input.sectionId === null) {
+      if (!input.categoryId) throw badRequest("categoryId is required when clearing sectionId");
+      categorization = { categoryId: input.categoryId, gameId: input.gameId ?? null, sectionId: null, productType: input.productType };
+    } else {
+      categorization = { categoryId: input.categoryId, gameId: input.gameId, sectionId: undefined, productType: undefined };
+    }
 
     const priceCents = input.price === undefined ? undefined : moneyToCents(input.price);
-    await pool.query(
-      `update products
-       set category_id = coalesce($2, category_id),
-           game_id = coalesce($3, game_id),
-           section_id = coalesce($4, section_id),
-           title = coalesce($5, title),
-           description = coalesce($6, description),
-           price_cents = coalesce($7, price_cents),
-           currency = coalesce($8, currency),
-           stock = coalesce($9, stock),
-           delivery_type = coalesce($10, delivery_type),
-           product_type = coalesce($11, product_type),
-           old_price_cents = coalesce($12, old_price_cents),
-           server = coalesce($13, server),
-           platform = coalesce($14, platform),
-           delivery_template = coalesce($15, delivery_template),
-           metadata = coalesce($16, metadata),
-           status = coalesce($17, status),
-           updated_at = now()
-       where id = $1`,
-      [
-        id,
-        categorization.categoryId ?? undefined,
-        categorization.gameId ?? undefined,
-        categorization.sectionId ?? undefined,
-        input.title,
-        input.description,
-        priceCents,
-        input.currency?.toUpperCase(),
-        input.stock,
-        input.deliveryType,
-        categorization.productType ?? input.productType,
-        input.oldPrice === undefined ? undefined : input.oldPrice === null ? null : moneyToCents(input.oldPrice),
-        input.server ?? undefined,
-        input.platform ?? undefined,
-        input.deliveryTemplate ?? undefined,
-        input.metadata,
-        input.status
-      ]
-    );
+    const oldPriceCents = input.oldPrice === undefined ? undefined : input.oldPrice === null ? null : moneyToCents(input.oldPrice);
+
+    const { sets, values } = buildDynamicUpdate(id, {
+      category_id: categorization.categoryId,
+      game_id: categorization.gameId,
+      section_id: categorization.sectionId,
+      title: input.title,
+      description: input.description,
+      price_cents: priceCents,
+      currency: input.currency?.toUpperCase(),
+      stock: input.stock,
+      delivery_type: input.deliveryType,
+      product_type: categorization.productType ?? input.productType,
+      old_price_cents: oldPriceCents,
+      server: input.server,
+      platform: input.platform,
+      delivery_template: input.deliveryTemplate,
+      // metadata's column is `not null default '{}'`, so an explicit null "clears" to {}
+      // rather than to an actual SQL null.
+      metadata: input.metadata === null ? {} : input.metadata,
+      status: input.status
+    });
+    if (sets.length) {
+      sets.push("updated_at = now()");
+      await pool.query(`update products set ${sets.join(", ")} where id = $1`, values);
+    }
     if (input.media !== undefined) await replaceProductMedia(id, input.media);
     await cacheDel(`marketplace:product:${id}`);
     await cacheDelPattern("marketplace:products:*");

@@ -18,6 +18,13 @@ export default function LoginPage() {
   const { t } = useI18n();
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [twoFactorToken, setTwoFactorToken] = useState("");
+  const [twoFactorCode, setTwoFactorCode] = useState("");
+
+  function goNext() {
+    const next = new URLSearchParams(window.location.search).get("next");
+    router.push(next ?? consumeReturnPath());
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -25,16 +32,19 @@ export default function LoginPage() {
     setSubmitting(true);
     const form = new FormData(event.currentTarget);
     try {
-      const response = await apiFetch<{ user: User }>("/auth/login", {
+      const response = await apiFetch<{ user: User; twoFactorRequired?: boolean; twoFactorToken?: string }>("/auth/login", {
         method: "POST",
         body: JSON.stringify({
           email: form.get("email"),
           password: form.get("password")
         })
       });
+      if (response.twoFactorRequired && response.twoFactorToken) {
+        setTwoFactorToken(response.twoFactorToken);
+        return;
+      }
       setUser(response.user);
-      const next = new URLSearchParams(window.location.search).get("next");
-      router.push(next ?? consumeReturnPath());
+      goNext();
     } catch (err) {
       // ApiError carries a server-written, already-user-safe message (e.g. "Invalid email
       // or password"); anything else is a network/parse failure with no safe detail to show.
@@ -42,6 +52,57 @@ export default function LoginPage() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function submitTwoFactor(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setSubmitting(true);
+    try {
+      const response = await apiFetch<{ user: User }>("/auth/2fa/verify", {
+        method: "POST",
+        body: JSON.stringify({ twoFactorToken, code: twoFactorCode.trim() })
+      });
+      setUser(response.user);
+      goNext();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("common.somethingWentWrong"));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (twoFactorToken) {
+    return (
+      <div className="mx-auto max-w-md">
+        <div className="app-card overflow-hidden">
+          <div className="border-b border-line bg-panel/60 p-6">
+            <h1 className="text-xl font-semibold">Двухфакторная аутентификация</h1>
+            <p className="mt-1 text-sm text-muted">Введите код из приложения-аутентификатора или один из backup-кодов.</p>
+          </div>
+          <div className="p-6">
+            <form className="mt-2 space-y-4" onSubmit={submitTwoFactor}>
+              <input
+                className="app-input w-full"
+                inputMode="numeric"
+                placeholder="123456"
+                autoFocus
+                value={twoFactorCode}
+                onChange={(event) => setTwoFactorCode(event.target.value)}
+                required
+              />
+              {error && <p className="text-sm text-rose-600">{error}</p>}
+              <button className="app-button w-full disabled:cursor-not-allowed disabled:opacity-60" disabled={submitting}>
+                {submitting ? t("auth.signingIn") : "Подтвердить"}
+              </button>
+              <button type="button" className="w-full text-center text-sm text-muted underline underline-offset-2" onClick={() => setTwoFactorToken("")}>
+                Назад
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

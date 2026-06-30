@@ -18,7 +18,7 @@ type AdminMedia = {
 
 export default function AdminMediaPage() {
   return (
-    <RequireAuth roles={["admin"]}>
+    <RequireAuth roles={["admin", "moderator"]}>
       <AdminMediaContent />
     </RequireAuth>
   );

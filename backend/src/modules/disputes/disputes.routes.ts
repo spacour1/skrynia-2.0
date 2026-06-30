@@ -10,6 +10,7 @@ import { refundEscrow, releaseEscrow } from "../orders/ledger.service.js";
 import { recordOrderEvent } from "../orders/order-events.service.js";
 import { notifyOrderEvent } from "../chat/ws.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
+import { getMessages, postOrderSystemMessage } from "../chat/chat.service.js";
 
 const router = Router();
 
@@ -66,6 +67,7 @@ router.post(
       title: "Открыт спор",
       body: input.reason
     });
+    await postOrderSystemMessage(orderId, "dispute_opened", `Открыт спор: ${input.reason}`);
     res.status(201).json({ dispute: dispute.rows[0] });
   })
 );
@@ -100,26 +102,24 @@ router.get(
     const id = z.string().uuid().parse(req.params.id);
     const dispute = await pool.query(
       `select d.*, o.buyer_id, o.seller_id, o.amount_cents, o.currency, o.status as order_status,
-              p.title as product_title
+              p.title as product_title, c.id as conversation_id
        from disputes d
        join orders o on o.id = d.order_id
        join products p on p.id = o.product_id
+       left join conversations c on c.order_id = o.id
        where d.id = $1`,
       [id]
     );
     if (!dispute.rows[0]) throw notFound("Dispute not found");
 
-    const messages = await pool.query(
-      `select m.id, m.sender_id as "senderId", u.display_name as "senderDisplayName",
-              m.body, m.attachment_url as "attachmentUrl", m.created_at as "createdAt"
-       from messages m
-       join users u on u.id = m.sender_id
-       where m.order_id = $1
-       order by m.created_at asc`,
-      [dispute.rows[0].order_id]
-    );
+    // Order chat lives on conversation_id, not the legacy messages.order_id column - a
+    // dispute must look the conversation up by order_id first, then read messages by
+    // conversation_id, the same way the regular chat endpoints do.
+    const messages = dispute.rows[0].conversation_id
+      ? await getMessages(dispute.rows[0].conversation_id, { limit: 200, viewerIsAdmin: true })
+      : [];
 
-    res.json({ dispute: dispute.rows[0], messages: messages.rows });
+    res.json({ dispute: dispute.rows[0], messages });
   })
 );
 
@@ -180,6 +180,16 @@ router.post(
       body: input.adminNote,
       metadata: { decision: input.decision }
     });
+    await postOrderSystemMessage(row.order_id, "dispute_resolved", `Спор решен администратором: ${input.adminNote}`, {
+      decision: input.decision
+    });
+    await postOrderSystemMessage(
+      row.order_id,
+      input.decision === "refund" ? "refunded" : "escrow_released",
+      input.decision === "refund"
+        ? "Средства возвращены покупателю."
+        : "Средства выплачены продавцу."
+    );
     res.json({ dispute: updated.rows[0], order });
   })
 );

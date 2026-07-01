@@ -40,8 +40,27 @@ services:
       AUTO_RELEASE_HOURS: ${AUTO_RELEASE_HOURS:-72}
       STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
       LOCAL_UPLOAD_DIR: uploads
+      PG_POOL_MAX: ${PG_POOL_MAX:-10}
+      # API replicas must NOT run the job worker — run one dedicated worker service instead.
+      JOB_WORKER_ENABLED: ${JOB_WORKER_ENABLED:-false}
+      # Set to 1 when running behind Railway / Fly / Cloudflare so req.ip uses real client IP.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
       METRICS_USER: ${METRICS_USER:-metrics}
       METRICS_PASSWORD: ${METRICS_PASSWORD:?METRICS_PASSWORD must be set in .env}
+      # Sentry (optional — leave unset to disable error tracking)
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
+      # S3-compatible object storage (required for multi-replica uploads)
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      # Payment providers
+      LIQPAY_PUBLIC_KEY: ${LIQPAY_PUBLIC_KEY:-}
+      LIQPAY_PRIVATE_KEY: ${LIQPAY_PRIVATE_KEY:-}
+      LIQPAY_SERVER_URL: ${LIQPAY_SERVER_URL:-}
       MONOBANK_TOKEN: ${MONOBANK_TOKEN:-}
       MONOBANK_WEBHOOK_URL: ${MONOBANK_WEBHOOK_URL:-}
       MANUAL_PAYMENT_CARD_NUMBER: ${MANUAL_PAYMENT_CARD_NUMBER:-}
@@ -52,6 +71,7 @@ services:
       WAYFORPAY_SERVICE_URL: ${WAYFORPAY_SERVICE_URL:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:-}
+      ENABLE_TEST_PAYMENTS: ${ENABLE_TEST_PAYMENTS:-false}
     ports:
       - "4000:4000"
     volumes:
@@ -61,6 +81,53 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  # Dedicated job worker — runs BullMQ consumers (escrow release, payouts, reconciliation).
+  # Scale to exactly 1 replica. API replicas above must have JOB_WORKER_ENABLED=false.
+  worker:
+    build:
+      context: ./backend
+    environment:
+      NODE_ENV: production
+      PORT: 4001
+      DATABASE_URL: postgres://${POSTGRES_USER:-marketplace}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-marketplace}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env to a long random production secret}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-http://localhost:4000}
+      PLATFORM_FEE_BPS: ${PLATFORM_FEE_BPS:-1000}
+      AUTO_RELEASE_HOURS: ${AUTO_RELEASE_HOURS:-72}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      LOCAL_UPLOAD_DIR: uploads
+      PG_POOL_MAX: ${PG_POOL_MAX:-5}
+      JOB_WORKER_ENABLED: "true"
+      TRUST_PROXY: "0"
+      METRICS_USER: ${METRICS_USER:-metrics}
+      METRICS_PASSWORD: ${METRICS_PASSWORD:?METRICS_PASSWORD must be set in .env}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      LIQPAY_PUBLIC_KEY: ${LIQPAY_PUBLIC_KEY:-}
+      LIQPAY_PRIVATE_KEY: ${LIQPAY_PRIVATE_KEY:-}
+      MONOBANK_TOKEN: ${MONOBANK_TOKEN:-}
+      WAYFORPAY_MERCHANT_ACCOUNT: ${WAYFORPAY_MERCHANT_ACCOUNT:-}
+      WAYFORPAY_MERCHANT_SECRET_KEY: ${WAYFORPAY_MERCHANT_SECRET_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+    volumes:
+      - backend_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - worker
 
   frontend:
     build:

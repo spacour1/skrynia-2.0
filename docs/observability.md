@@ -24,6 +24,8 @@ Protected by HTTP Basic Auth (`METRICS_USER` / `METRICS_PASSWORD`). Never expose
 | `marketplace_job_processed_total` | Counter | queue, name, result | BullMQ job completions |
 | `marketplace_ws_connections_active` | Gauge | — | Live WebSocket connections |
 | `marketplace_ws_messages_total` | Counter | type | WS messages by type |
+| `marketplace_ws_connection_failures_total` | Counter | reason | WS handshake rejections (auth, ban, etc.) |
+| `marketplace_rate_limit_hits_total` | Counter | — | Requests returning 429 (any limiter) |
 | `marketplace_*` (default) | Various | — | Node.js process metrics via prom-client defaults |
 
 ### Prometheus scrape config example
@@ -49,8 +51,11 @@ scrape_configs:
 **Recommended panels:**
 - Request rate: `rate(marketplace_http_request_duration_seconds_count[1m])`
 - p95 latency: `histogram_quantile(0.95, rate(marketplace_http_request_duration_seconds_bucket[5m]))`
+- p99 latency: `histogram_quantile(0.99, rate(marketplace_http_request_duration_seconds_bucket[5m]))`
 - Error rate: `rate(marketplace_http_errors_total[1m])`
+- 429 rate: `rate(marketplace_rate_limit_hits_total[1m])`
 - Active WS connections: `marketplace_ws_connections_active`
+- WS connect failures: `rate(marketplace_ws_connection_failures_total[5m])`
 - Job failure rate: `rate(marketplace_job_processed_total{result="failed"}[5m])`
 
 ### Required env vars

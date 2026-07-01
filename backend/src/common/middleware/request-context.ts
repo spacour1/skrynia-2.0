@@ -36,10 +36,17 @@ export const requestContext: RequestHandler = (req, res, next) => {
   req.startTime = process.hrtime.bigint();
   res.setHeader("x-trace-id", req.traceId);
 
+  // Attach traceId so every Sentry event links back to the structured log entry.
+  // Sentry.httpIntegration() sets up per-request async context; tags set here are
+  // scoped to this request only when async context propagation is active.
+  Sentry.getCurrentScope().setTag("traceId", req.traceId);
+
   res.on("finish", () => {
     const route = req.route?.path ? `${req.baseUrl}${req.route.path}` : req.path;
     const durationSeconds = Number(process.hrtime.bigint() - (req.startTime ?? process.hrtime.bigint())) / 1e9;
     httpRequestDuration.labels(req.method, route, String(res.statusCode)).observe(durationSeconds);
+
+    if (req.user?.id) Sentry.getCurrentScope().setUser({ id: req.user.id });
 
     logger.info({
       traceId: req.traceId,

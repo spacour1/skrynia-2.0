@@ -111,7 +111,7 @@ For these, use the dev Docker environment (`docker-compose.dev.yml`) and the see
 
 | Email | Password | Role |
 |-------|----------|------|
-| admin@example.com | password123 | admin |
-| moderator@example.com | password123 | moderator |
-| buyer@example.com | password123 | user |
-| seller@example.com | password123 | user |
+| admin@example.com | Password123! | admin |
+| moderator@example.com | Password123! | moderator |
+| buyer@example.com | Password123! | user |
+| seller@example.com | Password123! | user |

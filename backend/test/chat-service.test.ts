@@ -13,7 +13,7 @@ afterAll(closeDb);
 
 describe("sendMessage", () => {
   it("stores a message between an unblocked buyer and seller", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const conversationId = await createConversation(buyer, seller);
 
@@ -24,7 +24,7 @@ describe("sendMessage", () => {
   });
 
   it("rejects sending once either side has blocked the other", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const conversationId = await createConversation(buyer, seller);
     await blockUser(seller, buyer);
@@ -35,7 +35,7 @@ describe("sendMessage", () => {
   });
 
   it("rejects an empty or oversized body", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const conversationId = await createConversation(buyer, seller);
 
@@ -46,7 +46,7 @@ describe("sendMessage", () => {
 
 describe("assertCanSendMessage", () => {
   it("throws messaging_blocked in either block direction", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const conversationId = await createConversation(buyer, seller);
     await blockUser(buyer, seller);
@@ -55,7 +55,7 @@ describe("assertCanSendMessage", () => {
   });
 
   it("throws user_muted for a sender currently muted by a moderator", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const conversationId = await createConversation(buyer, seller);
     await muteUser(buyer);
@@ -67,7 +67,7 @@ describe("assertCanSendMessage", () => {
 
 describe("getOrCreateProductConversation", () => {
   it("does not create a conversation when the pair is blocked", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const productId = await createProduct(seller);
     await blockUser(seller, buyer);
@@ -81,7 +81,7 @@ describe("getOrCreateProductConversation", () => {
   });
 
   it("reuses the existing conversation for the same buyer/seller/product pair", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const productId = await createProduct(seller);
 
@@ -96,7 +96,7 @@ describe("getOrCreateProductConversation", () => {
 
 describe("getUserConversations", () => {
   it("reports unreadCount for the recipient and clears it after markConversationRead", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const conversationId = await createConversation(buyer, seller);
     await sendMessage({ conversationId, senderId: buyer, body: "Ping" });
@@ -111,7 +111,7 @@ describe("getUserConversations", () => {
   });
 
   it("flags the conversation as blocked and not sendable once one side blocks the other", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const conversationId = await createConversation(buyer, seller);
     await blockUser(buyer, seller);

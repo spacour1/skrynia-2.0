@@ -38,6 +38,17 @@ export const wsMessagesTotal = new client.Counter({
   labelNames: ["type"] as const
 });
 
+export const wsConnectionFailuresTotal = new client.Counter({
+  name: "marketplace_ws_connection_failures_total",
+  help: "WebSocket connections rejected at handshake (auth, ban, etc.)",
+  labelNames: ["reason"] as const
+});
+
+export const rateLimitHitsTotal = new client.Counter({
+  name: "marketplace_rate_limit_hits_total",
+  help: "Requests rejected by rate limiting (429)"
+});
+
 export async function metricsText() {
   return client.register.metrics();
 }

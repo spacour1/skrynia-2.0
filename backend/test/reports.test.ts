@@ -36,7 +36,7 @@ describe("createUserReport", () => {
 
 describe("createMessageReport", () => {
   it("rejects reporting your own message", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const conversationId = await createConversation(buyer, seller);
     const message = await sendMessage({ conversationId, senderId: buyer, body: "Hi" });
@@ -47,7 +47,7 @@ describe("createMessageReport", () => {
   });
 
   it("rejects a reporter who is not part of the conversation", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const outsider = await createUser();
     const conversationId = await createConversation(buyer, seller);
@@ -57,7 +57,7 @@ describe("createMessageReport", () => {
   });
 
   it("marks scam/off_platform_deal/personal_data/prohibited_content reasons as high priority", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const conversationId = await createConversation(buyer, seller);
     const message = await sendMessage({ conversationId, senderId: buyer, body: "Hi" });
@@ -67,7 +67,7 @@ describe("createMessageReport", () => {
   });
 
   it("keeps a normal priority for low-severity reasons", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const conversationId = await createConversation(buyer, seller);
     const message = await sendMessage({ conversationId, senderId: buyer, body: "Hi" });

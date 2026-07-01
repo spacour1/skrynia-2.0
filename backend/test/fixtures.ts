@@ -10,7 +10,7 @@ export async function closeDb() {
   await pool.end();
 }
 
-export async function createUser(role: "user" | "seller" | "admin" = "user") {
+export async function createUser(role: "user" | "moderator" | "admin" = "user") {
   const id = randomUUID();
   const result = await pool.query<{ id: string }>(
     `insert into users(id, email, display_name, role) values ($1, $2, $3, $4) returning id`,

@@ -11,7 +11,7 @@ afterAll(closeDb);
 
 describe("simulateTestPaymentSuccess", () => {
   it("locks escrow just like a real mock payment", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const productId = await createProduct(seller, { priceCents: 2000 });
     const orderId = await createOrder(buyer, seller, productId, { amountCents: 2000 });
@@ -24,7 +24,7 @@ describe("simulateTestPaymentSuccess", () => {
   });
 
   it("rejects a second success call on the same order instead of double-crediting escrow", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const productId = await createProduct(seller, { priceCents: 2000 });
     const orderId = await createOrder(buyer, seller, productId, { amountCents: 2000 });
@@ -37,7 +37,7 @@ describe("simulateTestPaymentSuccess", () => {
   });
 
   it("rejects a buyer simulating payment on someone else's order", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const intruder = await createUser();
     const productId = await createProduct(seller);
@@ -49,7 +49,7 @@ describe("simulateTestPaymentSuccess", () => {
 
 describe("simulateTestPaymentFailure", () => {
   it("cancels a pending order without touching escrow", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const productId = await createProduct(seller);
     const orderId = await createOrder(buyer, seller, productId);
@@ -62,7 +62,7 @@ describe("simulateTestPaymentFailure", () => {
   });
 
   it("rejects failing an order that was already paid", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const productId = await createProduct(seller);
     const orderId = await createOrder(buyer, seller, productId);
@@ -76,7 +76,7 @@ describe("simulateTestPaymentFailure", () => {
 
 describe("simulateTestPaymentWaitAccept", () => {
   it("leaves the order pending and unchanged", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const productId = await createProduct(seller);
     const orderId = await createOrder(buyer, seller, productId);

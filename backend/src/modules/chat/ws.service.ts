@@ -7,7 +7,7 @@ import { getRedis } from "../../common/redis.js";
 import { logger } from "../../common/logger.js";
 import { ACCESS_COOKIE } from "../../common/cookies.js";
 import { ApiError } from "../../common/errors.js";
-import { wsConnectionsActive, wsMessagesTotal } from "../../common/metrics.js";
+import { wsConnectionsActive, wsConnectionFailuresTotal, wsMessagesTotal } from "../../common/metrics.js";
 import { sendMessage } from "./chat.service.js";
 
 function readCookie(header: string | undefined, name: string): string | undefined {
@@ -26,6 +26,7 @@ type Client = WebSocket & {
   emailVerified?: boolean;
   rooms?: Set<string>;
   sentAt?: number[];
+  isAlive?: boolean;
 };
 
 type JwtPayload = {
@@ -97,10 +98,7 @@ function leaveAll(client: Client) {
     const clients = clientsByUser.get(client.userId);
     if (clients) {
       clients.delete(client);
-      if (clients.size === 0) {
-        clientsByUser.delete(client.userId);
-        broadcastPresence(client.userId, false);
-      }
+      if (clients.size === 0) clientsByUser.delete(client.userId);
     }
   }
   if (client.jti) {
@@ -151,17 +149,42 @@ export function isUserOnline(userId: string) {
   return (clientsByUser.get(userId)?.size ?? 0) > 0;
 }
 
-function broadcastPresence(userId: string, online: boolean) {
-  const clients = Array.from(clientsByUser.values()).flatMap((set) => Array.from(set));
-  for (const client of clients) {
-    sendJson(client, { type: "presence", userId, online });
-  }
-}
+// Presence broadcast intentionally omitted: broadcasting to every connected user on
+// each connect/disconnect is O(N) — at 5k connections this generates 5k sends per event.
+// For per-conversation presence, emit to conversation room members only (future work).
+
+// NOTE: This WS server uses in-memory connection maps (clientsByUser, etc.).
+// For multi-replica deployments, WS events only reach clients on the same replica.
+// Strategy options:
+//   1. Sticky sessions (recommended for Stage 1): configure the load balancer to pin
+//      each user to one replica by cookie or IP. Local rooms work correctly within one replica.
+//   2. Redis pub/sub: publish chat/order events to a channel; all replicas subscribe and
+//      fan out to their own connected clients. Needed if sticky sessions are not feasible.
+const HEARTBEAT_INTERVAL_MS = 30_000;
 
 export function attachWebSocketServer(server: http.Server) {
   const wss = new WebSocketServer({ server, path: "/ws" });
 
+  // Server-side heartbeat: ping every 30 s; terminate clients that miss a pong.
+  // This cleans up zombie connections (mobile sleep, NAT timeouts) without waiting for
+  // a TCP RST, which prevents active-connection count from drifting up over time.
+  const heartbeat = setInterval(() => {
+    for (const ws of wss.clients as Set<Client>) {
+      if (!ws.isAlive) {
+        ws.terminate();
+        continue;
+      }
+      ws.isAlive = false;
+      ws.ping();
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+
+  wss.on("close", () => clearInterval(heartbeat));
+
   wss.on("connection", async (client: Client, req) => {
+    client.isAlive = true;
+    client.on("pong", () => { client.isAlive = true; });
+
     try {
       // The access token lives in an httpOnly cookie, so the browser attaches it to the
       // WS handshake automatically — no token ever needs to be readable by frontend JS.
@@ -177,11 +200,9 @@ export function attachWebSocketServer(server: http.Server) {
       sameSession.add(client);
       clientsByJti.set(jti, sameSession);
 
-      const hadClients = (clientsByUser.get(client.userId)?.size ?? 0) > 0;
       const userClients = clientsByUser.get(client.userId) ?? new Set<Client>();
       userClients.add(client);
       clientsByUser.set(client.userId, userClients);
-      if (!hadClients) broadcastPresence(client.userId, true);
 
       wsConnectionsActive.inc();
       sendJson(client, { type: "connected" });
@@ -239,7 +260,9 @@ export function attachWebSocketServer(server: http.Server) {
         wsConnectionsActive.dec();
         leaveAll(client);
       });
-    } catch {
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "unknown";
+      wsConnectionFailuresTotal.labels(reason.slice(0, 64)).inc();
       client.close(1008, "Unauthorized");
     }
   });

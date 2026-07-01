@@ -92,9 +92,15 @@ async function processEscrowRelease(orderId?: string) {
       );
 
   for (const order of due.rows) {
-    await releaseEscrow(order.id);
-    notifyOrderEvent(order.buyer_id, { type: "order_auto_completed", orderId: order.id });
-    notifyOrderEvent(order.seller_id, { type: "order_auto_completed", orderId: order.id });
+    try {
+      await releaseEscrow(order.id);
+      notifyOrderEvent(order.buyer_id, { type: "order_auto_completed", orderId: order.id });
+      notifyOrderEvent(order.seller_id, { type: "order_auto_completed", orderId: order.id });
+    } catch (err) {
+      // Log and continue — a single bad order (e.g. seed data without matching escrow)
+      // must not crash the whole sweep or cause BullMQ to retry and spam logs.
+      logger.error({ orderId: order.id, err }, "escrow_release_order_failed");
+    }
   }
 }
 

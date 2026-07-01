@@ -14,6 +14,9 @@ on:
           - auth
           - websocket
           - order-flow
+          - stage1-http
+          - stage1-ws
+          - stage1-mixed
       base_url:
         description: "Backend base URL (e.g. https://staging.example.com)"
         required: true
@@ -21,6 +24,27 @@ on:
       ws_url:
         description: "WebSocket URL (e.g. wss://staging.example.com/ws)"
         required: false
+        type: string
+      # Tunable parameters — Stage 1 scenarios read these via __ENV
+      target_rps:
+        description: "Peak RPS for stage1-http (default: 1500)"
+        required: false
+        default: "1500"
+        type: string
+      target_vu:
+        description: "Peak VUs / WS connections for stage1-ws and stage1-mixed (default: 5000)"
+        required: false
+        default: "5000"
+        type: string
+      ramp_duration:
+        description: "Ramp-up duration, e.g. 3m (default: 3m)"
+        required: false
+        default: "3m"
+        type: string
+      hold_duration:
+        description: "Sustained load duration, e.g. 10m (default: 10m)"
+        required: false
+        default: "10m"
         type: string
 
 jobs:
@@ -39,6 +63,10 @@ jobs:
         env:
           BASE_URL: ${{ inputs.base_url }}
           WS_URL: ${{ inputs.ws_url || format('{0}/ws', replace(inputs.base_url, 'http', 'ws')) }}
+          TARGET_RPS: ${{ inputs.target_rps }}
+          TARGET_VU: ${{ inputs.target_vu }}
+          RAMP_DURATION: ${{ inputs.ramp_duration }}
+          HOLD_DURATION: ${{ inputs.hold_duration }}
           # Secrets for authenticated scenarios — set in GitHub repo secrets
           TEST_EMAIL: ${{ secrets.STAGING_TEST_EMAIL }}
           TEST_PASSWORD: ${{ secrets.STAGING_TEST_PASSWORD }}
@@ -49,6 +77,10 @@ jobs:
           k6 run \
             -e BASE_URL="$BASE_URL" \
             -e WS_URL="$WS_URL" \
+            -e TARGET_RPS="$TARGET_RPS" \
+            -e TARGET_VU="$TARGET_VU" \
+            -e RAMP_DURATION="$RAMP_DURATION" \
+            -e HOLD_DURATION="$HOLD_DURATION" \
             -e TEST_EMAIL="$TEST_EMAIL" \
             -e TEST_PASSWORD="$TEST_PASSWORD" \
             -e TEST_BUYER_EMAIL="$TEST_BUYER_EMAIL" \

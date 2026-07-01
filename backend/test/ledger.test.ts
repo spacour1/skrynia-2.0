@@ -18,7 +18,7 @@ afterAll(closeDb);
 
 describe("lockEscrow", () => {
   it("captures payment, decrements stock, and holds funds in the seller's escrow", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const productId = await createProduct(seller, { priceCents: 2000, stock: 5 });
     const orderId = await createOrder(buyer, seller, productId, { amountCents: 2000 });
@@ -61,7 +61,7 @@ describe("lockEscrow", () => {
   });
 
   it("delivers instantly and schedules auto-release when the product has an instant delivery template", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const productId = await createProduct(seller, {
       priceCents: 1500,
@@ -78,7 +78,7 @@ describe("lockEscrow", () => {
   });
 
   it("rejects paying an order that is not pending, preventing a double capture", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const productId = await createProduct(seller);
     const orderId = await createOrder(buyer, seller, productId, { status: "paid" });
@@ -87,7 +87,7 @@ describe("lockEscrow", () => {
   });
 
   it("rejects a buyer paying someone else's order", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const intruder = await createUser();
     const productId = await createProduct(seller);
@@ -97,7 +97,7 @@ describe("lockEscrow", () => {
   });
 
   it("rejects payment when stock ran out after the order was placed", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const productId = await createProduct(seller, { stock: 0 });
     const orderId = await createOrder(buyer, seller, productId, { quantity: 1 });
@@ -108,7 +108,7 @@ describe("lockEscrow", () => {
 
 describe("releaseEscrow", () => {
   it("pays the seller net of the platform fee and books platform revenue", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const productId = await createProduct(seller, { priceCents: 2000 });
     const orderId = await createOrder(buyer, seller, productId, { amountCents: 2000 });
@@ -129,7 +129,7 @@ describe("releaseEscrow", () => {
   });
 
   it("rejects releasing an order that was never escrowed", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const productId = await createProduct(seller);
     const orderId = await createOrder(buyer, seller, productId, { status: "delivered" });
@@ -138,7 +138,7 @@ describe("releaseEscrow", () => {
   });
 
   it("rejects releasing a pending order", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const productId = await createProduct(seller);
     const orderId = await createOrder(buyer, seller, productId);
@@ -149,7 +149,7 @@ describe("releaseEscrow", () => {
 
 describe("refundEscrow", () => {
   it("returns the full escrowed amount to the buyer and zeroes the seller's escrow", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const productId = await createProduct(seller, { priceCents: 2000 });
     const orderId = await createOrder(buyer, seller, productId, { amountCents: 2000 });
@@ -167,7 +167,7 @@ describe("refundEscrow", () => {
 
 describe("full order lifecycle (smoke test)", () => {
   it("pays with the mock provider, delivers, and releases escrow to the seller", async () => {
-    const seller = await createUser("seller");
+    const seller = await createUser();
     const buyer = await createUser();
     const productId = await createProduct(seller, { priceCents: 5000, stock: 1 });
     const orderId = await createOrder(buyer, seller, productId, { amountCents: 5000 });

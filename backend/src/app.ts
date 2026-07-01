@@ -5,7 +5,7 @@ import helmet from "helmet";
 import * as Sentry from "@sentry/node";
 import path from "node:path";
 import { env } from "./config/env.js";
-import { apiRateLimit, metricsAuth, writeRateLimit } from "./common/middleware/security.js";
+import { apiRateLimit, metricsAuth, publicReadRateLimit, writeRateLimit } from "./common/middleware/security.js";
 import { csrfProtection } from "./common/middleware/csrf.js";
 import { requestContext } from "./common/middleware/request-context.js";
 import { errorHandler } from "./common/errors.js";
@@ -29,6 +29,12 @@ import currencyRoutes from "./modules/currencies/currencies.routes.js";
 
 export function createApp() {
   const app = express();
+  // TRUST_PROXY=1 is required behind Railway/Fly/Cloudflare so that req.ip resolves
+  // to the real client IP from X-Forwarded-For instead of the proxy's address.
+  // Without it, all traffic behind a reverse proxy shares one rate-limit bucket.
+  if (env.TRUST_PROXY > 0) {
+    app.set("trust proxy", env.TRUST_PROXY);
+  }
   app.use(
     helmet({
       crossOriginResourcePolicy: { policy: "cross-origin" }
@@ -51,7 +57,7 @@ export function createApp() {
   app.use("/auth", authRoutes);
   app.use("/users", userRoutes);
   app.use("/users", userBlockRoutes);
-  app.use("/marketplace", marketplaceRoutes);
+  app.use("/marketplace", publicReadRateLimit, marketplaceRoutes);
   app.use("/orders", orderRoutes);
   app.use("/payments", paymentRoutes);
   app.use("/payments", testPaymentRoutes);

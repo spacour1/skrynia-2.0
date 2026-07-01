@@ -54,7 +54,7 @@ export const options = {
 const ENDPOINTS = [
   () => http.get(`${BASE_URL}/marketplace/products?sort=newest&limit=20&page=1`),
   () => http.get(`${BASE_URL}/marketplace/products?sort=price_asc&limit=20&page=1`),
-  () => http.get(`${BASE_URL}/marketplace/products?sort=popularity&limit=20&page=1`),
+  () => http.get(`${BASE_URL}/marketplace/products?sort=sales&limit=20&page=1`),
   () => http.get(`${BASE_URL}/marketplace/games`),
   () => http.get(`${BASE_URL}/marketplace/categories`)
 ];

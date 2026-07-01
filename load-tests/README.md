@@ -13,11 +13,14 @@ Install k6: https://k6.io/docs/get-started/installation/
 # macOS
 brew install k6
 
+# Windows (winget — recommended)
+winget install k6.k6
+
 # Windows (via Chocolatey)
 choco install k6
 
-# Docker
-docker pull grafana/k6
+# Without installing — Docker (cross-platform)
+docker run --rm -i grafana/k6 run - < load-tests/scenarios/stage1-http.js
 ```
 
 ## Scenarios
@@ -28,6 +31,9 @@ docker pull grafana/k6
 | `scenarios/auth.js` | Login + session validation | Yes (test account) |
 | `scenarios/websocket.js` | WebSocket connection handling (anonymous + authenticated) | Optional |
 | `scenarios/order-flow.js` | Full order create → pay (mock) flow | Yes (buyer account) |
+| `scenarios/stage1-http.js` | Stage 1 public browsing at 500–1500 RPS (ramping-arrival-rate) | No |
+| `scenarios/stage1-ws.js` | Stage 1 WebSocket: 1k/3k/5k authenticated connections (ramping-vus) | Yes (test account) |
+| `scenarios/stage1-mixed.js` | Stage 1 realistic blend: 70% browse / 20% auth / 10% checkout-read | Yes (test account) |
 
 ## Running locally
 
@@ -60,6 +66,57 @@ k6 run \
   load-tests/scenarios/order-flow.js
 ```
 
+## Stage 1 scenarios (production-scale load)
+
+All Stage 1 scenarios are configurable via env vars and require a staging environment.
+
+```bash
+# Stage 1 HTTP — public marketplace at 1000 RPS for 5 min
+k6 run \
+  -e BASE_URL=https://staging.example.com \
+  -e TARGET_RPS=1000 \
+  -e RAMP_DURATION=2m \
+  -e HOLD_DURATION=5m \
+  load-tests/scenarios/stage1-http.js
+
+# Stage 1 WebSocket — 1000 authenticated connections for 5 min
+k6 run \
+  -e BASE_URL=https://staging.example.com \
+  -e WS_URL=wss://staging.example.com/ws \
+  -e TEST_EMAIL=loadtest@example.com \
+  -e TEST_PASSWORD=Password123! \
+  -e TARGET_VU=1000 \
+  -e RAMP_DURATION=2m \
+  -e HOLD_DURATION=5m \
+  load-tests/scenarios/stage1-ws.js
+
+# Stage 1 mixed — 70/20/10 browse/auth/checkout blend, 500 total VUs
+k6 run \
+  -e BASE_URL=https://staging.example.com \
+  -e TEST_EMAIL=loadtest@example.com \
+  -e TEST_PASSWORD=Password123! \
+  -e TARGET_VU=500 \
+  -e RAMP_DURATION=2m \
+  -e HOLD_DURATION=5m \
+  load-tests/scenarios/stage1-mixed.js
+
+# Same via Docker (no k6 install required)
+docker run --rm \
+  -e BASE_URL=https://staging.example.com \
+  -e TARGET_RPS=500 \
+  -v "$(pwd)/load-tests:/load-tests" \
+  grafana/k6 run /load-tests/scenarios/stage1-http.js
+```
+
+### Stage 1 acceptance criteria
+
+| Metric | Target |
+|--------|--------|
+| `http_req_failed` | < 5% |
+| `http_req_duration{p95}` | < 1500 ms |
+| `rate_limited_responses` | < 100 per test run |
+| `ws_connect_errors` | 0 at 1k, < 1% at 5k |
+
 ## ⚠️ Safety rules
 
 1. **Never run `order-flow.js` against production.** It creates real orders.
@@ -74,11 +131,15 @@ k6 run \
 |----------|---------|-------------|
 | `BASE_URL` | `http://localhost:4000` | Backend API base URL |
 | `WS_URL` | `ws://localhost:4000/ws` | WebSocket endpoint |
-| `TEST_EMAIL` | — | Test account email (auth scenarios) |
+| `TEST_EMAIL` | — | Test account email (auth / stage1-ws / stage1-mixed) |
 | `TEST_PASSWORD` | — | Test account password |
 | `TEST_BUYER_EMAIL` | — | Buyer email (order-flow scenario) |
 | `TEST_BUYER_PASSWORD` | — | Buyer password |
 | `TEST_PRODUCT_ID` | — | Active product UUID (order-flow scenario) |
+| `TARGET_RPS` | `1500` | Peak RPS for stage1-http |
+| `TARGET_VU` | `5000` | Peak VUs/connections for stage1-ws and stage1-mixed |
+| `RAMP_DURATION` | `3m` | Ramp-up time for all Stage 1 scenarios |
+| `HOLD_DURATION` | `10m` | Sustained load duration for all Stage 1 scenarios |
 
 ## Thresholds (defaults)
 

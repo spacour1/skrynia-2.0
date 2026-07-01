@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
 import type { RequestHandler } from "express";
 import rateLimit from "express-rate-limit";
+import { RedisStore } from "rate-limit-redis";
 import { env } from "../../config/env.js";
+import { getRedis } from "../redis.js";
 import { rateLimitHitsTotal } from "../metrics.js";
 
 function timingSafeEqual(a: string, b: string) {
@@ -30,6 +32,17 @@ function keyByUserOrIp(req: any) {
   return req.user?.id ? `user:${req.user.id}` : `ip:${req.ip}`;
 }
 
+// Returns a Redis-backed store when REDIS_URL is configured; undefined falls back to
+// the default in-memory store (per-replica, not globally shared across API instances).
+function makeStore(prefix: string) {
+  const client = getRedis();
+  if (!client) return undefined;
+  return new RedisStore({
+    prefix,
+    sendCommand: (...args: string[]) => (client as any).call(args[0], ...args.slice(1)) as Promise<any>,
+  });
+}
+
 function rateLimitResponse(_req: any, res: any) {
   rateLimitHitsTotal.inc();
   return res.status(429).json({
@@ -47,29 +60,32 @@ export const authRateLimit = rateLimit({
   limit: env.AUTH_RATE_LIMIT_PER_15MIN,
   standardHeaders: "draft-7",
   legacyHeaders: false,
+  store: makeStore("rl:auth:"),
   keyGenerator: (req) => `auth:${req.ip}`,
   handler: rateLimitResponse
 });
 
-// General API: moderate per-user/IP limit.
-// NOTE: this is an in-memory store — limits are per-replica, not globally shared.
-// For global enforcement across multiple API replicas, use rate-limit-redis.
+// General API: moderate per-user/IP limit. Skips public marketplace GETs — those are
+// handled by publicReadRateLimit which carries a higher bucket for anonymous browsing.
 export const apiRateLimit = rateLimit({
   windowMs: 60 * 1000,
   limit: env.API_RATE_LIMIT_PER_MIN,
   standardHeaders: "draft-7",
   legacyHeaders: false,
+  store: makeStore("rl:api:"),
   keyGenerator: keyByUserOrIp,
+  skip: (req) => req.method === "GET" && req.path.startsWith("/marketplace"),
   handler: rateLimitResponse
 });
 
-// Public read marketplace: high limit to allow normal browsing bursts (unauthenticated).
+// Public read marketplace: high limit for anonymous browsing bursts.
 // Applied only to GET requests on /marketplace/* in app.ts.
 export const publicReadRateLimit = rateLimit({
   windowMs: 60 * 1000,
   limit: env.PUBLIC_READ_RATE_LIMIT_PER_MIN,
   standardHeaders: "draft-7",
   legacyHeaders: false,
+  store: makeStore("rl:pub:"),
   skip: (req) => req.method !== "GET",
   keyGenerator: (req) => `pub:${req.ip}`,
   handler: rateLimitResponse
@@ -80,6 +96,7 @@ export const webhookRateLimit = rateLimit({
   limit: 60,
   standardHeaders: "draft-7",
   legacyHeaders: false,
+  store: makeStore("rl:webhook:"),
   keyGenerator: (req) => `webhook:${req.ip}`,
   handler: rateLimitResponse
 });
@@ -89,6 +106,7 @@ export const writeRateLimit = rateLimit({
   limit: 60,
   standardHeaders: "draft-7",
   legacyHeaders: false,
+  store: makeStore("rl:write:"),
   skip: (req) => !["POST", "PUT", "PATCH", "DELETE"].includes(req.method),
   keyGenerator: (req) => `write:${keyByUserOrIp(req)}`,
   handler: rateLimitResponse

@@ -31,6 +31,7 @@ import { apiFetch, money, type Game } from "../lib/api";
 import { useAuth } from "../lib/auth-store";
 import { useI18n } from "../lib/i18n";
 import { firstProductMedia } from "../lib/product-media";
+import { captureEvent } from "../lib/posthog";
 
 type SuggestProduct = {
   id: string;
@@ -147,6 +148,7 @@ export function Nav() {
     params.delete("favorites");
     params.delete("game");
     params.delete("section");
+    if (next) captureEvent("search_submitted", { query: next });
     router.push(`/${params.toString() ? `?${params.toString()}` : ""}`);
     window.dispatchEvent(new CustomEvent("market-search", { detail: { q: next, game: "", section: "", favorites: false } }));
     setSuggestOpen(false);

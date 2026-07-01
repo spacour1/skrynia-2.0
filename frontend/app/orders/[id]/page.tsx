@@ -29,6 +29,7 @@ import { redirectToLiqpay, type LiqpayCheckout } from "../../../lib/liqpay";
 import { redirectToMonobank, type MonobankCheckout } from "../../../lib/monobank";
 import { ManualPaymentPanel } from "../../../components/ManualPaymentPanel";
 import { redirectToWayforpay, type WayforpayCheckout } from "../../../lib/wayforpay";
+import { captureEvent } from "../../../lib/posthog";
 
 // Mirrors the backend's NODE_ENV/ENABLE_TEST_PAYMENTS gate: hidden by default on a
 // production build (Vercel always builds with NODE_ENV=production) unless the deployment
@@ -85,17 +86,26 @@ export default function OrderPage({ params }: { params: { id: string } }) {
   });
 
   const payWithLiqpay = useMutation({
-    mutationFn: () => apiFetch<LiqpayCheckout>(`/payments/orders/${params.id}/liqpay/checkout`, { method: "POST" }),
+    mutationFn: () => {
+      captureEvent("payment_started", { order_id: params.id, provider: "liqpay" });
+      return apiFetch<LiqpayCheckout>(`/payments/orders/${params.id}/liqpay/checkout`, { method: "POST" });
+    },
     onSuccess: redirectToLiqpay
   });
 
   const payWithMonobank = useMutation({
-    mutationFn: () => apiFetch<MonobankCheckout>(`/payments/orders/${params.id}/monobank/checkout`, { method: "POST" }),
+    mutationFn: () => {
+      captureEvent("payment_started", { order_id: params.id, provider: "monobank" });
+      return apiFetch<MonobankCheckout>(`/payments/orders/${params.id}/monobank/checkout`, { method: "POST" });
+    },
     onSuccess: redirectToMonobank
   });
 
   const payWithWayforpay = useMutation({
-    mutationFn: () => apiFetch<WayforpayCheckout>(`/payments/orders/${params.id}/wayforpay/checkout`, { method: "POST" }),
+    mutationFn: () => {
+      captureEvent("payment_started", { order_id: params.id, provider: "wayforpay" });
+      return apiFetch<WayforpayCheckout>(`/payments/orders/${params.id}/wayforpay/checkout`, { method: "POST" });
+    },
     onSuccess: redirectToWayforpay
   });
 

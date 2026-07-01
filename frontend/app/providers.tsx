@@ -11,6 +11,7 @@ import { apiFetch, DISPLAY_CURRENCY_EVENT, setCurrencyRates, type CurrencyRatesR
 import { useLanguageStore } from "../lib/i18n";
 import { useThemeStore } from "../lib/theme-store";
 import { rememberReturnPath } from "../lib/return-path";
+import { PostHogProvider } from "../components/PostHogProvider";
 
 export function Providers({ children }: { children: ReactNode }) {
   const [client] = useState(() => new QueryClient());
@@ -50,13 +51,15 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <QueryClientProvider client={client}>
-      <CurrencyRatesLoader />
-      <div key={currencyVersion} className="contents">
-        {children}
-      </div>
-      <LanguageGate />
-      <GlobalTranslator />
-      <ToastCenter />
+      <PostHogProvider>
+        <CurrencyRatesLoader />
+        <div key={currencyVersion} className="contents">
+          {children}
+        </div>
+        <LanguageGate />
+        <GlobalTranslator />
+        <ToastCenter />
+      </PostHogProvider>
     </QueryClientProvider>
   );
 }

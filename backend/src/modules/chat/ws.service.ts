@@ -7,6 +7,7 @@ import { getRedis } from "../../common/redis.js";
 import { logger } from "../../common/logger.js";
 import { ACCESS_COOKIE } from "../../common/cookies.js";
 import { ApiError } from "../../common/errors.js";
+import { wsConnectionsActive, wsMessagesTotal } from "../../common/metrics.js";
 import { sendMessage } from "./chat.service.js";
 
 function readCookie(header: string | undefined, name: string): string | undefined {
@@ -182,6 +183,7 @@ export function attachWebSocketServer(server: http.Server) {
       clientsByUser.set(client.userId, userClients);
       if (!hadClients) broadcastPresence(client.userId, true);
 
+      wsConnectionsActive.inc();
       sendJson(client, { type: "connected" });
 
       client.on("message", async (raw) => {
@@ -193,6 +195,7 @@ export function attachWebSocketServer(server: http.Server) {
             attachmentUrl?: string;
           };
 
+          wsMessagesTotal.labels(msg.type ?? "unknown").inc();
           if (msg.type === "join_conversation") {
             if (!msg.conversationId || !(await canAccessConversation(msg.conversationId, client.userId!))) {
               return sendJson(client, { type: "error", message: "Cannot join conversation" });
@@ -232,7 +235,10 @@ export function attachWebSocketServer(server: http.Server) {
         }
       });
 
-      client.on("close", () => leaveAll(client));
+      client.on("close", () => {
+        wsConnectionsActive.dec();
+        leaveAll(client);
+      });
     } catch {
       client.close(1008, "Unauthorized");
     }

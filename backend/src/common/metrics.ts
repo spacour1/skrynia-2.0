@@ -27,6 +27,17 @@ export const jobProcessedTotal = new client.Counter({
   labelNames: ["queue", "name", "result"] as const
 });
 
+export const wsConnectionsActive = new client.Gauge({
+  name: "marketplace_ws_connections_active",
+  help: "Currently open WebSocket connections"
+});
+
+export const wsMessagesTotal = new client.Counter({
+  name: "marketplace_ws_messages_total",
+  help: "WebSocket messages received",
+  labelNames: ["type"] as const
+});
+
 export async function metricsText() {
   return client.register.metrics();
 }

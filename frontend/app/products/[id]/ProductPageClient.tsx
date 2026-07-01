@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -25,6 +25,7 @@ import { useAuth } from "../../../lib/auth-store";
 import { useI18n } from "../../../lib/i18n";
 import { fieldLabel, formatFieldValue } from "../../../lib/product-fields";
 import { showAppToast } from "../../../lib/toast-events";
+import { captureEvent } from "../../../lib/posthog";
 
 const HIDDEN_METADATA_KEYS = new Set(["catalogKind", "shortDescription", "region", "rank"]);
 
@@ -61,6 +62,20 @@ export function ProductPageClient({ id }: { id: string }) {
 
   const productItem = product.data?.product;
 
+  useEffect(() => {
+    if (!productItem) return;
+    captureEvent("product_viewed", {
+      product_id: productItem.id,
+      category: productItem.categorySlug,
+      game: productItem.gameSlug,
+      product_type: productItem.productType,
+      delivery_type: productItem.deliveryType,
+      price_cents: productItem.priceCents,
+      currency: productItem.currency,
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productItem?.id]);
+
   const blockedUsers = useQuery({
     queryKey: ["blocked-users"],
     queryFn: () => apiFetch<{ blocked: { id: string }[] }>("/users/me/blocked"),
@@ -85,13 +100,17 @@ export function ProductPageClient({ id }: { id: string }) {
   // not here — the product page only needs to create the order and hand off to checkout.
   const buySecurely = useMutation({
     mutationFn: async () => {
+      captureEvent("checkout_started", { product_id: id });
       const { order } = await apiFetch<{ order: { id: string } }>("/orders", {
         method: "POST",
         body: JSON.stringify({ productId: id, quantity: 1 })
       });
       return order;
     },
-    onSuccess: (order) => router.push(`/orders/${order.id}`)
+    onSuccess: (order) => {
+      captureEvent("order_created", { order_id: order.id, product_id: id });
+      router.push(`/orders/${order.id}`);
+    }
   });
 
   const buyError = buySecurely.error;

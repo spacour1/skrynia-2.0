@@ -3,7 +3,7 @@ import { env } from "../config/env.js";
 
 export const pool = new pg.Pool({
   connectionString: env.DATABASE_URL,
-  max: 20,
+  max: env.PG_POOL_MAX,
   idleTimeoutMillis: 30_000
 });
 

@@ -24,6 +24,7 @@ import { RequireAuth } from "../../../components/RequireAuth";
 import { GameIcon } from "../../../components/GameIcon";
 import { EmailNotVerifiedNotice } from "../../../components/EmailNotVerifiedNotice";
 import { apiFetch, isEmailNotVerifiedError, money, type Game, type GameSection } from "../../../lib/api";
+import { captureEvent } from "../../../lib/posthog";
 import { useAuth } from "../../../lib/auth-store";
 import { BOOLEAN_FIELD_KEYS, fieldLabel } from "../../../lib/product-fields";
 
@@ -145,7 +146,16 @@ function SellerCreateContent() {
       }
       return { id, draft };
     },
-    onSuccess: ({ id, draft }) => router.push(draft ? "/seller/products" : `/products/${id}`),
+    onSuccess: ({ id, draft }) => {
+      if (!draft) {
+        captureEvent("seller_listing_created", {
+          product_id: id,
+          game_id: gameId,
+          section_id: sectionId,
+        });
+      }
+      router.push(draft ? "/seller/products" : `/products/${id}`);
+    },
     onError: (err) => {
       if (isEmailNotVerifiedError(err)) {
         setEmailBlocked(true);

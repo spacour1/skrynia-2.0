@@ -1,0 +1,57 @@
+name: k6 Staging Load Test
+
+# Manual trigger only — never run automatically against staging/production.
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "Scenario to run"
+        required: true
+        default: browse
+        type: choice
+        options:
+          - browse
+          - auth
+          - websocket
+          - order-flow
+      base_url:
+        description: "Backend base URL (e.g. https://staging.example.com)"
+        required: true
+        type: string
+      ws_url:
+        description: "WebSocket URL (e.g. wss://staging.example.com/ws)"
+        required: false
+        type: string
+
+jobs:
+  k6:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          curl https://github.com/grafana/k6/releases/download/v0.54.0/k6-v0.54.0-linux-amd64.tar.gz -L | tar xvz --strip-components 1
+          sudo mv k6 /usr/local/bin/k6
+          k6 version
+
+      - name: Run ${{ inputs.scenario }} scenario
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          WS_URL: ${{ inputs.ws_url || format('{0}/ws', replace(inputs.base_url, 'http', 'ws')) }}
+          # Secrets for authenticated scenarios — set in GitHub repo secrets
+          TEST_EMAIL: ${{ secrets.STAGING_TEST_EMAIL }}
+          TEST_PASSWORD: ${{ secrets.STAGING_TEST_PASSWORD }}
+          TEST_BUYER_EMAIL: ${{ secrets.STAGING_BUYER_EMAIL }}
+          TEST_BUYER_PASSWORD: ${{ secrets.STAGING_BUYER_PASSWORD }}
+          TEST_PRODUCT_ID: ${{ secrets.STAGING_TEST_PRODUCT_ID }}
+        run: |
+          k6 run \
+            -e BASE_URL="$BASE_URL" \
+            -e WS_URL="$WS_URL" \
+            -e TEST_EMAIL="$TEST_EMAIL" \
+            -e TEST_PASSWORD="$TEST_PASSWORD" \
+            -e TEST_BUYER_EMAIL="$TEST_BUYER_EMAIL" \
+            -e TEST_BUYER_PASSWORD="$TEST_BUYER_PASSWORD" \
+            -e TEST_PRODUCT_ID="$TEST_PRODUCT_ID" \
+            load-tests/scenarios/${{ inputs.scenario }}.js

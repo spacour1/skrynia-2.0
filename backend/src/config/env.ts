@@ -8,6 +8,7 @@ const schema = z.object({
   PORT: z.coerce.number().default(4000),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().optional(),
+  PG_POOL_MAX: z.coerce.number().int().min(1).max(200).default(20),
   JWT_SECRET: z.string().min(24).default("dev-secret-change-me-for-production"),
   ACCESS_TOKEN_TTL_MIN: z.coerce.number().int().min(1).default(15),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).default(90),

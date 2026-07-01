@@ -23,6 +23,8 @@ const schema = z.object({
   LOCAL_UPLOAD_DIR: z.string().default("uploads"),
   PUBLIC_BACKEND_URL: z.string().default("http://localhost:4000"),
   SENTRY_DSN: z.string().optional(),
+  SENTRY_RELEASE: z.string().optional(),
+  SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).optional(),
   JOB_WORKER_ENABLED: z.coerce.boolean().default(true),
   S3_ENDPOINT: z.string().optional(),
   S3_REGION: z.string().default("auto"),

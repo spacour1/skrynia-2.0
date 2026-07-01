@@ -25,7 +25,9 @@ export function initErrorTracking() {
   Sentry.init({
     dsn: env.SENTRY_DSN,
     environment: env.NODE_ENV,
-    tracesSampleRate: 0.05
+    release: env.SENTRY_RELEASE ?? process.env.GITHUB_SHA ?? process.env.RAILWAY_DEPLOYMENT_ID,
+    tracesSampleRate: env.SENTRY_TRACES_SAMPLE_RATE ?? (env.NODE_ENV === "production" ? 0.1 : 0),
+    integrations: [Sentry.httpIntegration()],
   });
 }
 

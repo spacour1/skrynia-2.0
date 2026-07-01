@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
+import * as Sentry from "@sentry/node";
 import path from "node:path";
 import { env } from "./config/env.js";
 import { apiRateLimit, metricsAuth, writeRateLimit } from "./common/middleware/security.js";
@@ -64,6 +65,9 @@ export function createApp() {
   app.use("/telegram", telegramWebhookRoutes);
   app.use("/currencies", currencyRoutes);
 
+  // Must be before custom errorHandler — captures unhandled errors thrown inside routes
+  // and attaches request context (URL, method, user) to Sentry events automatically.
+  Sentry.setupExpressErrorHandler(app);
   app.use(errorHandler);
   return app;
 }

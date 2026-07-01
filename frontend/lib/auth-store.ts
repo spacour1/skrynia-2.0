@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import * as Sentry from "@sentry/nextjs";
 import { apiFetch, broadcastSessionEnded, onSessionEnded, type User } from "./api";
 
 type AuthState = {
@@ -40,6 +41,7 @@ export const useAuth = create<AuthState>((set) => ({
   hydrated: false,
   setUser: (user) => {
     writeCachedUser(user);
+    Sentry.setUser({ id: user.id, segment: user.role });
     set({ user, hydrated: true });
   },
   logout: async () => {
@@ -47,6 +49,7 @@ export const useAuth = create<AuthState>((set) => ({
       await apiFetch("/auth/logout", { method: "POST" });
     } finally {
       writeCachedUser(null);
+      Sentry.setUser(null);
       set({ user: null, hydrated: true });
       broadcastSessionEnded();
     }
@@ -55,9 +58,11 @@ export const useAuth = create<AuthState>((set) => ({
     try {
       const { user } = await apiFetch<{ user: User }>("/auth/me");
       writeCachedUser(user);
+      Sentry.setUser({ id: user.id, segment: user.role });
       set({ user, hydrated: true });
     } catch {
       writeCachedUser(null);
+      Sentry.setUser(null);
       set({ user: null, hydrated: true });
     }
   }

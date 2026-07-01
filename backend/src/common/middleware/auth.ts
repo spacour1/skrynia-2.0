@@ -1,5 +1,6 @@
 import type { RequestHandler } from "express";
 import jwt from "jsonwebtoken";
+import * as Sentry from "@sentry/node";
 import { pool } from "../../db/pool.js";
 import { env } from "../../config/env.js";
 import { logger } from "../logger.js";
@@ -54,6 +55,7 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
 
     req.user = user;
     req.sessionId = payload.jti;
+    Sentry.setUser({ id: user.id, segment: user.role });
     next();
   } catch (error) {
     next(error instanceof ApiError ? error : new ApiError(401, "Invalid access token", "unauthorized"));

@@ -71,7 +71,13 @@ type WalletResponse = {
 };
 
 export function Nav() {
-  const { user, logout } = useAuth();
+  const { user, hydrated, logout } = useAuth();
+  // Until we actually know (either the optimistic localStorage-cached profile already
+  // landed, or hydrate()'s /auth/me call confirmed it), don't render the logged-out
+  // placeholder ("Войти") - that text gets baked into the server-rendered HTML and is what
+  // briefly flashes on every refresh before hydration corrects it. A neutral skeleton has
+  // no false state to flash.
+  const authResolved = hydrated || Boolean(user);
   const { language, setLanguageAndReload, t } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
@@ -257,14 +263,26 @@ export function Nav() {
             <div className="relative shrink-0">
               <button
                 className="inline-flex h-12 shrink-0 items-center gap-3 rounded-2xl border border-line bg-card px-3 pr-4 text-left shadow-soft transition hover:border-brand/60 hover:bg-panel"
-                onClick={() => (user ? setProfileOpen((current) => !current) : router.push("/login"))}
+                onClick={() => {
+                  if (!authResolved) return;
+                  user ? setProfileOpen((current) => !current) : router.push("/login");
+                }}
               >
-                <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-panel text-sm font-bold text-brand">
-                  {user?.avatarUrl ? <img className="h-full w-full object-cover" src={user.avatarUrl} alt="" /> : (user?.displayName?.slice(0, 1).toUpperCase() ?? "U")}
+                <span className={`grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-panel text-sm font-bold text-brand ${!authResolved ? "animate-pulse" : ""}`}>
+                  {authResolved ? (user?.avatarUrl ? <img className="h-full w-full object-cover" src={user.avatarUrl} alt="" /> : (user?.displayName?.slice(0, 1).toUpperCase() ?? "U")) : null}
                 </span>
                 <span className="hidden leading-tight sm:block">
-                  <span className="block text-sm font-bold text-ink">{user?.displayName ?? t("nav.login")}</span>
-                  <span className="block text-xs text-muted">{user ? roleLabel(user.role, language) : "SKRYNIA"}</span>
+                  {authResolved ? (
+                    <>
+                      <span className="block text-sm font-bold text-ink">{user?.displayName ?? t("nav.login")}</span>
+                      <span className="block text-xs text-muted">{user ? roleLabel(user.role, language) : "SKRYNIA"}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="block h-3.5 w-20 animate-pulse rounded bg-panel" />
+                      <span className="mt-1 block h-3 w-12 animate-pulse rounded bg-panel" />
+                    </>
+                  )}
                 </span>
                 <ChevronDown className="hidden h-4 w-4 text-muted sm:block" />
               </button>

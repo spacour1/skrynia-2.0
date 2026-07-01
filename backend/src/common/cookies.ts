@@ -18,7 +18,12 @@ export function accessCookieOptions(): CookieOptions {
 }
 
 export function refreshCookieOptions(): CookieOptions {
-  return { ...baseOptions, httpOnly: true, path: "/auth", maxAge: env.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000 };
+  // path "/" (not "/auth"): the frontend only ever reaches this API through its same-origin
+  // "/api/*" rewrite proxy (see next.config.mjs), so the browser's request path is
+  // "/api/auth/refresh", not "/auth/refresh" - a cookie scoped to "/auth" never matches that
+  // and silently stops being sent, which surfaces as users getting logged out once their
+  // access token expires.
+  return { ...baseOptions, httpOnly: true, path: "/", maxAge: env.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000 };
 }
 
 export function csrfCookieOptions(): CookieOptions {
@@ -35,6 +40,6 @@ export function setAuthCookies(res: Response, input: { accessToken: string; refr
 
 export function clearAuthCookies(res: Response) {
   res.clearCookie(ACCESS_COOKIE, { ...baseOptions, httpOnly: true, path: "/" });
-  res.clearCookie(REFRESH_COOKIE, { ...baseOptions, httpOnly: true, path: "/auth" });
+  res.clearCookie(REFRESH_COOKIE, { ...baseOptions, httpOnly: true, path: "/" });
   res.clearCookie(CSRF_COOKIE, { ...baseOptions, httpOnly: false, path: "/" });
 }

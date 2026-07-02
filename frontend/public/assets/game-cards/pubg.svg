@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" role="img" aria-label="PUBG">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="420" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#02060b"/>
+      <stop offset=".42" stop-color="#3b2108"/>
+      <stop offset="1" stop-color="#020409"/>
+    </linearGradient>
+    <radialGradient id="flare" cx="72%" cy="76%" r="62%">
+      <stop stop-color="#f59e0b" stop-opacity=".46"/>
+      <stop offset=".38" stop-color="#f59e0b" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#f59e0b" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft"><feGaussianBlur stdDeviation="12"/></filter>
+    <filter id="shadow"><feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#000" flood-opacity=".65"/></filter>
+  </defs>
+  <rect width="1200" height="420" rx="34" fill="url(#bg)"/>
+  <rect x="10" y="10" width="1180" height="400" rx="28" fill="none" stroke="#f59e0b" stroke-opacity=".42" stroke-width="3"/>
+  <rect width="1200" height="420" rx="34" fill="url(#flare)"/>
+  <g opacity=".24" filter="url(#soft)">
+    <path d="M110 296c186-54 357-58 513-7 119 39 265 46 430-24" stroke="#f59e0b" stroke-width="34" fill="none"/>
+    <path d="M80 224c156-72 308-91 454-58" stroke="#fff" stroke-width="22" fill="none" opacity=".25"/>
+  </g>
+  
+    <path d="M828 210c3-72 34-132 96-148 62 16 92 76 96 148Z" fill="#111827" opacity=".78"/>
+    <path d="M862 76h118l-16 48H878Z" fill="#020617" stroke="#f59e0b" stroke-opacity=".32" stroke-width="4"/>
+    <path d="M778 178l286-62" stroke="#f59e0b" stroke-width="14" stroke-linecap="round" opacity=".28"/>
+    <path d="M795 190l266-58" stroke="#f8fafc" stroke-width="4" stroke-linecap="round" opacity=".24"/>
+    <circle cx="902" cy="92" r="34" fill="#f59e0b" opacity=".18"/>
+  <g filter="url(#shadow)">
+    <circle cx="174" cy="210" r="93" fill="#03101c" stroke="#f59e0b" stroke-opacity=".36" stroke-width="3"/>
+    <circle cx="174" cy="210" r="62" fill="#f59e0b" opacity=".16"/>
+    <text x="174" y="232" text-anchor="middle" font-family="Arial Black, Impact, sans-serif" font-size="42" fill="#fff">PUBG</text>
+  </g>
+  <g filter="url(#shadow)">
+    <text x="300" y="218" font-family="Arial Black, Impact, sans-serif" font-size="70" fill="#fff" letter-spacing="-1">PUBG</text>
+    <text x="304" y="266" font-family="Arial, sans-serif" font-size="26" fill="#f59e0b" font-weight="800" letter-spacing="4">MOBILE</text>
+  </g>
+  <rect y="260" width="1200" height="160" fill="url(#bg)" opacity=".34"/>
+</svg>

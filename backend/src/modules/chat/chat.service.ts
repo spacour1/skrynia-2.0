@@ -1,6 +1,8 @@
 import { ApiError, badRequest, forbidden, notFound } from "../../common/errors.js";
 import type { DbClient } from "../../db/pool.js";
 import { pool } from "../../db/pool.js";
+import { defaultLocale } from "../../i18n/config.js";
+import { t, type TranslateParams } from "../../i18n/t.js";
 import { createNotification } from "../notifications/notifications.service.js";
 import { broadcastConversation } from "./ws.service.js";
 
@@ -144,8 +146,8 @@ export async function sendMessage(input: {
   await createNotification({
     userId: recipientId,
     type: "message",
-    title: "Новое сообщение",
-    body: `${message.senderDisplayName}: ${body.slice(0, 120)}`,
+    templateKey: "notifications.newMessage",
+    params: { sender: message.senderDisplayName, preview: body.slice(0, 120) },
     conversationId: input.conversationId
   });
 
@@ -202,9 +204,20 @@ export async function markConversationRead(conversationId: string, userId: strin
  * instead of only in the separate order_events log.
  */
 export async function createSystemMessage(
-  input: { conversationId: string; type: string; body: string; metadata?: Record<string, unknown> },
+  input: {
+    conversationId: string;
+    type: string;
+    /** i18n key under "system.*" — rendered into the default locale for the stored body. */
+    bodyKey: string;
+    params?: TranslateParams;
+    metadata?: Record<string, unknown>;
+  },
   client: DbClient = pool
 ): Promise<Message> {
+  // The stored body is a default-locale fallback; bodyKey/params ride along in metadata
+  // so the frontend renders the message in the viewer's current language.
+  const body = t(defaultLocale, input.bodyKey, input.params);
+  const metadata = { ...(input.metadata ?? {}), bodyKey: input.bodyKey, ...(input.params ? { params: input.params } : {}) };
   const result = await client.query(
     `insert into messages(conversation_id, sender_id, kind, system_type, body, metadata)
      values ($1, null, 'system', $2, $3, $4)
@@ -212,7 +225,7 @@ export async function createSystemMessage(
                '${SYSTEM_SENDER_DISPLAY_NAME}' as "senderDisplayName",
                body, attachment_url as "attachmentUrl", created_at as "createdAt",
                kind, system_type as "systemType", metadata`,
-    [input.conversationId, input.type, input.body, JSON.stringify(input.metadata ?? {})]
+    [input.conversationId, input.type, body, JSON.stringify(metadata)]
   );
   return result.rows[0] as Message;
 }
@@ -231,12 +244,13 @@ export async function getConversationIdForOrder(orderId: string): Promise<string
 export async function postOrderSystemMessage(
   orderId: string,
   type: string,
-  body: string,
+  bodyKey: string,
+  params?: TranslateParams,
   metadata?: Record<string, unknown>
 ): Promise<Message | null> {
   const conversationId = await getConversationIdForOrder(orderId);
   if (!conversationId) return null;
-  const message = await createSystemMessage({ conversationId, type, body, metadata });
+  const message = await createSystemMessage({ conversationId, type, bodyKey, params, metadata });
   broadcastConversation(conversationId, { type: "message", message });
   return message;
 }

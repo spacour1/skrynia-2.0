@@ -80,7 +80,7 @@ router.post(
         {
           conversationId: newConversationId,
           type: "order_created",
-          body: "Заказ создан. Следующий шаг - оплата."
+          bodyKey: "system.orderCreated"
         },
         client
       );
@@ -92,8 +92,7 @@ router.post(
     await createNotification({
       userId: order.seller_id,
       type: "order_created",
-      title: "Новый заказ",
-      body: "Покупатель создал заказ. После оплаты он появится в работе.",
+      templateKey: "notifications.orderCreated",
       orderId: order.id,
       productId: order.product_id
     });
@@ -101,8 +100,7 @@ router.post(
       orderId: order.id,
       actorId: req.user.id,
       type: "created",
-      title: "Заказ создан",
-      body: "Покупатель оформил заказ. Следующий шаг - оплата."
+      templateKey: "orderEvents.created"
     });
     await cacheDelPattern(`orders:${req.user.id}:*`);
     await cacheDelPattern(`orders:${order.seller_id}:*`);
@@ -218,8 +216,7 @@ router.post(
     await createNotification({
       userId: result.rows[0].buyer_id,
       type: "order_started",
-      title: "Заказ взят в работу",
-      body: "Продавец начал выполнение заказа.",
+      templateKey: "notifications.orderStarted",
       orderId: id,
       productId: result.rows[0].product_id
     });
@@ -227,10 +224,9 @@ router.post(
       orderId: id,
       actorId: req.user.id,
       type: "started",
-      title: "Продавец начал выполнение",
-      body: "Заказ принят в работу."
+      templateKey: "orderEvents.started"
     });
-    await postOrderSystemMessage(id, "seller_started", "Продавец начал выполнение заказа.");
+    await postOrderSystemMessage(id, "seller_started", "system.sellerStarted");
     res.json({ order: result.rows[0] });
   })
 );
@@ -261,8 +257,7 @@ router.post(
     await createNotification({
       userId: result.rows[0].buyer_id,
       type: "order_delivered",
-      title: "Заказ доставлен",
-      body: "Проверьте результат и подтвердите доставку, если все хорошо.",
+      templateKey: "notifications.orderDelivered",
       orderId: id,
       productId: result.rows[0].product_id
     });
@@ -270,10 +265,9 @@ router.post(
       orderId: id,
       actorId: req.user.id,
       type: "delivered",
-      title: "Результат передан",
-      body: "Продавец отметил заказ доставленным и добавил данные доставки."
+      templateKey: "orderEvents.delivered"
     });
-    await postOrderSystemMessage(id, "delivery_sent", "Продавец передал результат заказа. Проверьте и подтвердите доставку.");
+    await postOrderSystemMessage(id, "delivery_sent", "system.deliverySent");
     res.json({ order: result.rows[0] });
   })
 );
@@ -295,18 +289,16 @@ router.post(
     await createNotification({
       userId: order.seller_id,
       type: "order_completed",
-      title: "Сделка завершена",
-      body: "Покупатель подтвердил доставку. Средства выплачены продавцу.",
+      templateKey: "notifications.orderCompleted",
       orderId: id
     });
     await recordOrderEvent({
       orderId: id,
       actorId: req.user.id,
       type: "completed",
-      title: "Покупатель подтвердил доставку",
-      body: "Сделка завершена, средства выплачены продавцу."
+      templateKey: "orderEvents.completed"
     });
-    await postOrderSystemMessage(id, "escrow_released", "Покупатель подтвердил доставку. Средства выплачены продавцу.");
+    await postOrderSystemMessage(id, "escrow_released", "system.escrowReleased");
     res.json({ order: updated });
   })
 );
@@ -333,16 +325,16 @@ router.post(
     await createNotification({
       userId: order.seller_id,
       type: "review_created",
-      title: "Новый отзыв",
-      body: `Покупатель оставил оценку ${input.rating}/5.`,
+      templateKey: "notifications.reviewCreated",
+      params: { rating: input.rating },
       orderId: id
     });
     await recordOrderEvent({
       orderId: id,
       actorId: req.user.id,
       type: "review_created",
-      title: "Покупатель оставил отзыв",
-      body: `Оценка: ${input.rating}/5.`
+      templateKey: "orderEvents.reviewCreated",
+      params: { rating: input.rating }
     });
     res.status(201).json({ review: result.rows[0] });
   })

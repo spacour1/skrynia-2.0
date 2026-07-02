@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect } from "react";
-import { usePathname } from "next/navigation";
-import { captureEvent, initPostHog, identifyUser, resetPostHogUser } from "../lib/posthog";
-import { useAuth } from "../lib/auth-store";
+import { usePathname } from "@/lib/navigation";
+import { captureEvent, initPostHog, identifyUser, resetPostHogUser } from "@/lib/posthog";
+import { useAuth } from "@/lib/auth-store";
 
 export function PostHogProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

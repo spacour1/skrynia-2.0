@@ -1,0 +1,25 @@
+{
+  "admin": {
+    "dashboard": "Адмін-панель",
+    "users": "Користувачі",
+    "listings": "Товари",
+    "openDisputes": "Відкриті спори",
+    "transactions": "Останні транзакції",
+    "platformRevenue": "Дохід платформи",
+    "moderateListings": "Модерація товарів",
+    "allow": "Дозволити",
+    "block": "Блокувати",
+    "userManagement": "Керування користувачами",
+    "ban": "Заблокувати",
+    "unban": "Розблокувати",
+    "disputes": "Спори",
+    "viewOrderChat": "Відкрити чат замовлення",
+    "refundBuyer": "Повернути покупцю",
+    "releaseSeller": "Виплатити продавцю",
+    "adminNote": "Коментар адміністратора",
+    "resolveDispute": "Вирішити спір",
+    "orderChatHistory": "Історія чату замовлення",
+    "noChat": "У цьому замовленні немає повідомлень.",
+    "resolved": "Вирішено"
+  }
+}

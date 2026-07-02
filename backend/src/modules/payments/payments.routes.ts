@@ -12,6 +12,7 @@ import { recordOrderEvent } from "../orders/order-events.service.js";
 import { notifyOrderEvent } from "../chat/ws.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
 import { postOrderSystemMessage } from "../chat/chat.service.js";
+import { t } from "../../i18n/t.js";
 import { paymentAttemptsTotal } from "../../common/metrics.js";
 import { webhookRateLimit } from "../../common/middleware/security.js";
 import { logger } from "../../common/logger.js";
@@ -46,26 +47,23 @@ export async function announceOrderPaid(order: { id: string; buyer_id: string; s
   await createNotification({
     userId: order.seller_id,
     type: "order_paid",
-    title: "Заказ оплачен",
-    body: "Покупатель оплатил заказ. Можно начинать выполнение.",
+    templateKey: "notifications.orderPaidSeller",
     orderId: order.id
   });
   await createNotification({
     userId: order.buyer_id,
     type: "order_paid",
-    title: "Оплата в escrow",
-    body: "Средства зарезервированы до подтверждения доставки.",
+    templateKey: "notifications.orderPaidBuyer",
     orderId: order.id
   });
   await recordOrderEvent({
     orderId: order.id,
     actorId,
     type: "paid",
-    title: "Заказ оплачен",
-    body: "Оплата зарезервирована в escrow.",
+    templateKey: "orderEvents.paid",
     metadata: { provider: order.payment_provider }
   });
-  await postOrderSystemMessage(order.id, "payment_received", "Оплата получена и зарезервирована в escrow.");
+  await postOrderSystemMessage(order.id, "payment_received", "system.paymentReceived");
 }
 
 router.post(
@@ -230,7 +228,7 @@ router.post(
       orderId: topup.id,
       amountCents,
       currency: "UAH",
-      description: "SKRYNIA: пополнение баланса",
+      description: t(req.locale ?? "ua", "payments.topupDescription"),
       resultUrl: `${env.FRONTEND_URL}/wallet?liqpay=return`
     });
     res.json({ data: checkout.data, signature: checkout.signature, actionUrl: checkout.actionUrl });
@@ -251,7 +249,7 @@ router.post(
       reference: topup.id,
       amountCents,
       currency: "UAH",
-      description: "SKRYNIA: пополнение баланса",
+      description: t(req.locale ?? "ua", "payments.topupDescription"),
       redirectUrl: `${env.FRONTEND_URL}/wallet?monobank=return`
     });
     res.json({ pageUrl: invoice.pageUrl, invoiceId: invoice.invoiceId });
@@ -272,7 +270,7 @@ router.post(
       orderReference: topup.id,
       amountCents,
       currency: "UAH",
-      productName: "SKRYNIA: пополнение баланса"
+      productName: t(req.locale ?? "ua", "payments.topupDescription")
     });
     res.json({ invoiceUrl: invoice.invoiceUrl });
   })

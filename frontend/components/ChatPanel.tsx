@@ -3,8 +3,9 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Flag, FileText, ImageIcon, Loader2, Paperclip, Send, X } from "lucide-react";
-import { apiFetch, ApiError, AUTH_REFRESHED_EVENT, WS_URL } from "../lib/api";
-import { useAuth } from "../lib/auth-store";
+import { apiFetch, ApiError, AUTH_REFRESHED_EVENT, WS_URL } from "@/lib/api";
+import { useAuth } from "@/lib/auth-store";
+import { useI18n } from "@/lib/i18n";
 import { EmailNotVerifiedNotice } from "./EmailNotVerifiedNotice";
 import { ReportModal } from "./ReportModal";
 
@@ -16,6 +17,7 @@ type Message = {
   attachmentUrl?: string;
   createdAt: string;
   kind?: "user" | "system";
+  metadata?: { bodyKey?: string; params?: Record<string, string | number> } | null;
 };
 
 export function ChatPanel({
@@ -28,6 +30,7 @@ export function ChatPanel({
   disabledNotice?: string;
 }) {
   const user = useAuth((state) => state.user);
+  const { language, t } = useI18n();
   const [reportMessageId, setReportMessageId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [attachmentUrl, setAttachmentUrl] = useState("");
@@ -173,10 +176,13 @@ export function ChatPanel({
       <div ref={listRef} className={`${compact ? "max-h-[170px] min-h-[110px] px-3 py-3" : "min-h-[420px] flex-1 px-5 py-5"} space-y-4 overflow-y-auto`}>
         {messages.map((message) => {
           if (message.kind === "system") {
+            // bodyKey/params travel in metadata so system messages render in the viewer's
+            // current language; the stored body is the default-locale fallback.
+            const systemBody = message.metadata?.bodyKey ? t(message.metadata.bodyKey, message.metadata.params) : message.body;
             return (
               <div key={message.id} className="flex justify-center">
                 <p className="max-w-[90%] rounded-full bg-panel/60 px-4 py-1.5 text-center text-xs font-medium text-muted">
-                  {message.body} · {new Date(message.createdAt).toLocaleString("ru-RU")}
+                  {systemBody} · {new Date(message.createdAt).toLocaleString(language)}
                 </p>
               </div>
             );
@@ -190,12 +196,12 @@ export function ChatPanel({
                   {message.attachmentUrl ? <AttachmentPreview url={message.attachmentUrl} mine={mine} /> : null}
                 </div>
                 <p className="mt-1 flex items-center gap-2 px-1 text-xs text-muted">
-                  {message.senderDisplayName ?? (mine ? "You" : "Participant")} · {new Date(message.createdAt).toLocaleString("ru-RU")}
+                  {message.senderDisplayName ?? (mine ? "You" : t("messages.participant"))} · {new Date(message.createdAt).toLocaleString(language)}
                   {!mine ? (
                     <button
                       type="button"
                       className="opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
-                      aria-label="Пожаловаться на сообщение"
+                      aria-label={t("chat.reportMessage")}
                       onClick={() => setReportMessageId(message.id)}
                     >
                       <Flag className="h-3 w-3" />

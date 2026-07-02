@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
+import Link from "@/lib/navigation";
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, MailWarning } from "lucide-react";
-import { apiFetch } from "../lib/api";
-import { useI18n } from "../lib/i18n";
+import { apiFetch } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 /** Friendly replacement for the raw 403 email_not_verified error in forms/buy/chat/wallet actions. */
 export function EmailNotVerifiedNotice() {

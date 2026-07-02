@@ -1,0 +1,61 @@
+{
+  "notifications": {
+    "orderCreated": {
+      "title": "New order",
+      "body": "A buyer created an order. It will move to work after payment."
+    },
+    "orderPaidSeller": {
+      "title": "Order paid",
+      "body": "The buyer paid for the order. You can start working on it."
+    },
+    "orderPaidBuyer": {
+      "title": "Payment in escrow",
+      "body": "Funds are reserved until delivery is confirmed."
+    },
+    "orderStarted": {
+      "title": "Order in progress",
+      "body": "The seller started working on your order."
+    },
+    "orderDelivered": {
+      "title": "Order delivered",
+      "body": "Check the result and confirm delivery if everything is fine."
+    },
+    "orderCompleted": {
+      "title": "Deal completed",
+      "body": "The buyer confirmed delivery. Funds were released to the seller."
+    },
+    "orderAutoReleased": {
+      "title": "Deal completed automatically",
+      "body": "The confirmation window expired. Funds were released to the seller."
+    },
+    "reviewCreated": {
+      "title": "New review",
+      "body": "The buyer left a {rating}/5 rating."
+    },
+    "orderDisputed": {
+      "title": "Dispute opened",
+      "body": "A dispute was opened for the order. An admin will review the deal history."
+    },
+    "disputeResolved": {
+      "title": "Dispute resolved",
+      "bodyRefund": "The admin resolved the dispute in favor of a refund.",
+      "bodyRelease": "The admin resolved the dispute in favor of the seller payout."
+    },
+    "accountWarned": {
+      "title": "Moderator warning",
+      "body": "{reason}"
+    },
+    "accountMuted": {
+      "title": "Temporary messaging restriction",
+      "body": "You cannot send messages until {until}."
+    },
+    "newMessage": {
+      "title": "New message",
+      "body": "{sender}: {preview}"
+    },
+    "reconciliationMismatch": {
+      "title": "Balance reconciliation mismatch",
+      "body": "Ledger/wallet mismatch detected: {summary}. Check /admin/finance."
+    }
+  }
+}

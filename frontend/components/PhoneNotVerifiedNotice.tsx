@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/lib/navigation";
 import { PhoneMissed } from "lucide-react";
 
 /** Friendly replacement for the raw 403 phone_not_verified error (currently only thrown by wallet withdrawal). */

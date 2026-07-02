@@ -19,6 +19,8 @@ import { sendPhoneVerificationCode, checkPhoneVerificationCode } from "../../com
 import { createTelegramConnectToken, disconnectTelegram } from "./telegram-link.service.js";
 import { getNotificationPreferences, updateNotificationPreferences } from "../notifications/preferences.service.js";
 import { confirmTwoFactor, disableTwoFactor, setupTwoFactor } from "../auth/twofa.service.js";
+import { locales } from "../../i18n/config.js";
+import { getRequestLocale } from "../../i18n/t.js";
 
 const router = Router();
 
@@ -46,6 +48,7 @@ router.get(
       `select u.id, u.email, u.display_name as "displayName", u.role,
               u.avatar_url as "avatarUrl", u.push_enabled as "pushEnabled",
               u.two_factor_enabled as "twoFactorEnabled", u.settings,
+              u.preferred_locale as "preferredLocale",
               u.created_at as "createdAt",
               (u.email_verified_at is not null or u.telegram_id is not null) as "emailVerified",
               u.phone, (u.phone_verified_at is not null) as "phoneVerified",
@@ -98,11 +101,25 @@ router.patch(
     const user = result.rows[0];
     if (emailChanged) {
       fireAndForget(
-        createAndSendVerificationEmail(user).then((created) => created.sendPromise),
+        createAndSendVerificationEmail(user, getRequestLocale(req)).then((created) => created.sendPromise),
         "profile_email_change_verification_failed"
       );
     }
     res.json({ user });
+  })
+);
+
+const localeSchema = z.object({ locale: z.enum(locales) });
+
+// Called by the frontend language switcher: persists the explicit language choice so
+// emails/Telegram notifications and the next login use it. Guests keep only the cookie.
+router.patch(
+  "/me/locale",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const input = localeSchema.parse(req.body);
+    await pool.query(`update users set preferred_locale = $2, updated_at = now() where id = $1`, [req.user.id, input.locale]);
+    res.json({ preferredLocale: input.locale });
   })
 );
 

@@ -2,25 +2,32 @@
 
 import { useEffect, useState } from "react";
 import { Languages } from "lucide-react";
-import { type Language, useLanguageStore } from "../lib/i18n";
+import { localeLabels, locales, type Locale } from "@/i18n/config";
+import { readLocaleCookie, useI18n } from "@/lib/i18n";
 
-const options: { value: Language; title: string; text: string }[] = [
-  { value: "en", title: "English", text: "Use SKRYNIA in English." },
-  { value: "uk", title: "Українська", text: "Використовувати SKRYNIA українською." },
-  { value: "ru", title: "Расийский", text: "Использовать SKRYNIA на русском." }
-];
+// Each description is intentionally in its own language — the reader hasn't picked one yet.
+const descriptions: Record<Locale, string> = {
+  ua: "Використовувати SKRYNIA українською.", // i18n-exempt
+  ru: "Использовать SKRYNIA на русском.", // i18n-exempt
+  en: "Use SKRYNIA in English."
+};
 
+/**
+ * First-visit language prompt. Once a choice is made the locale cookie is set and the
+ * URL prefix switches, so the middleware keeps every future visit on the chosen language.
+ */
 export function LanguageGate() {
-  const setLanguageAndReload = useLanguageStore((state) => state.setLanguageAndReload);
+  const { locale, switchLocale, t } = useI18n();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    setOpen(window.localStorage.getItem("languagePromptSeen") !== "1");
+    setOpen(window.localStorage.getItem("languagePromptSeen") !== "1" && readLocaleCookie() === null);
   }, []);
 
-  function choose(language: Language) {
+  function choose(next: Locale) {
     window.localStorage.setItem("languagePromptSeen", "1");
-    setLanguageAndReload(language);
+    setOpen(false);
+    if (next !== locale) switchLocale(next);
   }
 
   if (!open) return null;
@@ -32,22 +39,22 @@ export function LanguageGate() {
           <span className="mx-auto grid h-14 w-14 place-items-center rounded-lg bg-brand/10 text-brand">
             <Languages className="h-6 w-6" />
           </span>
-          <h1 className="mt-5 text-3xl font-black text-ink">Language selection</h1>
-          <p className="mt-3 text-sm leading-6 text-muted">This choice is saved for future visits. You can change it later in the header or sidebar.</p>
+          <h1 className="mt-5 text-3xl font-black text-ink">{t("nav.language")}</h1>
+          <p className="mt-3 text-sm leading-6 text-muted">{t("settings.language.text")}</p>
         </div>
         <div className="grid gap-3 p-4">
-          {options.map((option) => (
+          {locales.map((option) => (
             <button
-              key={option.value}
+              key={option}
               className="group flex items-center justify-between gap-4 rounded-lg border border-line bg-panel/40 p-5 text-left transition hover:-translate-y-0.5 hover:border-brand/70 hover:bg-brand/10"
-              onClick={() => choose(option.value)}
+              onClick={() => choose(option)}
             >
               <span>
-                <span className="block text-xl font-black text-ink">{option.title}</span>
-                <span className="mt-1 block text-sm leading-5 text-muted">{option.text}</span>
+                <span className="block text-xl font-black text-ink">{localeLabels[option]}</span>
+                <span className="mt-1 block text-sm leading-5 text-muted">{descriptions[option]}</span>
               </span>
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-line bg-card text-sm font-black text-muted transition group-hover:border-brand/60 group-hover:text-brand">
-                {option.value.toUpperCase()}
+                {option.toUpperCase()}
               </span>
             </button>
           ))}

@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import Link from "@/lib/navigation";
+import { usePathname, useRouter } from "@/lib/navigation";
 import type { FormEvent, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -27,11 +27,12 @@ import {
 } from "lucide-react";
 import { CurrencySwitcher } from "./CurrencySwitcher";
 import { GameIcon } from "./GameIcon";
-import { apiFetch, money, type Game } from "../lib/api";
-import { useAuth } from "../lib/auth-store";
-import { useI18n } from "../lib/i18n";
-import { firstProductMedia } from "../lib/product-media";
-import { captureEvent } from "../lib/posthog";
+import { localeLabels, locales } from "@/i18n/config";
+import { apiFetch, money, type Game } from "@/lib/api";
+import { useAuth } from "@/lib/auth-store";
+import { useI18n } from "@/lib/i18n";
+import { firstProductMedia } from "@/lib/product-media";
+import { captureEvent } from "@/lib/posthog";
 
 type SuggestProduct = {
   id: string;
@@ -56,6 +57,9 @@ type NotificationItem = {
   type: string;
   title: string;
   body?: string | null;
+  titleKey?: string | null;
+  bodyKey?: string | null;
+  params?: Record<string, string | number> | null;
   orderId?: string | null;
   productId?: string | null;
   conversationId?: string | null;
@@ -79,7 +83,7 @@ export function Nav() {
   // briefly flashes on every refresh before hydration corrects it. A neutral skeleton has
   // no false state to flash.
   const authResolved = hydrated || Boolean(user);
-  const { language, setLanguageAndReload, t } = useI18n();
+  const { locale, switchLocale, t } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
   const [search, setSearch] = useState("");
@@ -88,7 +92,6 @@ export function Nav() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
-  const languageLabel = language === "en" ? "ENG" : language === "uk" ? "UA" : "RU";
 
   useEffect(() => {
     if (pathname !== "/" || typeof window === "undefined") return;
@@ -178,10 +181,6 @@ export function Nav() {
     else if (item.orderId) router.push(`/orders/${item.orderId}`);
     else if (item.productId) router.push(`/products/${item.productId}`);
     else router.push("/dashboard");
-  }
-
-  function toggleLanguage() {
-    setLanguageAndReload(language === "ru" ? "en" : language === "en" ? "uk" : "ru");
   }
 
   function openRoute(href: string, auth?: boolean) {
@@ -277,7 +276,7 @@ export function Nav() {
                   {authResolved ? (
                     <>
                       <span className="block text-sm font-bold text-ink">{user?.displayName ?? t("nav.login")}</span>
-                      <span className="block text-xs text-muted">{user ? roleLabel(user.role, language) : "SKRYNIA"}</span>
+                      <span className="block text-xs text-muted">{user ? user.role : "SKRYNIA"}</span>
                     </>
                   ) : (
                     <>
@@ -290,10 +289,8 @@ export function Nav() {
               </button>
               {profileOpen && user ? (
                 <ProfileDropdown
-                  languageLabel={languageLabel}
                   onDashboard={() => router.push("/dashboard")}
                   onSettings={() => router.push("/settings")}
-                  onLanguage={toggleLanguage}
                   onLogout={() => {
                     logout().finally(() => {
                       setProfileOpen(false);
@@ -427,16 +424,12 @@ function CatalogMegaMenu({ games, onGame }: { games: Game[]; onGame: (slug: stri
 }
 
 function ProfileDropdown({
-  languageLabel,
   onDashboard,
   onSettings,
-  onLanguage,
   onLogout
 }: {
-  languageLabel: string;
   onDashboard: () => void;
   onSettings: () => void;
-  onLanguage: () => void;
   onLogout: () => void;
 }) {
   const { t } = useI18n();
@@ -445,18 +438,57 @@ function ProfileDropdown({
       <div className="grid gap-2 p-3">
         <MenuButton icon={UserCircle} label={t("nav.dashboard")} onClick={onDashboard} />
         <MenuButton icon={Settings} label={t("nav.settings")} onClick={onSettings} />
-        <button className="flex h-11 items-center justify-between rounded-xl px-3 text-sm font-bold text-muted transition hover:bg-panel hover:text-ink" type="button" onClick={onLanguage}>
-          <span className="inline-flex items-center gap-3">
-            <Languages className="h-5 w-5" />
-            {t("nav.language")}
-          </span>
-          <span className="text-xs text-brand">{languageLabel}</span>
-        </button>
+        <LanguageSwitcher />
         <CurrencySwitcher />
       </div>
       <div className="border-t border-line p-3">
         <MenuButton icon={LogOut} label={t("nav.logout")} onClick={onLogout} danger />
       </div>
+    </div>
+  );
+}
+
+/**
+ * Language selector: switching swaps the /ua|/ru|/en URL prefix (same page, same query),
+ * stores the skrynia_locale cookie, and persists preferred_locale for signed-in users.
+ */
+function LanguageSwitcher() {
+  const { locale, switchLocale, t } = useI18n();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div>
+      <button
+        className="flex h-11 w-full items-center justify-between rounded-xl px-3 text-sm font-bold text-muted transition hover:bg-panel hover:text-ink"
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="inline-flex items-center gap-3">
+          <Languages className="h-5 w-5" />
+          {t("nav.language")}
+        </span>
+        <span className="text-xs text-brand">{locale.toUpperCase()}</span>
+      </button>
+      {open ? (
+        <div className="mt-1 grid gap-1 rounded-xl border border-line bg-panel/40 p-2">
+          {locales.map((option) => (
+            <button
+              key={option}
+              className={`flex h-10 items-center justify-between rounded-lg px-3 text-sm font-bold transition ${
+                option === locale ? "bg-brand/10 text-brand" : "text-muted hover:bg-panel hover:text-ink"
+              }`}
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                switchLocale(option);
+              }}
+            >
+              <span>{localeLabels[option]}</span>
+              <span className="text-xs">{option.toUpperCase()}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -569,7 +601,7 @@ function NotificationDropdown({
   onOpen: (item: NotificationItem) => void;
   onReadAll: () => void;
 }) {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   return (
     <div className="absolute right-0 top-[calc(100%+10px)] z-50 w-[360px] overflow-hidden rounded-2xl border border-line bg-card shadow-lift">
       <div className="flex items-center justify-between gap-3 border-b border-line bg-panel/55 px-4 py-3">
@@ -590,34 +622,33 @@ function NotificationDropdown({
             <p className="max-w-[240px] text-sm leading-6 text-muted">{t("nav.noNotifications")}</p>
           </div>
         ) : null}
-        {items.map((item) => (
-          <button key={item.id} className={`flex w-full gap-3 rounded-xl p-3 text-left transition hover:bg-panel ${item.readAt ? "opacity-75" : "bg-brand/5"}`} type="button" onClick={() => onOpen(item)}>
-            <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${item.readAt ? "bg-muted/40" : "bg-action"}`} />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-black text-ink">{item.title}</span>
-              {item.body ? <span className="mt-1 line-clamp-2 block text-xs leading-5 text-muted">{item.body}</span> : null}
-              <span className="mt-2 block text-xs text-muted">{formatNotificationTime(item.createdAt)}</span>
-            </span>
-            <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted" />
-          </button>
-        ))}
+        {items.map((item) => {
+          // Key-based notifications re-localize instantly on language switch; older rows
+          // without keys fall back to the title/body stored at creation time.
+          const title = item.titleKey ? t(item.titleKey, item.params ?? undefined) : item.title;
+          const body = item.bodyKey ? t(item.bodyKey, item.params ?? undefined) : item.body;
+          return (
+            <button key={item.id} className={`flex w-full gap-3 rounded-xl p-3 text-left transition hover:bg-panel ${item.readAt ? "opacity-75" : "bg-brand/5"}`} type="button" onClick={() => onOpen(item)}>
+              <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${item.readAt ? "bg-muted/40" : "bg-action"}`} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-black text-ink">{title}</span>
+                {body ? <span className="mt-1 line-clamp-2 block text-xs leading-5 text-muted">{body}</span> : null}
+                <span className="mt-2 block text-xs text-muted">{formatNotificationTime(item.createdAt, language)}</span>
+              </span>
+              <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted" />
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function formatNotificationTime(value: string) {
-  return new Date(value).toLocaleString("ru-RU", {
+function formatNotificationTime(value: string, language: string) {
+  return new Date(value).toLocaleString(language, {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
     minute: "2-digit"
   });
-}
-
-function roleLabel(role: string, language: string) {
-  if (language !== "ru") return role;
-  if (role === "admin") return "admin";
-  if (role === "moderator") return "moderator";
-  return "user";
 }

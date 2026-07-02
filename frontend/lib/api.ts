@@ -151,10 +151,12 @@ export type CurrencyRatesResponse = {
   rates: CurrencyRate[];
 };
 
+// Labels are ISO-style English names; the UI shows only the currency code, so these
+// don't need per-locale translations.
 export const DISPLAY_CURRENCIES: { code: CurrencyCode; label: string; symbol: string }[] = [
-  { code: "UAH", label: "Гривна", symbol: "₴" },
-  { code: "USD", label: "Доллар", symbol: "$" },
-  { code: "EUR", label: "Евро", symbol: "€" }
+  { code: "UAH", label: "Hryvnia", symbol: "₴" },
+  { code: "USD", label: "Dollar", symbol: "$" },
+  { code: "EUR", label: "Euro", symbol: "€" }
 ];
 
 export const DISPLAY_CURRENCY_EVENT = "display-currency-change";
@@ -219,6 +221,9 @@ function isCurrencyCode(value: unknown): value is CurrencyCode {
 
 function isAccountingPath() {
   if (typeof window === "undefined") return false;
+  // Strip the /ua|/ru|/en prefix so path checks keep working under locale routing.
+  const locale = currentPathLocale();
+  const pathname = locale ? window.location.pathname.slice(locale.length + 1) || "/" : window.location.pathname;
   return [
     "/admin",
     "/dashboard",
@@ -226,7 +231,7 @@ function isAccountingPath() {
     "/wallet",
     "/seller/earnings",
     "/seller/sales"
-  ].some((path) => window.location.pathname.startsWith(path));
+  ].some((path) => pathname.startsWith(path));
 }
 
 export class ApiError extends Error {
@@ -260,10 +265,22 @@ function readCookie(name: string): string | undefined {
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
+function currentPathLocale(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const first = window.location.pathname.split("/")[1];
+  return first === "ua" || first === "ru" || first === "en" ? first : undefined;
+}
+
 function rawFetch(path: string, options: RequestInit) {
   const headers = new Headers(options.headers);
   if (!headers.has("Content-Type") && !(options.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
+  }
+  // Tell the backend which language to respond in (validation errors, localized
+  // notifications, emails). Kept in sync with the URL prefix by the middleware.
+  if (!headers.has("x-locale")) {
+    const locale = readCookie("skrynia_locale") ?? currentPathLocale();
+    if (locale) headers.set("x-locale", locale);
   }
   const method = (options.method ?? "GET").toUpperCase();
   if (MUTATING_METHODS.has(method)) {
@@ -374,8 +391,9 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, isRet
       if (outcome === "ok") return apiFetch<T>(path, options, true);
       if (outcome === "invalid") {
         broadcastSessionEnded();
-        if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-          window.location.assign("/login");
+        if (typeof window !== "undefined" && !window.location.pathname.includes("/login")) {
+          const locale = currentPathLocale() ?? readCookie("skrynia_locale") ?? "ua";
+          window.location.assign(`/${locale}/login`);
         }
       }
       // "retry-later": a transient backend hiccup, not a real logout - fall through and

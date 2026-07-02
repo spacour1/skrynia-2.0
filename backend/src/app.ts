@@ -8,6 +8,7 @@ import { env } from "./config/env.js";
 import { apiRateLimit, metricsAuth, publicReadRateLimit, writeRateLimit } from "./common/middleware/security.js";
 import { csrfProtection } from "./common/middleware/csrf.js";
 import { requestContext } from "./common/middleware/request-context.js";
+import { localeContext } from "./i18n/t.js";
 import { errorHandler } from "./common/errors.js";
 import { metricsText } from "./common/metrics.js";
 import authRoutes from "./modules/auth/auth.routes.js";
@@ -44,6 +45,7 @@ export function createApp() {
   app.use(cookieParser());
   app.use(express.json({ limit: "1mb" }));
   app.use(requestContext);
+  app.use(localeContext);
   app.use(apiRateLimit);
   app.use(writeRateLimit);
   app.use(csrfProtection);

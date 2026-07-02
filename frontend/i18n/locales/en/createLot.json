@@ -1,0 +1,12 @@
+{
+  "createLot": {
+    "title": "Listing creation",
+    "newProduct": "New product",
+    "category": "Product category",
+    "gameOrService": "Game or service",
+    "sectionInsideGame": "Section inside the game",
+    "detailsStep": "Description, title and price",
+    "publish": "Publish listing",
+    "preview": "Preview"
+  }
+}

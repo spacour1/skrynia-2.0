@@ -1,0 +1,12 @@
+{
+  "createLot": {
+    "title": "Створення лота",
+    "newProduct": "Новий товар",
+    "category": "Категорія товару",
+    "gameOrService": "Гра або сервіс",
+    "sectionInsideGame": "Розділ усередині гри",
+    "detailsStep": "Опис, заголовок і ціна",
+    "publish": "Опублікувати лот",
+    "preview": "Передперегляд"
+  }
+}

@@ -31,8 +31,7 @@ export async function simulateTestPaymentFailure(orderId: string, buyerId: strin
     orderId,
     actorId: buyerId,
     type: "canceled",
-    title: "Оплата не прошла",
-    body: "Тестовый платеж завершился ошибкой."
+    templateKey: "orderEvents.paymentFailed"
   });
   notifyOrderEvent(order.seller_id, { type: "order_canceled", orderId });
   return updated.rows[0];

@@ -1,0 +1,25 @@
+{
+  "admin": {
+    "dashboard": "Админ-панель",
+    "users": "Пользователи",
+    "listings": "Товары",
+    "openDisputes": "Открытые споры",
+    "transactions": "Последние транзакции",
+    "platformRevenue": "Доход платформы",
+    "moderateListings": "Модерация товаров",
+    "allow": "Разрешить",
+    "block": "Блокировать",
+    "userManagement": "Управление пользователями",
+    "ban": "Забанить",
+    "unban": "Разбанить",
+    "disputes": "Споры",
+    "viewOrderChat": "Открыть чат заказа",
+    "refundBuyer": "Вернуть покупателю",
+    "releaseSeller": "Выплатить продавцу",
+    "adminNote": "Комментарий администратора",
+    "resolveDispute": "Решить спор",
+    "orderChatHistory": "История чата заказа",
+    "noChat": "В этом заказе нет сообщений.",
+    "resolved": "Решено"
+  }
+}

@@ -1,13 +1,13 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import Link from "@/lib/navigation";
+import { useRouter } from "@/lib/navigation";
 import { BadgePercent, Star, Store, Timer } from "lucide-react";
-import type { Product } from "../lib/api";
-import { money } from "../lib/api";
+import type { Product } from "@/lib/api";
+import { money } from "@/lib/api";
 import { GameIcon } from "./GameIcon";
-import { firstProductMedia } from "../lib/product-media";
-import { useI18n } from "../lib/i18n";
+import { firstProductMedia } from "@/lib/product-media";
+import { useI18n } from "@/lib/i18n";
 
 export function ProductCard({ product }: { product: Product }) {
   const router = useRouter();

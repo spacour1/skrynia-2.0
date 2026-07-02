@@ -2,6 +2,8 @@ import { nanoid } from "nanoid";
 import { pool } from "../../db/pool.js";
 import { buildTelegramConnectLink, sendTelegramMessage } from "../../common/telegram-bot.js";
 import { badRequest } from "../../common/errors.js";
+import { normalizeLocale } from "../../i18n/config.js";
+import { t } from "../../i18n/t.js";
 
 /**
  * Issues a fresh deep-link token for a user to connect their Telegram account for
@@ -31,7 +33,14 @@ export async function consumeTelegramConnectToken(token: string, chatId: string)
     [token, chatId]
   );
   const userId = result.rows[0]?.userId;
-  if (userId) await sendTelegramMessage(chatId, "✅ Telegram подключен к вашему аккаунту SKRYNIA. Теперь вы будете получать уведомления здесь.");
+  if (userId) {
+    const localeResult = await pool.query<{ preferredLocale: string }>(
+      `select preferred_locale as "preferredLocale" from users where id = $1`,
+      [userId]
+    );
+    const locale = normalizeLocale(localeResult.rows[0]?.preferredLocale);
+    await sendTelegramMessage(chatId, t(locale, "telegram.connectedGreeting"));
+  }
   return userId ?? null;
 }
 

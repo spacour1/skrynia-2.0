@@ -11,6 +11,8 @@ import { getNotificationPreferences } from "../notifications/preferences.service
 import { getTelegramChatId } from "../users/telegram-link.service.js";
 import { sendEmail, renderBrandedEmail } from "../../common/mailer.js";
 import { sendTelegramMessage } from "../../common/telegram-bot.js";
+import { normalizeLocale } from "../../i18n/config.js";
+import { t } from "../../i18n/t.js";
 
 export type MarketplaceJobName = "escrow_release" | "payout" | "dispute_timer" | "email_notification" | "reconciliation_daily";
 
@@ -21,6 +23,11 @@ export type MarketplaceJobPayload = {
   email?: string;
   subject?: string;
   body?: string;
+  // Key-based notification template — rendered in the recipient's preferred_locale
+  // inside the worker; subject/body above stay as a default-locale fallback.
+  titleKey?: string;
+  bodyKey?: string;
+  params?: Record<string, string | number>;
 };
 
 let connection: ConnectionOptions | null = null;
@@ -138,16 +145,19 @@ async function processEmail(data: MarketplaceJobPayload) {
     logger.warn({ data }, "notification_job_missing_user_id");
     return;
   }
-  const userResult = await pool.query<{ email: string; displayName: string }>(
-    `select email, display_name as "displayName" from users where id = $1`,
+  const userResult = await pool.query<{ email: string; displayName: string; preferredLocale: string }>(
+    `select email, display_name as "displayName", preferred_locale as "preferredLocale" from users where id = $1`,
     [data.userId]
   );
   const user = userResult.rows[0];
   if (!user) return;
 
   const preferences = await getNotificationPreferences(data.userId);
-  const subject = data.subject ?? "Уведомление SKRYNIA";
-  const body = data.body ?? "";
+  // Render key-based templates in the recipient's language; older jobs without keys
+  // fall back to the pre-rendered subject/body they were enqueued with.
+  const locale = normalizeLocale(user.preferredLocale);
+  const subject = data.titleKey ? t(locale, data.titleKey, data.params) : data.subject ?? t(locale, "email.notification.subject");
+  const body = data.bodyKey ? t(locale, data.bodyKey, data.params) : data.body ?? "";
   // subject/body often embed user-generated content (e.g. a chat message preview), so they
   // must be escaped before going into either HTML email or Telegram's HTML parse_mode.
   const safeSubject = escapeHtml(subject);
@@ -161,9 +171,9 @@ async function processEmail(data: MarketplaceJobPayload) {
       html: renderBrandedEmail({
         title: safeSubject,
         bodyHtml: `<p>${safeBody}</p>`,
-        ctaText: "Открыть SKRYNIA",
+        ctaText: t(locale, "email.notification.cta"),
         ctaUrl: env.FRONTEND_URL,
-        footerNote: "Вы получили это письмо, потому что включены уведомления на email в настройках аккаунта."
+        footerNote: t(locale, "email.notification.footer")
       })
     });
     if (!sent) logger.info({ userId: data.userId, subject }, "email_notification_not_sent");
@@ -201,8 +211,8 @@ async function processReconciliationDaily() {
       createNotification({
         userId: admin.id,
         type: "reconciliation_mismatch",
-        title: "Расхождение в сверке баланса",
-        body: `Обнаружено расхождение в ledger/wallet: ${summary}. Проверьте /admin/finance.`
+        templateKey: "notifications.reconciliationMismatch",
+        params: { summary }
       })
     )
   );

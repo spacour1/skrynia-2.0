@@ -1,0 +1,25 @@
+{
+  "admin": {
+    "dashboard": "Admin dashboard",
+    "users": "Users",
+    "listings": "Listings",
+    "openDisputes": "Open disputes",
+    "transactions": "Recent transactions",
+    "platformRevenue": "Platform revenue",
+    "moderateListings": "Moderate listings",
+    "allow": "Allow",
+    "block": "Block",
+    "userManagement": "User management",
+    "ban": "Ban",
+    "unban": "Unban",
+    "disputes": "Disputes",
+    "viewOrderChat": "View order chat",
+    "refundBuyer": "Refund buyer",
+    "releaseSeller": "Release seller funds",
+    "adminNote": "Admin note",
+    "resolveDispute": "Resolve dispute",
+    "orderChatHistory": "Order chat history",
+    "noChat": "No chat messages for this order.",
+    "resolved": "Resolved"
+  }
+}

@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
+import Link from "@/lib/navigation";
 import { useMutation } from "@tanstack/react-query";
 import { MailWarning, X } from "lucide-react";
-import { apiFetch } from "../lib/api";
-import { useAuth } from "../lib/auth-store";
-import { useI18n } from "../lib/i18n";
+import { apiFetch } from "@/lib/api";
+import { useAuth } from "@/lib/auth-store";
+import { useI18n } from "@/lib/i18n";
 
 const DISMISS_KEY = "skrynia-email-banner-dismissed";
 

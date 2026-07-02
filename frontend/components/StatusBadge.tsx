@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { useI18n } from "../lib/i18n";
+import { useI18n } from "@/lib/i18n";
 
 const colors: Record<string, string> = {
   pending: "bg-slate-100 text-muted dark:bg-slate-500/15 dark:text-slate-200",

@@ -1,0 +1,117 @@
+{
+  "settings": {
+    "title": "Settings",
+    "badge": "Account settings",
+    "headerText": "Profile, avatar, notifications, security, and sign-in.",
+    "language": {
+      "title": "Interface language",
+      "text": "Choose a language. It is saved for future visits and applied across the whole site."
+    },
+    "profile": {
+      "title": "Profile",
+      "text": "The details buyers and sellers see on the platform.",
+      "nameLabel": "Display name",
+      "bio": "Public profile description",
+      "bioPlaceholder": "Tell buyers about yourself, your experience, delivery rules, and product categories.",
+      "save": "Save profile",
+      "saved": "Profile settings saved",
+      "saveFailed": "Could not save settings"
+    },
+    "avatar": {
+      "upload": "Upload avatar",
+      "delete": "Delete",
+      "deleteNotice": "The avatar will be removed after saving the profile.",
+      "hint": "PNG, JPG, or WEBP up to 8 MB. After uploading, click \"Save profile\".",
+      "uploaded": "Avatar uploaded. Click save to apply it to your profile.",
+      "uploadFailed": "Could not upload the avatar",
+      "invalidType": "Choose a PNG, JPG, or WEBP image",
+      "tooLarge": "The file is too large. Maximum is 8 MB.",
+      "alt": "Avatar"
+    },
+    "push": {
+      "title": "Push notifications",
+      "text": "Orders, messages, and important events."
+    },
+    "theme": {
+      "title": "Interface theme",
+      "text": "Choose a theme. The page will reload in the new appearance.",
+      "light": "Light theme",
+      "dark": "Dark theme"
+    },
+    "password": {
+      "title": "Password",
+      "text": "At least 8 characters. Use the new password the next time you sign in.",
+      "current": "Current password",
+      "new": "New password",
+      "repeat": "Repeat new password",
+      "change": "Change password",
+      "updated": "Password updated",
+      "mismatch": "New passwords don't match",
+      "changeFailed": "Could not change the password"
+    },
+    "twofa": {
+      "title": "Two-factor authentication",
+      "text": "A code from an authenticator app (Google Authenticator, Authy, etc.) on every sign-in.",
+      "enabled": "2FA enabled",
+      "enable": "Enable 2FA",
+      "disable": "Disable 2FA",
+      "confirmDisable": "Confirm disabling",
+      "backupIntro": "2FA is on. Save the backup codes — each can be used once instead of an app code if your phone is unavailable.",
+      "done": "Done",
+      "setupIntro": "Scan in your authenticator app or enter the secret manually, then enter the code to confirm.",
+      "secretLabel": "Secret:",
+      "codePlaceholder": "Code from the app",
+      "confirmEnable": "Confirm and enable",
+      "setupFailed": "Could not start 2FA setup",
+      "invalidCode": "Invalid code",
+      "disableFailed": "Could not disable 2FA"
+    },
+    "emailVerify": {
+      "title": "Email verification",
+      "text": "Protect your account and unlock order notifications by email.",
+      "verified": "Email verified",
+      "notVerified": "Email not verified",
+      "sentTo": "We sent a link to {email} at registration. If it didn't arrive, send it again.",
+      "resend": "Resend email",
+      "sent": "Email sent — check your inbox (and spam folder)",
+      "alreadyVerified": "Email already verified",
+      "sendFailed": "Could not send the email"
+    },
+    "phone": {
+      "title": "Phone verification",
+      "text": "Required for withdrawals. Optional for everything else on the site.",
+      "verified": "Phone verified: {phone}",
+      "numberLabel": "Phone number",
+      "sendCode": "Send code by SMS",
+      "codeSentTo": "The code was sent to {phone}. Enter it below.",
+      "codeLabel": "SMS code",
+      "confirmCode": "Confirm code",
+      "changeNumber": "Change number",
+      "codeSent": "Code sent by SMS",
+      "confirmed": "Phone verified",
+      "sendFailed": "Could not send the code",
+      "invalidCode": "Invalid or expired code"
+    },
+    "notifs": {
+      "title": "Notifications",
+      "text": "Where to send orders, messages, disputes, and other important events.",
+      "emailTitle": "Email notifications",
+      "emailText": "Emails about key order events.",
+      "telegramTitle": "Telegram notifications",
+      "telegramText": "Requires connecting the Telegram bot below."
+    },
+    "telegram": {
+      "connected": "Telegram connected",
+      "disconnect": "Disconnect",
+      "connect": "Connect Telegram",
+      "disconnected": "Telegram disconnected",
+      "connectFailed": "Could not get the connection link"
+    },
+    "works": {
+      "title": "What already works",
+      "item1": "The avatar is uploaded as a file to the backend and stored in the profile.",
+      "item2": "Name, email, and toggles are updated in the database.",
+      "item3": "The session refreshes after saving, so the avatar shows up in the navigation without re-login."
+    }
+  }
+}

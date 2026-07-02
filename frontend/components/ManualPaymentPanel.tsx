@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Banknote, Check, Copy } from "lucide-react";
-import { ApiError, apiFetch, money } from "../lib/api";
+import { ApiError, apiFetch, money } from "@/lib/api";
 
 type ManualPaymentDetails = {
   cardNumber: string;

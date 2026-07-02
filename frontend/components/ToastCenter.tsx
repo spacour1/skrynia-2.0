@@ -2,11 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/navigation";
 import { Bell, CheckCircle2, Heart, MessageCircle, ReceiptText, X } from "lucide-react";
-import { WS_URL } from "../lib/api";
-import { useAuth } from "../lib/auth-store";
-import { APP_TOAST_EVENT, type AppToastPayload } from "../lib/toast-events";
+import { WS_URL } from "@/lib/api";
+import { useAuth } from "@/lib/auth-store";
+import { APP_TOAST_EVENT, type AppToastPayload } from "@/lib/toast-events";
 
 type WsNotification = {
   id?: string;

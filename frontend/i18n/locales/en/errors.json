@@ -1,0 +1,9 @@
+{
+  "errors": {
+    "email_not_verified": "Please verify your email to continue",
+    "phone_not_verified": "Please verify your phone number first",
+    "requestFailed": "Request failed. Please try again.",
+    "notFoundTitle": "Page not found",
+    "notFoundText": "This page does not exist or has been moved."
+  }
+}

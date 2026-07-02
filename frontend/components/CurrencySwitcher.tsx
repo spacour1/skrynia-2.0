@@ -11,7 +11,7 @@ import {
   setDisplayCurrency,
   type CurrencyCode,
   type CurrencyRatesResponse
-} from "../lib/api";
+} from "@/lib/api";
 
 export function CurrencySwitcher() {
   const [currency, setCurrency] = useState<CurrencyCode>("UAH");

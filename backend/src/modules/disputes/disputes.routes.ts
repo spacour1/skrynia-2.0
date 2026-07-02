@@ -54,8 +54,7 @@ router.post(
         createNotification({
           userId,
           type: "order_disputed",
-          title: "Открыт спор",
-          body: "По заказу открыт спор. Администратор проверит историю сделки.",
+          templateKey: "notifications.orderDisputed",
           orderId
         })
       )
@@ -64,10 +63,11 @@ router.post(
       orderId,
       actorId: req.user.id,
       type: "disputed",
-      title: "Открыт спор",
+      templateKey: "orderEvents.disputed",
+      // The dispute reason is user-generated content — stored raw, never translated.
       body: input.reason
     });
-    await postOrderSystemMessage(orderId, "dispute_opened", `Открыт спор: ${input.reason}`);
+    await postOrderSystemMessage(orderId, "dispute_opened", "system.disputeOpened", { reason: input.reason });
     res.status(201).json({ dispute: dispute.rows[0] });
   })
 );
@@ -166,8 +166,8 @@ router.post(
         createNotification({
           userId,
           type: "dispute_resolved",
-          title: "Спор решен",
-          body: input.decision === "refund" ? "Администратор решил спор в пользу возврата." : "Администратор решил спор в пользу выплаты продавцу.",
+          titleKey: "notifications.disputeResolved.title",
+          bodyKey: input.decision === "refund" ? "notifications.disputeResolved.bodyRefund" : "notifications.disputeResolved.bodyRelease",
           orderId: row.order_id
         })
       )
@@ -176,19 +176,18 @@ router.post(
       orderId: row.order_id,
       actorId: req.user.id,
       type: "dispute_resolved",
-      title: "Спор решен администратором",
+      templateKey: "orderEvents.disputeResolved",
+      // The admin note is free text written by the admin — stored raw, never translated.
       body: input.adminNote,
       metadata: { decision: input.decision }
     });
-    await postOrderSystemMessage(row.order_id, "dispute_resolved", `Спор решен администратором: ${input.adminNote}`, {
+    await postOrderSystemMessage(row.order_id, "dispute_resolved", "system.disputeResolved", { note: input.adminNote }, {
       decision: input.decision
     });
     await postOrderSystemMessage(
       row.order_id,
       input.decision === "refund" ? "refunded" : "escrow_released",
-      input.decision === "refund"
-        ? "Средства возвращены покупателю."
-        : "Средства выплачены продавцу."
+      input.decision === "refund" ? "system.refunded" : "system.fundsReleased"
     );
     res.json({ dispute: updated.rows[0], order });
   })

@@ -1,10 +1,10 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import Link from "@/lib/navigation";
+import { usePathname } from "@/lib/navigation";
 import { useEffect } from "react";
-import { useAuth } from "../lib/auth-store";
-import { useI18n } from "../lib/i18n";
+import { useAuth } from "@/lib/auth-store";
+import { useI18n } from "@/lib/i18n";
 
 export function RequireAuth({
   children,

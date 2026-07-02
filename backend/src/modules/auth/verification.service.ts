@@ -4,6 +4,8 @@ import { badRequest } from "../../common/errors.js";
 import { env } from "../../config/env.js";
 import { sendEmail, renderBrandedEmail } from "../../common/mailer.js";
 import { logger } from "../../common/logger.js";
+import { defaultLocale, type Locale } from "../../i18n/config.js";
+import { getT } from "../../i18n/t.js";
 
 const EMAIL_VERIFY_TTL_SECONDS = 24 * 60 * 60;
 const PASSWORD_RESET_TTL_SECONDS = 60 * 60;
@@ -75,14 +77,14 @@ export async function checkResendRateLimit(userId: string) {
   await redis.set(cooldownKey, "1", "EX", RESEND_COOLDOWN_SECONDS);
 }
 
-function verificationEmailHtml(link: string) {
+function verificationEmailHtml(link: string, locale: Locale) {
+  const t = getT(locale);
   return renderBrandedEmail({
-    title: "Подтвердите email",
-    bodyHtml:
-      "Осталось подтвердить адрес почты, чтобы покупать, продавать и переписываться с продавцами на SKRYNIA. Ссылка действует 24 часа.",
-    ctaText: "Подтвердить email",
+    title: t("email.verify.title"),
+    bodyHtml: t("email.verify.body"),
+    ctaText: t("email.verify.cta"),
     ctaUrl: link,
-    footerNote: "Если вы не регистрировались на SKRYNIA, просто игнорируйте это письмо."
+    footerNote: t("email.verify.footer")
   });
 }
 
@@ -92,35 +94,39 @@ function verificationEmailHtml(link: string) {
  * decide whether to await it — register fires-and-forgets, the explicit resend endpoint
  * awaits it in production so a broken SMTP config surfaces as a real error).
  */
-export function createAndSendVerificationEmail(user: { id: string; email: string }) {
+export function createAndSendVerificationEmail(user: { id: string; email: string }, locale: Locale = defaultLocale) {
+  const t = getT(locale);
   return createEmailVerificationToken(user.id).then((token) => {
-    const link = `${env.FRONTEND_URL}/verify-email?token=${token}`;
+    // Localized link so the confirmation page opens in the user's language.
+    const link = `${env.FRONTEND_URL}/${locale}/verify-email?token=${token}`;
     const sendPromise = sendEmail({
       to: user.email,
-      subject: "Подтвердите email на SKRYNIA",
-      text: `Подтвердите email по ссылке: ${link}`,
-      html: verificationEmailHtml(link)
+      subject: t("email.verify.subject"),
+      text: t("email.verify.text", { link }),
+      html: verificationEmailHtml(link, locale)
     });
     return { link, sendPromise };
   });
 }
 
-function passwordResetEmailHtml(link: string) {
+function passwordResetEmailHtml(link: string, locale: Locale) {
+  const t = getT(locale);
   return renderBrandedEmail({
-    title: "Сброс пароля",
-    bodyHtml: "Запрошен сброс пароля для вашего аккаунта на SKRYNIA. Ссылка действует 1 час.",
-    ctaText: "Сбросить пароль",
+    title: t("email.passwordReset.title"),
+    bodyHtml: t("email.passwordReset.body"),
+    ctaText: t("email.passwordReset.cta"),
     ctaUrl: link,
-    footerNote: "Если вы не запрашивали сброс пароля, просто игнорируйте это письмо — пароль останется прежним."
+    footerNote: t("email.passwordReset.footer")
   });
 }
 
-export function sendPasswordResetEmail(user: { email: string }, link: string) {
+export function sendPasswordResetEmail(user: { email: string }, link: string, locale: Locale = defaultLocale) {
+  const t = getT(locale);
   return sendEmail({
     to: user.email,
-    subject: "Сброс пароля на SKRYNIA",
-    text: `Сбросьте пароль по ссылке: ${link}`,
-    html: passwordResetEmailHtml(link)
+    subject: t("email.passwordReset.subject"),
+    text: t("email.passwordReset.text", { link }),
+    html: passwordResetEmailHtml(link, locale)
   });
 }
 

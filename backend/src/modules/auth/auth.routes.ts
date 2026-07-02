@@ -31,6 +31,7 @@ import {
   fireAndForget
 } from "./verification.service.js";
 import { logger } from "../../common/logger.js";
+import { getRequestLocale } from "../../i18n/t.js";
 
 const router = Router();
 
@@ -84,7 +85,7 @@ router.post(
     // the account and wallet are already committed by this point.
     let debugVerificationUrl: string | undefined;
     try {
-      const { link, sendPromise } = await createAndSendVerificationEmail(user);
+      const { link, sendPromise } = await createAndSendVerificationEmail(user, getRequestLocale(req));
       fireAndForget(sendPromise, "registration_verification_email_failed");
       if (env.NODE_ENV !== "production") debugVerificationUrl = link;
     } catch (error) {
@@ -275,7 +276,7 @@ router.post(
     if (user.emailVerified) return res.json({ status: "already_verified" });
 
     await checkResendRateLimit(user.id);
-    const { link, sendPromise } = await createAndSendVerificationEmail(user);
+    const { link, sendPromise } = await createAndSendVerificationEmail(user, getRequestLocale(req));
 
     if (env.NODE_ENV === "production") {
       // Unlike registration, this is an explicit user action waiting on an email - a
@@ -323,9 +324,10 @@ router.post(
     // Always respond the same way whether or not the account exists, so this endpoint
     // can't be used to enumerate registered emails.
     if (user) {
+      const locale = getRequestLocale(req);
       const token = await createPasswordResetToken(user.id);
-      const link = `${env.FRONTEND_URL}/reset-password?token=${token}`;
-      fireAndForget(sendPasswordResetEmail(user, link), "password_reset_email_failed");
+      const link = `${env.FRONTEND_URL}/${locale}/reset-password?token=${token}`;
+      fireAndForget(sendPasswordResetEmail(user, link, locale), "password_reset_email_failed");
     }
     res.json({ status: "sent" });
   })

@@ -3,8 +3,8 @@
 import { FormEvent, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { X } from "lucide-react";
-import { apiFetch } from "../lib/api";
-import { showAppToast } from "../lib/toast-events";
+import { apiFetch } from "@/lib/api";
+import { showAppToast } from "@/lib/toast-events";
 
 const USER_REPORT_REASONS: Array<[string, string]> = [
   ["fraud", "Мошенничество"],

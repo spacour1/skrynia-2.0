@@ -1,0 +1,37 @@
+{
+  "chat": {
+    "title": "Order chat",
+    "empty": "No messages yet.",
+    "attachment": "Attachment",
+    "attachmentPlaceholder": "Optional attachment URL",
+    "messagePlaceholder": "Write a message",
+    "reportMessage": "Report this message",
+    "systemSender": "System"
+  },
+  "system": {
+    "orderCreated": "Order created. The next step is payment.",
+    "paymentReceived": "Payment received and reserved in escrow.",
+    "sellerStarted": "The seller started working on the order.",
+    "deliverySent": "The seller delivered the order result. Check it and confirm delivery.",
+    "escrowReleased": "The buyer confirmed delivery. Funds were released to the seller.",
+    "disputeOpened": "Dispute opened: {reason}",
+    "disputeResolved": "Dispute resolved by admin: {note}",
+    "refunded": "Funds were returned to the buyer.",
+    "fundsReleased": "Funds were released to the seller."
+  },
+  "messages": {
+    "title": "Messages",
+    "searchPlaceholder": "Search order, product, or seller",
+    "tabAll": "All",
+    "tabActive": "Active",
+    "tabFinished": "Finished",
+    "noChats": "No order chats found.",
+    "openSellerProfile": "Open profile",
+    "order": "Order",
+    "openOrder": "Open order",
+    "selectChat": "Select an order to open its chat.",
+    "participant": "Participant",
+    "report": "Report",
+    "blockedNotice": "You have blocked this user. They will not be able to message you directly."
+  }
+}

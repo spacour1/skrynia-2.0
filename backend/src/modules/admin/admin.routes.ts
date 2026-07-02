@@ -106,7 +106,8 @@ router.post(
     await createNotification({
       userId: id,
       type: "account_warned",
-      title: "Предупреждение от модератора",
+      titleKey: "notifications.accountWarned.title",
+      // The reason is written by the moderator — kept as-is, only the title is localized.
       body: input.reason
     });
     res.json({ ok: true });
@@ -135,8 +136,13 @@ router.post(
     await createNotification({
       userId: id,
       type: "account_muted",
-      title: "Временное ограничение на сообщения",
-      body: input.reason ?? `Вы не можете отправлять сообщения до ${new Date(result.rows[0].mutedUntil).toLocaleString("ru-RU")}.`
+      titleKey: "notifications.accountMuted.title",
+      ...(input.reason
+        ? { body: input.reason }
+        : {
+            bodyKey: "notifications.accountMuted.body",
+            params: { until: new Date(result.rows[0].mutedUntil).toISOString().slice(0, 16).replace("T", " ") + " UTC" }
+          })
     });
     res.json({ user: result.rows[0] });
   })

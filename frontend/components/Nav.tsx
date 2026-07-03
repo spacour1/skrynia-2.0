@@ -316,11 +316,6 @@ export function Nav() {
         className={`fixed bottom-0 left-0 top-[86px] z-30 hidden border-r border-line/70 bg-surface/85 px-3 py-5 shadow-[18px_0_70px_rgba(0,0,0,0.16)] backdrop-blur-xl transition-[width] duration-200 lg:block ${
           sidebarOpen ? "w-[252px]" : "w-[84px]"
         }`}
-        onMouseEnter={() => setSidebarOpen(true)}
-        onMouseLeave={() => {
-          setSidebarOpen(false);
-          setCatalogOpen(false);
-        }}
       >
         <button
           className={`mb-5 flex h-14 items-center rounded-xl bg-action text-stone-950 shadow-lift ring-2 ring-action/30 transition hover:brightness-95 ${
@@ -356,9 +351,15 @@ export function Nav() {
         </nav>
         <button
           type="button"
-          className="absolute right-[-13px] top-1/2 grid h-24 w-6 -translate-y-1/2 place-items-center rounded-r-xl border border-l-0 border-line bg-card text-muted shadow-soft transition hover:text-brand"
-          onClick={() => setSidebarOpen((current) => !current)}
+          className="absolute right-2 top-1/2 grid h-24 w-7 -translate-y-1/2 place-items-center rounded-xl border border-line bg-card/95 text-muted shadow-soft transition hover:border-brand/50 hover:text-brand"
+          onClick={() => {
+            setSidebarOpen((current) => {
+              if (current) setCatalogOpen(false);
+              return !current;
+            });
+          }}
           title={sidebarOpen ? "Згорнути меню" : "Розгорнути меню"}
+          aria-label={sidebarOpen ? "Згорнути меню" : "Розгорнути меню"}
         >
           <ChevronRight className={`h-4 w-4 transition-transform ${sidebarOpen ? "rotate-180" : ""}`} />
         </button>

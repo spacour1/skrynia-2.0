@@ -103,6 +103,13 @@ export function Nav() {
     return () => window.clearTimeout(handle);
   }, [search]);
 
+  useEffect(() => {
+    document.documentElement.style.setProperty("--sidebar-width", "84px");
+    return () => {
+      document.documentElement.style.removeProperty("--sidebar-width");
+    };
+  }, []);
+
   const suggestions = useQuery({
     queryKey: ["search-suggest", debouncedSearch],
     queryFn: () => apiFetch<{ games: Game[]; products: SuggestProduct[] }>(`/marketplace/suggest?q=${encodeURIComponent(debouncedSearch)}`),
@@ -191,7 +198,7 @@ export function Nav() {
   return (
     <>
       <header className="sticky top-0 z-40 border-b border-line/70 bg-surface/85 backdrop-blur-xl">
-        <div className="mx-auto grid min-h-[86px] max-w-[1440px] gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[220px_minmax(280px,1fr)_auto] lg:items-center lg:px-8">
+        <div className="mx-auto grid min-h-[86px] max-w-[1720px] gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[220px_minmax(280px,1fr)_auto] lg:items-center lg:px-8">
           <Link href="/" className="inline-flex items-center gap-3 text-xl font-extrabold tracking-normal text-ink">
             <span className="grid h-11 w-11 place-items-center rounded-xl border border-brand/20 bg-brand/10 text-brand shadow-soft">
               <Trophy className="h-5 w-5" />
@@ -304,15 +311,16 @@ export function Nav() {
         </div>
       </header>
 
-      <aside className="fixed bottom-0 left-[max(1rem,calc((100vw-1440px)/2+1rem))] top-[86px] z-30 hidden w-56 py-5 lg:block">
+      <aside className="fixed bottom-0 left-0 top-[86px] z-30 hidden w-[84px] border-r border-line/70 bg-surface/85 px-3 py-5 backdrop-blur-xl lg:block">
         <button
-          className="mb-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-action px-3 text-sm font-black text-stone-950 shadow-lift ring-2 ring-action/30 transition hover:brightness-95"
+          className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-xl bg-action text-stone-950 shadow-lift ring-2 ring-action/30 transition hover:brightness-95"
           onClick={() => openRoute("/seller/create", true)}
+          title={t("nav.createListing")}
         >
           <PackagePlus className="h-5 w-5" />
-          <span>{t("nav.createListing")}</span>
+          <span className="sr-only">{t("nav.createListing")}</span>
         </button>
-        <nav className="grid gap-1">
+        <nav className="grid justify-items-center gap-3">
           {navItems.map((item) => (
             <div
               key={item.href}
@@ -333,6 +341,9 @@ export function Nav() {
             </div>
           ))}
         </nav>
+        <span className="absolute right-[-13px] top-1/2 grid h-24 w-6 -translate-y-1/2 place-items-center rounded-r-xl border border-l-0 border-line bg-card text-muted shadow-soft">
+          <ChevronRight className="h-4 w-4" />
+        </span>
       </aside>
 
       <nav className="sticky top-[86px] z-30 flex gap-2 overflow-x-auto border-b border-line/70 bg-surface/90 px-4 py-3 backdrop-blur-xl lg:hidden">
@@ -356,13 +367,14 @@ export function Nav() {
 function SideNavButton({ icon: Icon, label, active, onClick }: { icon: LucideIcon; label: string; active: boolean; onClick: () => void }) {
   return (
     <button
-      className={`flex h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-bold transition ${
+      className={`flex h-11 w-11 items-center justify-center rounded-xl text-sm font-bold transition ${
         active ? "bg-brand/10 text-brand shadow-[inset_0_0_0_1px_rgb(var(--color-brand)/0.18)]" : "text-muted hover:bg-panel hover:text-ink"
       }`}
       onClick={onClick}
+      title={label}
     >
       <Icon className="h-5 w-5" />
-      <span className="truncate">{label}</span>
+      <span className="sr-only">{label}</span>
     </button>
   );
 }

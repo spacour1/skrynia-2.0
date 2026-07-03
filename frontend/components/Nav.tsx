@@ -92,6 +92,7 @@ export function Nav() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (pathname !== "/" || typeof window === "undefined") return;
@@ -104,11 +105,11 @@ export function Nav() {
   }, [search]);
 
   useEffect(() => {
-    document.documentElement.style.setProperty("--sidebar-width", "84px");
+    document.documentElement.style.setProperty("--sidebar-width", sidebarOpen ? "252px" : "84px");
     return () => {
       document.documentElement.style.removeProperty("--sidebar-width");
     };
-  }, []);
+  }, [sidebarOpen]);
 
   const suggestions = useQuery({
     queryKey: ["search-suggest", debouncedSearch],
@@ -311,20 +312,31 @@ export function Nav() {
         </div>
       </header>
 
-      <aside className="fixed bottom-0 left-0 top-[86px] z-30 hidden w-[84px] border-r border-line/70 bg-surface/85 px-3 py-5 backdrop-blur-xl lg:block">
+      <aside
+        className={`fixed bottom-0 left-0 top-[86px] z-30 hidden border-r border-line/70 bg-surface/85 px-3 py-5 shadow-[18px_0_70px_rgba(0,0,0,0.16)] backdrop-blur-xl transition-[width] duration-200 lg:block ${
+          sidebarOpen ? "w-[252px]" : "w-[84px]"
+        }`}
+        onMouseEnter={() => setSidebarOpen(true)}
+        onMouseLeave={() => {
+          setSidebarOpen(false);
+          setCatalogOpen(false);
+        }}
+      >
         <button
-          className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-xl bg-action text-stone-950 shadow-lift ring-2 ring-action/30 transition hover:brightness-95"
+          className={`mb-5 flex h-14 items-center rounded-xl bg-action text-stone-950 shadow-lift ring-2 ring-action/30 transition hover:brightness-95 ${
+            sidebarOpen ? "w-full justify-start gap-3 px-4" : "mx-auto w-14 justify-center"
+          }`}
           onClick={() => openRoute("/seller/create", true)}
           title={t("nav.createListing")}
         >
           <PackagePlus className="h-5 w-5" />
-          <span className="sr-only">{t("nav.createListing")}</span>
+          <span className={`truncate text-sm font-black transition-opacity ${sidebarOpen ? "opacity-100" : "sr-only opacity-0"}`}>{t("nav.createListing")}</span>
         </button>
-        <nav className="grid justify-items-center gap-3">
+        <nav className={`grid gap-3 ${sidebarOpen ? "justify-items-stretch" : "justify-items-center"}`}>
           {navItems.map((item) => (
             <div
               key={item.href}
-              className="relative"
+              className="relative w-full"
               onMouseEnter={item.href === "/" ? () => setCatalogOpen(true) : undefined}
               onMouseLeave={item.href === "/" ? () => setCatalogOpen(false) : undefined}
             >
@@ -332,6 +344,7 @@ export function Nav() {
                 icon={item.icon}
                 label={item.label}
                 active={(item.href === "/" ? pathname === "/" || catalogOpen : pathname === item.href) || Boolean(item.match && pathname.startsWith(item.match))}
+                expanded={sidebarOpen}
                 onClick={item.href === "/" ? () => {
                   router.push("/");
                   setCatalogOpen(true);
@@ -341,9 +354,14 @@ export function Nav() {
             </div>
           ))}
         </nav>
-        <span className="absolute right-[-13px] top-1/2 grid h-24 w-6 -translate-y-1/2 place-items-center rounded-r-xl border border-l-0 border-line bg-card text-muted shadow-soft">
-          <ChevronRight className="h-4 w-4" />
-        </span>
+        <button
+          type="button"
+          className="absolute right-[-13px] top-1/2 grid h-24 w-6 -translate-y-1/2 place-items-center rounded-r-xl border border-l-0 border-line bg-card text-muted shadow-soft transition hover:text-brand"
+          onClick={() => setSidebarOpen((current) => !current)}
+          title={sidebarOpen ? "Згорнути меню" : "Розгорнути меню"}
+        >
+          <ChevronRight className={`h-4 w-4 transition-transform ${sidebarOpen ? "rotate-180" : ""}`} />
+        </button>
       </aside>
 
       <nav className="sticky top-[86px] z-30 flex gap-2 overflow-x-auto border-b border-line/70 bg-surface/90 px-4 py-3 backdrop-blur-xl lg:hidden">
@@ -364,17 +382,29 @@ export function Nav() {
   );
 }
 
-function SideNavButton({ icon: Icon, label, active, onClick }: { icon: LucideIcon; label: string; active: boolean; onClick: () => void }) {
+function SideNavButton({
+  icon: Icon,
+  label,
+  active,
+  expanded,
+  onClick
+}: {
+  icon: LucideIcon;
+  label: string;
+  active: boolean;
+  expanded: boolean;
+  onClick: () => void;
+}) {
   return (
     <button
-      className={`flex h-11 w-11 items-center justify-center rounded-xl text-sm font-bold transition ${
+      className={`flex h-11 items-center rounded-xl text-sm font-bold transition ${
         active ? "bg-brand/10 text-brand shadow-[inset_0_0_0_1px_rgb(var(--color-brand)/0.18)]" : "text-muted hover:bg-panel hover:text-ink"
-      }`}
+      } ${expanded ? "w-full justify-start gap-3 px-3 text-left" : "w-11 justify-center"}`}
       onClick={onClick}
       title={label}
     >
-      <Icon className="h-5 w-5" />
-      <span className="sr-only">{label}</span>
+      <Icon className="h-5 w-5 shrink-0" />
+      <span className={`truncate transition-opacity ${expanded ? "opacity-100" : "sr-only opacity-0"}`}>{label}</span>
     </button>
   );
 }

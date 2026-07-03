@@ -47,7 +47,6 @@ const presets: Record<string, IconPreset> = {
   minecraft: { icon: Blocks, bg: "from-lime-300 via-emerald-500 to-stone-950", glow: "bg-lime-200/40", accent: "bg-emerald-100/25" },
   roblox: { icon: Hexagon, bg: "from-red-400 via-orange-500 to-stone-950", glow: "bg-orange-200/40", accent: "bg-red-100/25" },
   "league-of-legends": { icon: Trophy, bg: "from-blue-300 via-blue-700 to-yellow-950", glow: "bg-blue-100/35", accent: "bg-yellow-200/25" },
-  "league-wild-rift": { icon: Trophy, bg: "from-cyan-300 via-blue-700 to-yellow-950", glow: "bg-cyan-100/35", accent: "bg-yellow-200/25" },
   "apex-legends": { icon: Flame, bg: "from-red-400 via-rose-600 to-zinc-950", glow: "bg-red-200/35", accent: "bg-rose-100/20" },
   pubg: { icon: Shield, bg: "from-yellow-300 via-orange-500 to-stone-950", glow: "bg-yellow-100/40", accent: "bg-orange-200/25" },
   warface: { icon: Crosshair, bg: "from-emerald-300 via-teal-600 to-slate-950", glow: "bg-emerald-200/35", accent: "bg-teal-100/25" },

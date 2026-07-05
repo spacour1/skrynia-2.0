@@ -39,25 +39,14 @@ export function generateMetadata({ params }: { params: { locale: string } }): Me
 
 export default function RootLayout({ children, params }: { children: React.ReactNode; params: { locale: string } }) {
   const locale = resolveLocale(params.locale);
-  const themeScript = `
-    try {
-      var saved = localStorage.getItem('theme');
-      var theme = saved === 'dark' || saved === 'light'
-        ? saved
-        : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-      document.documentElement.classList.toggle('dark', theme === 'dark');
-      document.documentElement.style.colorScheme = theme;
-    } catch (_) {}
-  `;
 
   return (
-    <html lang={localeToLang[locale]} suppressHydrationWarning>
+    <html lang={localeToLang[locale]} className="dark" style={{ colorScheme: "dark" }} suppressHydrationWarning>
       <body className="antialiased">
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <LocaleProvider locale={locale}>
           <Providers>
             <Nav />
-            <main className="mx-auto w-full max-w-[1720px] px-4 py-5 transition-[padding] duration-300 sm:px-6 lg:pl-[calc(var(--sidebar-width,84px)+1.25rem)] lg:pr-5">
+            <main className="mx-auto w-full max-w-[1720px] px-4 py-5 sm:px-6 lg:pl-[104px] lg:pr-5">
               <EmailVerificationBanner />
               {children}
             </main>

@@ -3,30 +3,6 @@
 @tailwind utilities;
 
 :root {
-  --color-bg: 244 248 253;
-  --color-surface: 249 252 255;
-  --color-card: 255 255 255;
-  --color-panel: 235 243 255;
-  --color-ink: 13 24 46;
-  --color-muted: 100 113 137;
-  --color-line: 222 230 243;
-  --color-brand: 59 130 246;
-  --color-action: 244 180 64;
-  --color-accent: 34 116 211;
-  --shadow-soft: 0 16px 38px rgba(54, 87, 130, 0.1);
-  --shadow-lift: 0 22px 54px rgba(54, 87, 130, 0.16);
-  color: rgb(var(--color-ink));
-  background: rgb(var(--color-bg));
-}
-
-html {
-  background: rgb(var(--color-bg));
-  transition:
-    background-color 320ms ease,
-    color 320ms ease;
-}
-
-.dark {
   --color-bg: 3 6 10;
   --color-surface: 7 10 15;
   --color-card: 10 14 20;
@@ -39,25 +15,29 @@ html {
   --color-accent: 96 165 250;
   --shadow-soft: 0 20px 52px rgba(0, 0, 0, 0.34);
   --shadow-lift: 0 28px 70px rgba(0, 0, 0, 0.48);
+  color-scheme: dark;
+  color: rgb(var(--color-ink));
+  background: rgb(var(--color-bg));
+}
+
+html {
+  background: rgb(var(--color-bg));
+  transition:
+    background-color 320ms ease,
+    color 320ms ease;
 }
 
 body {
   min-height: 100vh;
   color: rgb(var(--color-ink));
   background:
-    linear-gradient(180deg, rgba(var(--color-surface), 0.98), rgba(var(--color-bg), 1) 420px),
+    linear-gradient(180deg, rgba(3, 6, 10, 1), rgba(5, 8, 13, 1) 520px),
     rgb(var(--color-bg));
   text-rendering: optimizeLegibility;
   transition:
     background 360ms ease,
     background-color 360ms ease,
     color 320ms ease;
-}
-
-.dark body {
-  background:
-    linear-gradient(180deg, rgba(3, 6, 10, 1), rgba(5, 8, 13, 1) 520px),
-    rgb(var(--color-bg));
 }
 
 button,
@@ -114,12 +94,12 @@ select option {
   background: rgb(var(--color-brand));
 }
 
-.dark .bg-brand.text-white,
-.dark .bg-brand .text-white {
+.bg-brand.text-white,
+.bg-brand .text-white {
   color: rgb(4 24 22) !important;
 }
 
-.dark .bg-action.text-white {
+.bg-action.text-white {
   color: rgb(35 23 3) !important;
 }
 

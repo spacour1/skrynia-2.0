@@ -1,0 +1,53 @@
+{
+  "home": {
+    "hero": {
+      "titleLine1": "Buy and sell",
+      "titleLine2": "game accounts, items,",
+      "titleLine3": "keys, and services"
+    },
+    "benefits": {
+      "safeTitle": "Safe",
+      "safeText": "Escrow-backed deals",
+      "fastTitle": "Fast",
+      "fastText": "Instant delivery",
+      "reliableTitle": "Reliable",
+      "reliableText": "24/7 support",
+      "choiceTitle": "Huge selection",
+      "choiceText": "Thousands of listings"
+    },
+    "sections": {
+      "mobile": "Mobile games",
+      "platform": "PC & console games",
+      "popular": "Popular titles"
+    },
+    "carousel": {
+      "back": "Back",
+      "forward": "Forward"
+    },
+    "chat": {
+      "title": "Community chat online",
+      "you": "You",
+      "placeholder": "Write a message...",
+      "send": "Send",
+      "m1": "Anyone selling a PSN account?",
+      "m2": "Looking for rare CS2 skins",
+      "m3": "Can you explain how the escrow works?",
+      "m4": "Bought a key, all good, thanks!",
+      "m5": "I'll trade my account for something interesting"
+    },
+    "recentChats": {
+      "title": "Recent chats",
+      "support": "SKRYNIA support",
+      "online": "Online",
+      "orderPayment": "Order #128734 payment",
+      "minutesAgo": "5 min ago",
+      "lotCheck": "Listing #125671 review",
+      "minutesAgo18": "18 min ago"
+    },
+    "support": {
+      "title": "We're always in touch",
+      "text": "Our support team can help with any question",
+      "button": "Contact support"
+    }
+  }
+}

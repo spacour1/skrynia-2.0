@@ -207,7 +207,7 @@ describe("password reset invalidates old sessions", () => {
 
     await authA
       .post("/users/me/password")
-      .send({ currentPassword: authA.password, newPassword: "a-brand-new-password" })
+      .send({ currentPassword: authA.password, newPassword: "A-brand-new-password1" })
       .expect(200);
 
     // The session that performed the change stays logged in...

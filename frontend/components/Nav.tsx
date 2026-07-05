@@ -33,6 +33,7 @@ import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
 import { firstProductMedia } from "@/lib/product-media";
 import { captureEvent } from "@/lib/posthog";
+import { SECTION_PATTERNS } from "@/lib/game-catalog";
 
 type SuggestProduct = {
   id: string;
@@ -103,13 +104,6 @@ export function Nav() {
     const handle = window.setTimeout(() => setDebouncedSearch(search.trim()), 180);
     return () => window.clearTimeout(handle);
   }, [search]);
-
-  useEffect(() => {
-    document.documentElement.style.setProperty("--sidebar-width", sidebarOpen ? "252px" : "84px");
-    return () => {
-      document.documentElement.style.removeProperty("--sidebar-width");
-    };
-  }, [sidebarOpen]);
 
   const suggestions = useQuery({
     queryKey: ["search-suggest", debouncedSearch],
@@ -313,19 +307,19 @@ export function Nav() {
       </header>
 
       <aside
-        className={`fixed bottom-0 left-0 top-[86px] z-30 hidden border-r border-line/70 bg-surface/85 px-3 py-5 shadow-[18px_0_70px_rgba(0,0,0,0.16)] backdrop-blur-xl transition-[width] duration-200 lg:block ${
+        className={`fixed bottom-0 left-0 top-[86px] z-30 hidden transform-gpu border-r border-line/70 bg-surface/85 px-3 py-5 shadow-[18px_0_70px_rgba(0,0,0,0.16)] backdrop-blur-xl transition-[width] duration-300 ease-out will-change-[width] lg:block ${
           sidebarOpen ? "w-[252px]" : "w-[84px]"
         }`}
       >
         <button
-          className={`mb-5 flex h-14 items-center rounded-xl bg-action text-stone-950 shadow-lift ring-2 ring-action/30 transition hover:brightness-95 ${
+          className={`mb-5 flex h-14 items-center rounded-[15px] border border-action/70 bg-action text-stone-950 shadow-[0_14px_34px_rgba(251,191,36,0.22),inset_0_1px_0_rgba(255,255,255,0.42)] ring-1 ring-black/10 transition hover:brightness-105 ${
             sidebarOpen ? "w-full justify-start gap-3 px-4" : "mx-auto w-14 justify-center"
           }`}
           onClick={() => openRoute("/seller/create", true)}
           title={t("nav.createListing")}
         >
           <PackagePlus className="h-5 w-5" />
-          <span className={`truncate text-sm font-black transition-opacity ${sidebarOpen ? "opacity-100" : "sr-only opacity-0"}`}>{t("nav.createListing")}</span>
+          <span className={`overflow-hidden whitespace-nowrap text-sm font-black transition-[max-width,opacity] duration-200 ${sidebarOpen ? "max-w-[170px] opacity-100" : "max-w-0 opacity-0"}`}>{t("nav.createListing")}</span>
         </button>
         <nav className={`grid gap-3 ${sidebarOpen ? "justify-items-stretch" : "justify-items-center"}`}>
           {navItems.map((item) => (
@@ -351,17 +345,17 @@ export function Nav() {
         </nav>
         <button
           type="button"
-          className="absolute right-2 top-1/2 grid h-24 w-7 -translate-y-1/2 place-items-center rounded-xl border border-line bg-card/95 text-muted shadow-soft transition hover:border-brand/50 hover:text-brand"
+          className="absolute left-full top-1/2 grid h-11 w-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-line bg-card/95 text-muted shadow-lift ring-4 ring-surface/80 backdrop-blur transition hover:border-brand/60 hover:bg-panel hover:text-brand"
           onClick={() => {
             setSidebarOpen((current) => {
               if (current) setCatalogOpen(false);
               return !current;
             });
           }}
-          title={sidebarOpen ? "Згорнути меню" : "Розгорнути меню"}
-          aria-label={sidebarOpen ? "Згорнути меню" : "Розгорнути меню"}
+          title={sidebarOpen ? t("nav.collapseSidebar") : t("nav.expandSidebar")}
+          aria-label={sidebarOpen ? t("nav.collapseSidebar") : t("nav.expandSidebar")}
         >
-          <ChevronRight className={`h-4 w-4 transition-transform ${sidebarOpen ? "rotate-180" : ""}`} />
+          <ChevronRight className={`h-5 w-5 transition-transform ${sidebarOpen ? "rotate-180" : ""}`} />
         </button>
       </aside>
 
@@ -398,14 +392,14 @@ function SideNavButton({
 }) {
   return (
     <button
-      className={`flex h-11 items-center rounded-xl text-sm font-bold transition ${
-        active ? "bg-brand/10 text-brand shadow-[inset_0_0_0_1px_rgb(var(--color-brand)/0.18)]" : "text-muted hover:bg-panel hover:text-ink"
-      } ${expanded ? "w-full justify-start gap-3 px-3 text-left" : "w-11 justify-center"}`}
+      className={`flex h-12 items-center rounded-xl text-sm font-bold transition ${
+        active ? "bg-brand/15 text-brand shadow-[inset_0_0_0_1px_rgb(var(--color-brand)/0.18)]" : "text-muted hover:bg-panel hover:text-ink"
+      } ${expanded ? "w-full justify-start gap-3 px-3 text-left" : "mx-auto w-12 justify-center"}`}
       onClick={onClick}
       title={label}
     >
-      <Icon className="h-5 w-5 shrink-0" />
-      <span className={`truncate transition-opacity ${expanded ? "opacity-100" : "sr-only opacity-0"}`}>{label}</span>
+      <Icon className="h-6 w-6 shrink-0" />
+      <span className={`overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-200 ${expanded ? "max-w-[170px] opacity-100" : "max-w-0 opacity-0"}`}>{label}</span>
     </button>
   );
 }
@@ -414,7 +408,7 @@ function CatalogMegaMenu({ games, onGame }: { games: Game[]; onGame: (slug: stri
   const { t } = useI18n();
   const groups = [
     { title: t("catalogMenu.games"), text: t("catalogMenu.gamesText"), items: games.slice(0, 10), live: true },
-    { title: t("catalogMenu.mobile"), text: t("catalogMenu.mobileText"), items: games.filter((game) => /mobile|genshin|roblox|brawl|clash/i.test(game.name)).slice(0, 6), live: true },
+    { title: t("catalogMenu.mobile"), text: t("catalogMenu.mobileText"), items: games.filter((game) => SECTION_PATTERNS.mobile.test(`${game.slug} ${game.name} ${game.publisher ?? ""}`)).slice(0, 6), live: true },
     { title: t("catalogMenu.services"), text: t("catalogMenu.servicesText"), items: [] as Game[], live: false },
     { title: t("catalogMenu.software"), text: t("catalogMenu.softwareText"), items: [] as Game[], live: false }
   ];

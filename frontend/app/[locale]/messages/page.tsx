@@ -90,6 +90,15 @@ function MessagesContent() {
     allGroups.find((group) => group.contexts.some((context) => context.conversationId === selected));
   const selectedContext = selectedGroup?.contexts.find((context) => context.conversationId === selected);
 
+  // Auto-expand the active conversation's group once when it becomes selected, without
+  // permanently forcing it open - otherwise the user could never collapse that group again.
+  useEffect(() => {
+    if (!selectedGroup) return;
+    setExpandedGroupIds((current) =>
+      current.has(selectedGroup.peerUserId) ? current : new Set(current).add(selectedGroup.peerUserId)
+    );
+  }, [selectedGroup?.peerUserId]);
+
   function selectConversation(conversationId: string) {
     setSelectedConversationId(conversationId);
     router.replace(`/messages?conversationId=${conversationId}`);
@@ -131,10 +140,15 @@ function MessagesContent() {
 
         <div className="max-h-[calc(100vh-350px)] min-h-[420px] overflow-y-auto p-2">
           {filtered.map((group, index) => {
-            const selectedInGroup = group.contexts.some((context) => context.conversationId === selected);
-            const expanded = hasSearch || selectedInGroup || expandedGroupIds.has(group.peerUserId);
-            const latestActiveContext = group.contexts.find(contextIsActive) ?? group.contexts[0];
-            const visibleContexts = expanded ? group.contexts : latestActiveContext ? [latestActiveContext] : [];
+            const expanded = hasSearch || expandedGroupIds.has(group.peerUserId);
+            // Collapsed groups show the open chat if it belongs here, so collapsing never
+            // hides the conversation the user is currently reading; otherwise fall back to
+            // the most recent active context.
+            const collapsedContext =
+              group.contexts.find((context) => context.conversationId === selected) ??
+              group.contexts.find(contextIsActive) ??
+              group.contexts[0];
+            const visibleContexts = expanded ? group.contexts : collapsedContext ? [collapsedContext] : [];
 
             return (
               <article key={group.peerUserId} className="mb-2 rounded-xl border border-line/60 bg-surface/35 p-2">

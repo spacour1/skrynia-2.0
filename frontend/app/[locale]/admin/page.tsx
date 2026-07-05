@@ -2,7 +2,7 @@
 
 import Link from "@/lib/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, Banknote, Flag, Headphones, ImageIcon, ListChecks, ShieldCheck, Users, WalletCards } from "lucide-react";
+import { Activity, AlertTriangle, Banknote, Flag, Headphones, ImageIcon, LayoutGrid, ListChecks, ShieldCheck, Users, WalletCards } from "lucide-react";
 import { apiFetch, money } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -130,6 +130,16 @@ function AdminContent() {
           <div>
             <p className="font-bold">Выплаты продавцам</p>
             <p className="text-sm text-muted">Подтверждение и отклонение заявок на вывод средств</p>
+          </div>
+        </Link>
+      ) : null}
+
+      {isAdmin ? (
+        <Link className="interactive-card flex items-center gap-4 p-5" href="/admin/catalog">
+          <LayoutGrid className="h-6 w-6 text-brand" />
+          <div>
+            <p className="font-bold">Конструктор каталога</p>
+            <p className="text-sm text-muted">Группы, игры/сервисы, разделы и схемы полей лота</p>
           </div>
         </Link>
       ) : null}

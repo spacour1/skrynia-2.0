@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { z } from "zod";
 import { pool } from "../../db/pool.js";
 import { asyncHandler, badRequest, notFound } from "../../common/errors.js";
@@ -8,6 +8,7 @@ import type { AuthedRequest } from "../../common/types.js";
 import { broadcastConversation } from "./ws.service.js";
 import {
   assertConversationAccess,
+  getGroupedUserConversations,
   getMessages,
   getOrCreateDirectConversation,
   getOrCreateProductConversation,
@@ -38,6 +39,15 @@ router.get(
 );
 
 router.get(
+  "/conversations/grouped",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const groups = await getGroupedUserConversations(req.user.id, req.user.role);
+    res.json({ groups });
+  })
+);
+
+router.get(
   "/conversations/:conversationId/messages",
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
@@ -54,19 +64,33 @@ router.get(
   })
 );
 
+async function startDirectConversation(req: AuthedRequest, res: Response, userId: string) {
+  if (userId === req.user.id) throw badRequest("You cannot message yourself");
+
+  const user = await pool.query(`select id from users where id = $1 and is_banned = false`, [userId]);
+  if (!user.rows[0]) throw notFound("User not found");
+
+  const conversation = await getOrCreateDirectConversation({ buyerId: req.user.id, sellerId: userId });
+  res.status(conversation.existing ? 200 : 201).json({ conversationId: conversation.id, existing: conversation.existing });
+}
+
+router.post(
+  "/users/:userId/start",
+  authenticate,
+  requireEmailVerified,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const userId = z.string().uuid().parse(req.params.userId);
+    await startDirectConversation(req, res, userId);
+  })
+);
+
 router.post(
   "/sellers/:sellerId/start",
   authenticate,
   requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const sellerId = z.string().uuid().parse(req.params.sellerId);
-    if (sellerId === req.user.id) throw badRequest("You cannot message yourself");
-
-    const seller = await pool.query(`select id from users where id = $1 and is_banned = false`, [sellerId]);
-    if (!seller.rows[0]) throw notFound("Seller not found");
-
-    const conversation = await getOrCreateDirectConversation({ buyerId: req.user.id, sellerId });
-    res.status(conversation.existing ? 200 : 201).json({ conversationId: conversation.id, existing: conversation.existing });
+    await startDirectConversation(req, res, sellerId);
   })
 );
 

@@ -81,6 +81,11 @@
     "noListings": "No listings yet.",
     "available": "Available",
     "inEscrow": "In escrow",
-    "releasedNet": "Released net"
+    "releasedNet": "Released net",
+    "messageUser": "Message",
+    "saveUser": "Save profile",
+    "saved": "Saved",
+    "activeOffersCount": "{count} active offers",
+    "noActiveOffers": "No active offers."
   }
 }

@@ -136,6 +136,37 @@ export type Conversation = {
   createdAt?: string;
 };
 
+export type ConversationContextType = "direct" | "product" | "order";
+
+export type ConversationContext = {
+  conversationId: string;
+  type: ConversationContextType;
+  label: string;
+  productId?: string | null;
+  productTitle?: string | null;
+  orderId?: string | null;
+  orderStatus?: string | null;
+  amountCents?: number | null;
+  currency?: string | null;
+  unreadCount?: number;
+  lastMessageAt?: string | null;
+  lastMessageBody?: string | null;
+  blocked?: boolean;
+  canSendMessage?: boolean;
+  createdAt?: string;
+};
+
+export type ConversationGroup = {
+  peerUserId: string;
+  peerDisplayName: string;
+  peerAvatarUrl?: string | null;
+  isOnline?: boolean;
+  totalUnreadCount: number;
+  lastMessageAt?: string | null;
+  lastMessageBody?: string | null;
+  contexts: ConversationContext[];
+};
+
 export type CurrencyCode = "UAH" | "USD" | "EUR";
 
 export type CurrencyRate = {

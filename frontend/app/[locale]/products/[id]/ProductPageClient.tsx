@@ -254,7 +254,7 @@ export function ProductPageClient({ id }: { id: string }) {
       <aside className="space-y-4 xl:sticky xl:top-28 xl:self-start">
         <section className="rounded-xl border border-line bg-card p-4">
           <p className="text-sm text-muted">{t("product.sellerLabel")}</p>
-          <Link className="mt-3 flex items-center gap-3 rounded-xl bg-panel/45 p-3 transition hover:bg-brand/10" href={`/sellers/${item.sellerId}`}>
+          <Link className="mt-3 flex items-center gap-3 rounded-xl bg-panel/45 p-3 transition hover:bg-brand/10" href={`/users/${item.sellerId}`}>
             <span className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-brand/10 text-xl font-black text-brand">{item.sellerDisplayName.slice(0, 1).toUpperCase()}</span>
             <span className="min-w-0">
               <span className="block truncate font-black text-ink">{item.sellerDisplayName}</span>

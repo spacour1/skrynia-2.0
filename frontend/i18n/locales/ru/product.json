@@ -81,6 +81,11 @@
     "noListings": "Товаров пока нет.",
     "available": "Доступно",
     "inEscrow": "В escrow",
-    "releasedNet": "Выплачено чистыми"
+    "releasedNet": "Выплачено чистыми",
+    "messageUser": "Написать",
+    "saveUser": "Сохранить профиль",
+    "saved": "Сохранено",
+    "activeOffersCount": "{count} активных предложений",
+    "noActiveOffers": "Активных предложений нет."
   }
 }

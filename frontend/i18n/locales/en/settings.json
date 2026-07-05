@@ -32,21 +32,16 @@
       "title": "Push notifications",
       "text": "Orders, messages, and important events."
     },
-    "theme": {
-      "title": "Interface theme",
-      "text": "Choose a theme. The page will reload in the new appearance.",
-      "light": "Light theme",
-      "dark": "Dark theme"
-    },
     "password": {
       "title": "Password",
-      "text": "At least 8 characters. Use the new password the next time you sign in.",
+      "text": "At least 8 characters, with an uppercase letter, a number, and a special character. Use the new password the next time you sign in.",
       "current": "Current password",
       "new": "New password",
       "repeat": "Repeat new password",
       "change": "Change password",
       "updated": "Password updated",
       "mismatch": "New passwords don't match",
+      "weak": "Password must contain an uppercase letter, a number, and a special character",
       "changeFailed": "Could not change the password"
     },
     "twofa": {

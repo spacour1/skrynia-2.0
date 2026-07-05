@@ -5,6 +5,7 @@ import Link from "@/lib/navigation";
 import { useRouter } from "@/lib/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowUpRight,
   BadgePercent,
   Clock,
   CreditCard,
@@ -61,6 +62,24 @@ export function ProductPageClient({ id }: { id: string }) {
   });
 
   const productItem = product.data?.product;
+  const isOwnProduct = Boolean(user && productItem && user.id === productItem.sellerId);
+  const [productConversationId, setProductConversationId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setProductConversationId(null);
+  }, [id]);
+
+  const existingProductConversation = useQuery({
+    queryKey: ["product-conversation", id],
+    queryFn: () => apiFetch<{ conversationId: string | null }>(`/chat/products/${id}/conversation`),
+    enabled: Boolean(user && productItem && !isOwnProduct)
+  });
+
+  useEffect(() => {
+    if (existingProductConversation.data) {
+      setProductConversationId(existingProductConversation.data.conversationId);
+    }
+  }, [existingProductConversation.data]);
 
   useEffect(() => {
     if (!productItem) return;
@@ -91,11 +110,6 @@ export function ProductPageClient({ id }: { id: string }) {
     }
   });
 
-  // Chat is opened only on an explicit click — never auto-created when the product page loads.
-  const startChat = useMutation({
-    mutationFn: () => apiFetch<{ conversationId: string; existing: boolean }>(`/chat/products/${id}/start`, { method: "POST" })
-  });
-
   // Provider choice (LiqPay/Monobank/WayForPay/manual transfer) happens on the order page,
   // not here — the product page only needs to create the order and hand off to checkout.
   const buySecurely = useMutation({
@@ -120,7 +134,7 @@ export function ProductPageClient({ id }: { id: string }) {
 
   const item = product.data.product;
   const reviews = product.data.reviews ?? [];
-  const isOwn = user?.id === item.sellerId;
+  const isOwn = isOwnProduct;
   const discount =
     item.oldPriceCents && item.oldPriceCents > item.priceCents
       ? Math.round(((item.oldPriceCents - item.priceCents) / item.oldPriceCents) * 100)
@@ -291,6 +305,7 @@ export function ProductPageClient({ id }: { id: string }) {
         </section>
 
         <section className="rounded-xl border border-line bg-card p-4">
+          <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
               <span className="grid h-10 w-10 place-items-center rounded-lg bg-brand/10 text-brand">
                 <MessageCircle className="h-5 w-5" />
@@ -300,45 +315,71 @@ export function ProductPageClient({ id }: { id: string }) {
                 <p className="text-xs text-muted">{t("product.chatSubtitle")}</p>
               </div>
             </div>
-            {startChat.data?.conversationId ? (
-              <div className="mt-3 overflow-hidden rounded-lg bg-surface/35">
-                <ChatPanel
-                  conversationId={startChat.data.conversationId}
-                  compact
-                  disabledNotice={isBlocked ? t("product.blockedChatNotice") : undefined}
-                />
-              </div>
-            ) : startChat.isPending ? (
-              <div className="mt-3 grid min-h-[130px] place-items-center rounded-lg bg-panel/35 text-sm text-muted">
-                {t("product.openingChat")}
-              </div>
-            ) : !user ? (
-              <button className="app-button-secondary mt-3 w-full py-3" onClick={() => router.push("/login")}>
-                <MessageCircle className="h-5 w-5" />
-                {t("product.loginAndMessage")}
-              </button>
-            ) : isOwn ? (
-              <div className="mt-3 rounded-lg bg-panel/35 p-3 text-sm text-muted">
-                {t("product.ownListingChatNotice")}
-              </div>
-            ) : (
+            {productConversationId ? (
               <button
-                className="app-button-secondary mt-3 w-full py-3"
-                onClick={() => startChat.mutate()}
+                className="app-button-secondary h-9 shrink-0 px-3 text-xs"
+                type="button"
+                onClick={() => router.push(`/messages?conversationId=${productConversationId}`)}
               >
-                <MessageCircle className="h-5 w-5" />
-                {t("product.messageSeller")}
+                {t("product.openInMessages")}
+                <ArrowUpRight className="h-3.5 w-3.5" />
               </button>
-            )}
-          {startChat.error ? (
-            isEmailNotVerifiedError(startChat.error) ? (
-              <div className="mt-3">
-                <EmailNotVerifiedNotice />
-              </div>
-            ) : (
-              <p className="mt-2 text-sm text-rose-600">{startChat.error.message}</p>
-            )
+            ) : null}
+          </div>
+
+          {user && !isOwn ? (
+            <Link
+              className="mt-3 flex items-center gap-3 rounded-xl border border-line/60 bg-panel/45 p-3 transition hover:border-brand/40 hover:bg-brand/10"
+              href={`/users/${item.sellerId}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <span className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full bg-brand/10 text-base font-black text-brand">
+                {item.sellerDisplayName.slice(0, 1).toUpperCase()}
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-black text-ink">{item.sellerDisplayName}</span>
+                <span className="mt-0.5 flex items-center gap-1 text-xs text-muted">
+                  <span className={`h-2 w-2 rounded-full ${item.sellerOnline ? "bg-emerald-400" : "bg-muted"}`} />
+                  {item.sellerOnline ? t("product.online") : t("product.offline")}
+                </span>
+              </span>
+            </Link>
           ) : null}
+
+          {!user ? (
+            <button className="app-button-secondary mt-3 w-full py-3" onClick={() => router.push("/login")}>
+              <MessageCircle className="h-5 w-5" />
+              {t("product.loginAndMessage")}
+            </button>
+          ) : isOwn ? (
+            <div className="mt-3 rounded-lg bg-panel/35 p-3 text-sm text-muted">
+              {t("product.ownListingChatNotice")}
+            </div>
+          ) : (
+            <div className="mt-3">
+              <ChatPanel
+                key={id}
+                conversationId={productConversationId}
+                mode="compact"
+                disabledNotice={
+                  existingProductConversation.isLoading
+                    ? t("common.loading")
+                    : isBlocked
+                      ? t("product.blockedChatNotice")
+                      : undefined
+                }
+                ensureConversation={async () => {
+                  const created = await apiFetch<{ conversationId: string; existing: boolean }>(`/chat/products/${id}/start`, { method: "POST" });
+                  return { conversationId: created.conversationId };
+                }}
+                onConversationReady={(conversationId) => {
+                  setProductConversationId(conversationId);
+                  queryClient.setQueryData(["product-conversation", id], { conversationId });
+                  queryClient.invalidateQueries({ queryKey: ["chat-conversations-grouped"] });
+                }}
+              />
+            </div>
+          )}
         </section>
 
         <section className="app-card p-5">

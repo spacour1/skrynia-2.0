@@ -82,6 +82,7 @@ export function ToastCenter() {
         }
         if (toast.conversationId) {
           queryClient.invalidateQueries({ queryKey: ["chat-conversations"] });
+          queryClient.invalidateQueries({ queryKey: ["chat-conversations-grouped"] });
         }
       });
 
@@ -142,7 +143,7 @@ export function ToastCenter() {
   function openToast(toast: Toast) {
     dismiss(toast.id);
     if (toast.conversationId) {
-      router.push(`/messages?conversation=${toast.conversationId}`);
+      router.push(`/messages?conversationId=${toast.conversationId}`);
       return;
     }
     if (toast.orderId) {

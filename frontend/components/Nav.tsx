@@ -179,7 +179,7 @@ export function Nav() {
     if (!item.readAt) await apiFetch(`/notifications/${item.id}/read`, { method: "POST" });
     setNotificationsOpen(false);
     notifications.refetch();
-    if (item.conversationId) router.push(`/messages?conversation=${item.conversationId}`);
+    if (item.conversationId) router.push(`/messages?conversationId=${item.conversationId}`);
     else if (item.orderId) router.push(`/orders/${item.orderId}`);
     else if (item.productId) router.push(`/products/${item.productId}`);
     else router.push("/dashboard");

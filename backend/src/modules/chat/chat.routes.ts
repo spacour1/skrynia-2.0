@@ -8,6 +8,7 @@ import type { AuthedRequest } from "../../common/types.js";
 import { broadcastConversation } from "./ws.service.js";
 import {
   assertConversationAccess,
+  getExistingProductConversation,
   getGroupedUserConversations,
   getMessages,
   getOrCreateDirectConversation,
@@ -28,6 +29,19 @@ const listMessagesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
   before: z.string().datetime().optional()
 });
+
+async function getActiveProduct(productId: string) {
+  const product = await pool.query(
+    `select p.id, p.seller_id, p.status, u.is_banned
+     from products p
+     join users u on u.id = p.seller_id
+     where p.id = $1`,
+    [productId]
+  );
+  const row = product.rows[0];
+  if (!row || row.status !== "active" || row.is_banned) throw notFound("Product is unavailable");
+  return row as { id: string; seller_id: string; status: string; is_banned: boolean };
+}
 
 router.get(
   "/conversations",
@@ -94,21 +108,30 @@ router.post(
   })
 );
 
+router.get(
+  "/products/:productId/conversation",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const productId = z.string().uuid().parse(req.params.productId);
+    const product = await getActiveProduct(productId);
+    if (product.seller_id === req.user.id) return res.json({ conversationId: null });
+
+    const conversationId = await getExistingProductConversation({
+      buyerId: req.user.id,
+      sellerId: product.seller_id,
+      productId: product.id
+    });
+    res.json({ conversationId });
+  })
+);
+
 router.post(
   "/products/:productId/start",
   authenticate,
   requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const productId = z.string().uuid().parse(req.params.productId);
-    const product = await pool.query(
-      `select p.id, p.seller_id, p.status, u.is_banned
-       from products p
-       join users u on u.id = p.seller_id
-       where p.id = $1`,
-      [productId]
-    );
-    const row = product.rows[0];
-    if (!row || row.status !== "active" || row.is_banned) throw notFound("Product is unavailable");
+    const row = await getActiveProduct(productId);
     if (row.seller_id === req.user.id) throw badRequest("You cannot message yourself on your own listing");
 
     const conversation = await getOrCreateProductConversation({

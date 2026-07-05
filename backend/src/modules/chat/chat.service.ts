@@ -156,6 +156,19 @@ export function getOrCreateProductConversation(
   return getOrCreateConversation({ buyerId: input.buyerId, sellerId: input.sellerId, productId: input.productId }, client);
 }
 
+export async function getExistingProductConversation(input: { buyerId: string; sellerId: string; productId: string }) {
+  const result = await pool.query<{ id: string }>(
+    `select id
+     from conversations
+     where buyer_id = $1
+       and seller_id = $2
+       and product_id = $3
+       and order_id is null`,
+    [input.buyerId, input.sellerId, input.productId]
+  );
+  return result.rows[0]?.id ?? null;
+}
+
 export function getOrCreateDirectConversation(input: { buyerId: string; sellerId: string }, client: DbClient = pool) {
   return getOrCreateConversation({ buyerId: input.buyerId, sellerId: input.sellerId, productId: null }, client);
 }

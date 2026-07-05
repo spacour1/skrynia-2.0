@@ -52,7 +52,7 @@ export default function SellerPage({ params }: { params: { id: string } }) {
   });
   const startChat = useMutation({
     mutationFn: () => apiFetch<{ conversationId: string }>(`/chat/users/${params.id}/start`, { method: "POST" }),
-    onSuccess: ({ conversationId }) => router.push(`/messages?conversation=${conversationId}`)
+    onSuccess: ({ conversationId }) => router.push(`/messages?conversationId=${conversationId}`)
   });
 
   if (seller.isLoading) return <p className="text-muted">{t("common.loading")}</p>;
@@ -105,7 +105,7 @@ export default function SellerPage({ params }: { params: { id: string } }) {
             <div className="mt-5 grid gap-2">
               <button className="app-button h-11 w-full" type="button" disabled={!hydrated || startChat.isPending} onClick={writeSeller}>
                 <MessageCircle className="h-4 w-4" />
-                {t("seller.messageUser")}
+                {startChat.isPending ? t("seller.openingChat") : t("seller.messageUser")}
               </button>
               <button className={isFavorite ? "app-button h-11 w-full" : "app-button-secondary h-11 w-full"} disabled={!userSession || favoriteMutation.isPending} onClick={() => favoriteMutation.mutate(isFavorite)}>
                 <Heart className={`h-4 w-4 ${isFavorite ? "fill-current" : ""}`} />

@@ -352,8 +352,8 @@ export function Nav() {
               return !current;
             });
           }}
-          title={sidebarOpen ? "Згорнути меню" : "Розгорнути меню"}
-          aria-label={sidebarOpen ? "Згорнути меню" : "Розгорнути меню"}
+          title={sidebarOpen ? t("nav.collapseSidebar") : t("nav.expandSidebar")}
+          aria-label={sidebarOpen ? t("nav.collapseSidebar") : t("nav.expandSidebar")}
         >
           <ChevronRight className={`h-5 w-5 transition-transform ${sidebarOpen ? "rotate-180" : ""}`} />
         </button>

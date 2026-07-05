@@ -22,6 +22,7 @@ import { GameIcon } from "../../components/GameIcon";
 import { apiFetch, type Game } from "../../lib/api";
 import { useAuth } from "../../lib/auth-store";
 import { buildSectionTiles, getGameTileTheme, type CategoryTile, type GameTileThemeConfig } from "../../lib/game-catalog";
+import { useI18n } from "../../lib/i18n";
 
 type ChatMessage = {
   id: string;
@@ -31,17 +32,10 @@ type ChatMessage = {
   avatar: string;
 };
 
-const initialChatMessages: ChatMessage[] = [
-  { id: "m1", name: "ShadowHunter", text: "Хтось продає акаунт з PSN?", time: "16:52", avatar: "/avatars/keyforge-market.svg" },
-  { id: "m2", name: "Kira", text: "Шукаю рідкісні скіни на CS2", time: "16:53", avatar: "/avatars/nova-accounts.svg" },
-  { id: "m3", name: "NecX", text: "Підкажіть, як працює гарантія?", time: "16:54", avatar: "/avatars/pixel-boost.svg" },
-  { id: "m4", name: "GameLord", text: "Куплю ключ, все супер, дякую!", time: "16:55", avatar: "/avatars/raid-supply.svg" },
-  { id: "m5", name: "Viper", text: "Обміняю акаунт на щось цікаве", time: "16:55", avatar: "/avatars/nova-accounts.svg" }
-];
-
 export default function HomePage() {
   const router = useRouter();
   const user = useAuth((s) => s.user);
+  const { t } = useI18n();
 
   const games = useQuery({
     queryKey: ["games"],
@@ -77,9 +71,9 @@ export default function HomePage() {
           <Hero />
 
           <section id="game-catalog" className="space-y-5 scroll-mt-28">
-            <CategoryCarousel title="Мобільні ігри" items={mobileGames} onSelect={selectGame} />
-            <CategoryCarousel title="ПК та консольні ігри" items={platformGames} onSelect={selectGame} compact />
-            <CategoryCarousel title="Популярні тайтли" items={popularGames} onSelect={selectGame} />
+            <CategoryCarousel title={t("home.sections.mobile")} items={mobileGames} onSelect={selectGame} />
+            <CategoryCarousel title={t("home.sections.platform")} items={platformGames} onSelect={selectGame} compact />
+            <CategoryCarousel title={t("home.sections.popular")} items={popularGames} onSelect={selectGame} />
           </section>
         </div>
       </main>
@@ -94,20 +88,21 @@ export default function HomePage() {
 }
 
 function Hero() {
+  const { t } = useI18n();
   const benefits = [
-    { title: "Безпечно", text: "Угода через гаранта", icon: PackageCheck },
-    { title: "Швидко", text: "Миттєва доставка", icon: Zap },
-    { title: "Надійно", text: "Підтримка 24/7", icon: ShieldCheck },
-    { title: "Великий вибір", text: "Тисячі пропозицій", icon: Trophy }
+    { title: t("home.benefits.safeTitle"), text: t("home.benefits.safeText"), icon: PackageCheck },
+    { title: t("home.benefits.fastTitle"), text: t("home.benefits.fastText"), icon: Zap },
+    { title: t("home.benefits.reliableTitle"), text: t("home.benefits.reliableText"), icon: ShieldCheck },
+    { title: t("home.benefits.choiceTitle"), text: t("home.benefits.choiceText"), icon: Trophy }
   ];
 
   return (
     <section className="relative min-h-[274px]">
       <div className="relative z-10 flex min-h-[274px] flex-col justify-center px-6 pb-8 pt-9 sm:px-8 lg:px-10 xl:px-12">
         <h1 className="max-w-[540px] text-[30px] font-black leading-[1.08] tracking-normal text-white md:text-[38px] xl:text-[42px]">
-          Купуй та продавай
-          <span className="block text-brand">ігрові акаунти, предмети,</span>
-          <span className="block text-brand">ключі та послуги</span>
+          {t("home.hero.titleLine1")}
+          <span className="block text-brand">{t("home.hero.titleLine2")}</span>
+          <span className="block text-brand">{t("home.hero.titleLine3")}</span>
         </h1>
         <div className="mt-8 grid max-w-[820px] gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {benefits.map((item) => (
@@ -134,6 +129,7 @@ function Benefit({ title, text, icon: Icon }: { title: string; text: string; ico
 }
 
 function CategoryCarousel({ title, items, onSelect, compact }: { title: string; items: CategoryTile[]; onSelect: (slug: string) => void; compact?: boolean }) {
+  const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   function scroll(direction: number) {
@@ -150,10 +146,10 @@ function CategoryCarousel({ title, items, onSelect, compact }: { title: string; 
           <ChevronRight className="h-4 w-4 text-brand" />
         </button>
         <div className="hidden gap-2 opacity-30 transition-opacity group-hover:opacity-100 sm:flex">
-          <button className="grid h-8 w-8 place-items-center rounded-lg bg-panel/25 text-muted hover:bg-panel/70 hover:text-brand" onClick={() => scroll(-1)} aria-label="Назад">
+          <button className="grid h-8 w-8 place-items-center rounded-lg bg-panel/25 text-muted hover:bg-panel/70 hover:text-brand" onClick={() => scroll(-1)} aria-label={t("home.carousel.back")}>
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <button className="grid h-8 w-8 place-items-center rounded-lg bg-panel/25 text-muted hover:bg-panel/70 hover:text-brand" onClick={() => scroll(1)} aria-label="Вперед">
+          <button className="grid h-8 w-8 place-items-center rounded-lg bg-panel/25 text-muted hover:bg-panel/70 hover:text-brand" onClick={() => scroll(1)} aria-label={t("home.carousel.forward")}>
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
@@ -262,7 +258,14 @@ function GameTileScene({ slug, tile, compact }: { slug: string; tile: GameTileTh
 }
 
 function GeneralChatWidget() {
-  const [messages, setMessages] = useState(initialChatMessages);
+  const { t } = useI18n();
+  const [messages, setMessages] = useState<ChatMessage[]>(() => [
+    { id: "m1", name: "ShadowHunter", text: t("home.chat.m1"), time: "16:52", avatar: "/avatars/keyforge-market.svg" },
+    { id: "m2", name: "Kira", text: t("home.chat.m2"), time: "16:53", avatar: "/avatars/nova-accounts.svg" },
+    { id: "m3", name: "NecX", text: t("home.chat.m3"), time: "16:54", avatar: "/avatars/pixel-boost.svg" },
+    { id: "m4", name: "GameLord", text: t("home.chat.m4"), time: "16:55", avatar: "/avatars/raid-supply.svg" },
+    { id: "m5", name: "Viper", text: t("home.chat.m5"), time: "16:55", avatar: "/avatars/nova-accounts.svg" }
+  ]);
   const [text, setText] = useState("");
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -273,7 +276,7 @@ function GeneralChatWidget() {
       ...current.slice(-5),
       {
         id: `local-${Date.now()}`,
-        name: "Ти",
+        name: t("home.chat.you"),
         text: value,
         time: new Date().toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" }),
         avatar: "/avatars/raid-supply.svg"
@@ -286,7 +289,7 @@ function GeneralChatWidget() {
     <section className="overflow-hidden rounded-lg border border-line bg-card shadow-soft">
       <div className="flex items-center justify-between gap-3 px-5 py-4">
         <div className="flex items-center gap-2">
-          <h2 className="text-base font-black text-ink">Загальний чат онлайн</h2>
+          <h2 className="text-base font-black text-ink">{t("home.chat.title")}</h2>
           <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(52,211,153,0.7)]" />
         </div>
         <span className="rounded-full bg-panel px-2 py-1 text-xs font-bold text-ink">1284</span>
@@ -311,9 +314,9 @@ function GeneralChatWidget() {
           className="min-w-0 flex-1 border-0 bg-panel/45 px-4 py-3 text-sm outline-none placeholder:text-muted"
           value={text}
           onChange={(event) => setText(event.target.value)}
-          placeholder="Написати повідомлення..."
+          placeholder={t("home.chat.placeholder")}
         />
-        <button className="grid w-12 place-items-center bg-panel/45 text-brand transition hover:bg-brand hover:text-stone-950 disabled:text-muted" disabled={!text.trim()} aria-label="Надіслати">
+        <button className="grid w-12 place-items-center bg-panel/45 text-brand transition hover:bg-brand hover:text-stone-950 disabled:text-muted" disabled={!text.trim()} aria-label={t("home.chat.send")}>
           <Send className="h-5 w-5" />
         </button>
       </form>
@@ -322,16 +325,17 @@ function GeneralChatWidget() {
 }
 
 function RecentChatsWidget({ onOpen }: { onOpen: (href: string) => void }) {
+  const { t } = useI18n();
   const items = [
-    { title: "Підтримка SKRYNIA", text: "Онлайн", badge: "2", icon: BadgeCheck, accent: true, href: "/support" },
-    { title: "Оплата замовлення #128734", text: "5 хв тому", icon: ShoppingBag, href: "/messages" },
-    { title: "Перевірка лоту #125671", text: "18 хв тому", icon: MessageCircle, href: "/messages" }
+    { title: t("home.recentChats.support"), text: t("home.recentChats.online"), badge: "2", icon: BadgeCheck, accent: true, href: "/support" },
+    { title: t("home.recentChats.orderPayment"), text: t("home.recentChats.minutesAgo"), icon: ShoppingBag, href: "/messages" },
+    { title: t("home.recentChats.lotCheck"), text: t("home.recentChats.minutesAgo18"), icon: MessageCircle, href: "/messages" }
   ];
 
   return (
     <section className="rounded-lg border border-line bg-card p-5 shadow-soft">
       <div className="mb-4 flex items-center gap-2">
-        <h2 className="text-base font-black text-ink">Останні чати</h2>
+        <h2 className="text-base font-black text-ink">{t("home.recentChats.title")}</h2>
         <span className="rounded-full bg-panel px-2 py-0.5 text-xs font-bold text-ink">3</span>
       </div>
       <div className="space-y-2">
@@ -356,6 +360,7 @@ function RecentChatsWidget({ onOpen }: { onOpen: (href: string) => void }) {
 }
 
 function SupportWidget({ onOpen }: { onOpen: () => void }) {
+  const { t } = useI18n();
   return (
     <section className="relative min-h-[180px] overflow-hidden rounded-lg border border-brand/20 bg-card p-5 shadow-soft">
       <div className="pointer-events-none absolute -right-5 top-7 h-24 w-24 rounded-full border-[8px] border-brand/50" />
@@ -363,10 +368,10 @@ function SupportWidget({ onOpen }: { onOpen: () => void }) {
         <Headphones className="h-8 w-8" />
       </div>
       <div className="relative z-10 max-w-[220px] pr-4">
-        <h2 className="text-lg font-black text-ink">Ми завжди на зв'язку</h2>
-        <p className="mt-2 text-sm leading-6 text-muted">Наша підтримка допоможе з будь-яким питанням</p>
+        <h2 className="text-lg font-black text-ink">{t("home.support.title")}</h2>
+        <p className="mt-2 text-sm leading-6 text-muted">{t("home.support.text")}</p>
         <button className="mt-4 rounded-lg border border-brand/70 px-4 py-2 text-sm font-black text-brand transition hover:bg-brand hover:text-stone-950" onClick={onOpen}>
-          Написати в підтримку
+          {t("home.support.button")}
         </button>
       </div>
     </section>

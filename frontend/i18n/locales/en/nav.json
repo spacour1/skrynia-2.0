@@ -34,7 +34,9 @@
     "noNotifications": "No notifications yet. Orders, payments, delivery events, and disputes will appear here.",
     "language": "Language",
     "comingSoon": "Coming soon",
-    "home": "Home"
+    "home": "Home",
+    "collapseSidebar": "Collapse menu",
+    "expandSidebar": "Expand menu"
   },
   "catalogMenu": {
     "games": "Games",

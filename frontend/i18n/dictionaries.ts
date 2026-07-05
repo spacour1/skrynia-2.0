@@ -5,6 +5,7 @@
 import { defaultLocale, type Locale } from "./config";
 
 import uaCommon from "./locales/ua/common.json";
+import uaHome from "./locales/ua/home.json";
 import uaNav from "./locales/ua/nav.json";
 import uaAuth from "./locales/ua/auth.json";
 import uaMarketplace from "./locales/ua/marketplace.json";
@@ -19,6 +20,7 @@ import uaAdmin from "./locales/ua/admin.json";
 import uaErrors from "./locales/ua/errors.json";
 
 import ruCommon from "./locales/ru/common.json";
+import ruHome from "./locales/ru/home.json";
 import ruNav from "./locales/ru/nav.json";
 import ruAuth from "./locales/ru/auth.json";
 import ruMarketplace from "./locales/ru/marketplace.json";
@@ -33,6 +35,7 @@ import ruAdmin from "./locales/ru/admin.json";
 import ruErrors from "./locales/ru/errors.json";
 
 import enCommon from "./locales/en/common.json";
+import enHome from "./locales/en/home.json";
 import enNav from "./locales/en/nav.json";
 import enAuth from "./locales/en/auth.json";
 import enMarketplace from "./locales/en/marketplace.json";
@@ -66,15 +69,15 @@ function buildDictionary(namespaces: NestedDictionary[]): FlatDictionary {
 
 const dictionaries: Record<Locale, FlatDictionary> = {
   ua: buildDictionary([
-    uaCommon, uaNav, uaAuth, uaMarketplace, uaProduct, uaCreateLot, uaOrders,
+    uaCommon, uaHome, uaNav, uaAuth, uaMarketplace, uaProduct, uaCreateLot, uaOrders,
     uaChat, uaWallet, uaSettings, uaNotifications, uaAdmin, uaErrors
   ] as NestedDictionary[]),
   ru: buildDictionary([
-    ruCommon, ruNav, ruAuth, ruMarketplace, ruProduct, ruCreateLot, ruOrders,
+    ruCommon, ruHome, ruNav, ruAuth, ruMarketplace, ruProduct, ruCreateLot, ruOrders,
     ruChat, ruWallet, ruSettings, ruNotifications, ruAdmin, ruErrors
   ] as NestedDictionary[]),
   en: buildDictionary([
-    enCommon, enNav, enAuth, enMarketplace, enProduct, enCreateLot, enOrders,
+    enCommon, enHome, enNav, enAuth, enMarketplace, enProduct, enCreateLot, enOrders,
     enChat, enWallet, enSettings, enNotifications, enAdmin, enErrors
   ] as NestedDictionary[])
 };

@@ -32,6 +32,13 @@
     "selectChat": "Select an order to open its chat.",
     "participant": "Participant",
     "report": "Report",
-    "blockedNotice": "You have blocked this user. They will not be able to message you directly."
+    "blockedNotice": "You have blocked this user. They will not be able to message you directly.",
+    "openUserProfile": "Open user profile",
+    "selectContext": "Select a conversation context",
+    "contextDirect": "Direct chat",
+    "contextDirectHint": "General direct messages",
+    "contextProductHint": "Listing discussion",
+    "contextOrder": "Order #{id}",
+    "contextOrderHint": "Order chat"
   }
 }

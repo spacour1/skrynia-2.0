@@ -4,7 +4,8 @@ import Link from "@/lib/navigation";
 import { useRouter } from "@/lib/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Heart, MessageCircle, Star, Store } from "lucide-react";
-import { apiFetch, type Product } from "@/lib/api";
+import { EmailNotVerifiedNotice } from "@/components/EmailNotVerifiedNotice";
+import { apiFetch, isEmailNotVerifiedError, type Product } from "@/lib/api";
 import { ProductCard } from "@/components/ProductCard";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
@@ -34,6 +35,7 @@ export default function SellerPage({ params }: { params: { id: string } }) {
   const { t } = useI18n();
   const router = useRouter();
   const userSession = useAuth((state) => state.user);
+  const hydrated = useAuth((state) => state.hydrated);
   const client = useQueryClient();
   const seller = useQuery({
     queryKey: ["seller", params.id],
@@ -49,7 +51,7 @@ export default function SellerPage({ params }: { params: { id: string } }) {
     onSuccess: () => client.invalidateQueries({ queryKey: ["seller-favorites"] })
   });
   const startChat = useMutation({
-    mutationFn: () => apiFetch<{ conversationId: string }>(`/chat/sellers/${params.id}/start`, { method: "POST" }),
+    mutationFn: () => apiFetch<{ conversationId: string }>(`/chat/users/${params.id}/start`, { method: "POST" }),
     onSuccess: ({ conversationId }) => router.push(`/messages?conversation=${conversationId}`)
   });
 
@@ -63,12 +65,15 @@ export default function SellerPage({ params }: { params: { id: string } }) {
   const headline = typeof user.settings?.headline === "string" ? user.settings.headline : "SKRYNIA seller";
   const specialty = typeof user.settings?.specialty === "string" ? user.settings.specialty : "Digital goods";
   const responseTime = typeof user.settings?.responseTime === "string" ? user.settings.responseTime : "Usually fast";
+  const startChatError = startChat.error;
 
   function writeSeller() {
+    if (!hydrated) return;
     if (!userSession) {
-      router.push("/login");
+      router.push(`/login?next=${encodeURIComponent(`/users/${params.id}`)}`);
       return;
     }
+    startChat.reset();
     startChat.mutate();
   }
 
@@ -98,14 +103,23 @@ export default function SellerPage({ params }: { params: { id: string } }) {
 
           {!isOwn ? (
             <div className="mt-5 grid gap-2">
-              <button className="app-button h-11 w-full" disabled={startChat.isPending || !products.length} onClick={writeSeller}>
+              <button className="app-button h-11 w-full" type="button" disabled={!hydrated || startChat.isPending} onClick={writeSeller}>
                 <MessageCircle className="h-4 w-4" />
-                Message
+                {t("seller.messageUser")}
               </button>
               <button className={isFavorite ? "app-button h-11 w-full" : "app-button-secondary h-11 w-full"} disabled={!userSession || favoriteMutation.isPending} onClick={() => favoriteMutation.mutate(isFavorite)}>
                 <Heart className={`h-4 w-4 ${isFavorite ? "fill-current" : ""}`} />
-                {isFavorite ? "Saved" : "Save seller"}
+                {isFavorite ? t("seller.saved") : t("seller.saveUser")}
               </button>
+              {startChatError ? (
+                isEmailNotVerifiedError(startChatError) ? (
+                  <EmailNotVerifiedNotice />
+                ) : (
+                  <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm font-bold text-rose-300">
+                    {startChatError instanceof Error ? startChatError.message : t("common.somethingWentWrong")}
+                  </p>
+                )
+              ) : null}
             </div>
           ) : null}
         </section>
@@ -113,7 +127,7 @@ export default function SellerPage({ params }: { params: { id: string } }) {
         <Link className="app-card flex items-center justify-between px-4 py-3 text-sm font-bold text-muted transition hover:text-brand" href="/">
           <span className="inline-flex items-center gap-2">
             <Store className="h-4 w-4" />
-            Catalog
+            {t("nav.home")}
           </span>
           <ChevronRight className="h-4 w-4" />
         </Link>
@@ -122,8 +136,8 @@ export default function SellerPage({ params }: { params: { id: string } }) {
       <main className="space-y-4">
         <section className="app-card flex flex-wrap items-center justify-between gap-3 p-5">
           <div>
-            <p className="text-xs font-black uppercase text-brand">Listings</p>
-            <h2 className="mt-1 text-xl font-black text-ink">{products.length} active offers</h2>
+            <p className="text-xs font-black uppercase text-brand">{t("seller.activeListings")}</p>
+            <h2 className="mt-1 text-xl font-black text-ink">{t("seller.activeOffersCount", { count: products.length })}</h2>
           </div>
           <div className="inline-flex items-center gap-2 rounded-full bg-panel px-3 py-1 text-sm font-bold text-muted">
             <Star className="h-4 w-4 fill-action text-action" />
@@ -149,7 +163,7 @@ export default function SellerPage({ params }: { params: { id: string } }) {
 
         {!products.length ? (
           <div className="app-card grid min-h-[220px] place-items-center p-8 text-center text-sm text-muted">
-            No active offers.
+            {t("seller.noActiveOffers")}
           </div>
         ) : null}
       </main>

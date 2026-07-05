@@ -395,7 +395,7 @@ router.get(
        group by u.id`,
       [id]
     );
-    if (!user.rows[0]) throw notFound("Seller not found");
+    if (!user.rows[0]) throw notFound("User not found");
 
     const products = await pool.query(
       `select p.id, p.title, p.description, p.price_cents as "priceCents", p.currency, p.stock,

@@ -55,6 +55,18 @@ export default {
       title: "Новое сообщение",
       body: "{sender}: {preview}"
     },
+    newMessageDirect: {
+      title: "Новое сообщение",
+      body: "{sender} написал вам сообщение: {preview}"
+    },
+    newMessageProduct: {
+      title: "Сообщение по объявлению",
+      body: "{sender} написал по объявлению: {productTitle}"
+    },
+    newMessageOrder: {
+      title: "Сообщение по заказу",
+      body: "{sender} написал по заказу #{orderId}"
+    },
     reconciliationMismatch: {
       title: "Расхождение в сверке баланса",
       body: "Обнаружено расхождение в ledger/wallet: {summary}. Проверьте /admin/finance."
@@ -112,6 +124,9 @@ export default {
   telegram: {
     connectedGreeting: "✅ Telegram подключен к вашему аккаунту SKRYNIA. Теперь вы будете получать уведомления здесь.",
     orderCreated: { title: "Новый заказ", body: "Покупатель создал заказ «{productTitle}»." },
-    newMessage: { title: "Новое сообщение", body: "{sender}: {preview}" }
+    newMessage: { title: "Новое сообщение", body: "{sender}: {preview}" },
+    newMessageDirect: { title: "Новое сообщение", body: "{sender} написал вам сообщение: {preview}" },
+    newMessageProduct: { title: "Сообщение по объявлению", body: "{sender} написал по объявлению: {productTitle}" },
+    newMessageOrder: { title: "Сообщение по заказу", body: "{sender} написал по заказу #{orderId}" }
   }
 } as const;

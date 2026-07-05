@@ -1,12 +1,15 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
   assertCanSendMessage,
+  getGroupedUserConversations,
+  getOrCreateDirectConversation,
+  getOrCreateOrderConversation,
   getOrCreateProductConversation,
   getUserConversations,
   markConversationRead,
   sendMessage
 } from "../src/modules/chat/chat.service.js";
-import { blockUser, closeDb, createConversation, createProduct, createUser, muteUser, resetDb } from "./fixtures.js";
+import { blockUser, closeDb, createConversation, createOrder, createProduct, createUser, muteUser, resetDb } from "./fixtures.js";
 
 beforeEach(resetDb);
 afterAll(closeDb);
@@ -91,6 +94,57 @@ describe("getOrCreateProductConversation", () => {
     expect(first.existing).toBe(false);
     expect(second.existing).toBe(true);
     expect(second.id).toBe(first.id);
+  });
+});
+
+describe("conversation contexts", () => {
+  it("reuses one direct conversation for an unordered user pair", async () => {
+    const firstUser = await createUser();
+    const secondUser = await createUser();
+
+    const first = await getOrCreateDirectConversation({ buyerId: firstUser, sellerId: secondUser });
+    const second = await getOrCreateDirectConversation({ buyerId: secondUser, sellerId: firstUser });
+
+    expect(first.existing).toBe(false);
+    expect(second.existing).toBe(true);
+    expect(second.id).toBe(first.id);
+  });
+
+  it("keeps product and order conversations separate for the same listing", async () => {
+    const seller = await createUser();
+    const buyer = await createUser();
+    const productId = await createProduct(seller);
+    const orderId = await createOrder(buyer, seller, productId);
+
+    const productConversation = await getOrCreateProductConversation({ buyerId: buyer, sellerId: seller, productId });
+    const orderConversation = await getOrCreateOrderConversation({ buyerId: buyer, sellerId: seller, productId, orderId });
+    const sameOrderConversation = await getOrCreateOrderConversation({ buyerId: buyer, sellerId: seller, productId, orderId });
+
+    expect(productConversation.id).not.toBe(orderConversation.id);
+    expect(sameOrderConversation.existing).toBe(true);
+    expect(sameOrderConversation.id).toBe(orderConversation.id);
+  });
+
+  it("groups direct, product, and order contexts under the peer user", async () => {
+    const seller = await createUser();
+    const buyer = await createUser();
+    const productId = await createProduct(seller);
+    const orderId = await createOrder(buyer, seller, productId);
+
+    const direct = await getOrCreateDirectConversation({ buyerId: buyer, sellerId: seller });
+    const product = await getOrCreateProductConversation({ buyerId: buyer, sellerId: seller, productId });
+    const order = await getOrCreateOrderConversation({ buyerId: buyer, sellerId: seller, productId, orderId });
+
+    await sendMessage({ conversationId: direct.id, senderId: seller, body: "Direct hello" });
+    await sendMessage({ conversationId: product.id, senderId: seller, body: "Product hello" });
+    await sendMessage({ conversationId: order.id, senderId: seller, body: "Order hello" });
+
+    const groups = await getGroupedUserConversations(buyer, "user");
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].peerUserId).toBe(seller);
+    expect(groups[0].totalUnreadCount).toBe(3);
+    expect(groups[0].contexts.map((context) => context.type).sort()).toEqual(["direct", "order", "product"]);
   });
 });
 

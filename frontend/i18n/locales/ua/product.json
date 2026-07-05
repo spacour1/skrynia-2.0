@@ -81,6 +81,11 @@
     "noListings": "Товарів ще немає.",
     "available": "Доступно",
     "inEscrow": "В escrow",
-    "releasedNet": "Виплачено чистими"
+    "releasedNet": "Виплачено чистими",
+    "messageUser": "Написати",
+    "saveUser": "Зберегти профіль",
+    "saved": "Збережено",
+    "activeOffersCount": "{count} активних пропозицій",
+    "noActiveOffers": "Активних пропозицій немає."
   }
 }

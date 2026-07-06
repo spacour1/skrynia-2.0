@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { inTx, pool } from "../../db/pool.js";
 import { badRequest } from "../../common/errors.js";
 import { buildOtpauthUri, generateTotpSecret, verifyTotpCode } from "./totp.service.js";
+import { createNotification } from "../notifications/notifications.service.js";
 
 const BACKUP_CODE_COUNT = 10;
 
@@ -47,6 +48,11 @@ export async function confirmTwoFactor(userId: string, code: string): Promise<st
     await client.query(`update users set two_factor_enabled = true, updated_at = now() where id = $1`, [userId]);
   });
 
+  await createNotification({
+    userId,
+    type: "two_factor_enabled",
+    templateKey: "notifications.twoFactorEnabled"
+  });
   return backupCodes;
 }
 
@@ -54,6 +60,11 @@ export async function disableTwoFactor(userId: string) {
   await pool.query(`delete from user_2fa_methods where user_id = $1`, [userId]);
   await pool.query(`delete from user_2fa_backup_codes where user_id = $1`, [userId]);
   await pool.query(`update users set two_factor_enabled = false, updated_at = now() where id = $1`, [userId]);
+  await createNotification({
+    userId,
+    type: "two_factor_disabled",
+    templateKey: "notifications.twoFactorDisabled"
+  });
 }
 
 /** Used at login: a confirmed TOTP code, or a single-use backup code (consumed on success). */

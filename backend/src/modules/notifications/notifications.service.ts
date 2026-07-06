@@ -23,6 +23,18 @@ export type NotificationInput = {
   orderId?: string;
   productId?: string;
   conversationId?: string;
+  /**
+   * Sends the email leg to this address instead of the account's current email — needed
+   * for alerts like "your email was changed", which must reach the address being replaced,
+   * not the new one the recipient lookup would otherwise resolve to.
+   */
+  emailOverride?: string;
+  /**
+   * Skips the Telegram leg even if the recipient has it enabled — for events (e.g. "Telegram
+   * connected") that already got an immediate, interactive reply on that exact channel, so a
+   * queued copy would just be a duplicate message.
+   */
+  skipTelegram?: boolean;
 };
 
 export async function createNotification(input: NotificationInput) {
@@ -58,13 +70,27 @@ export async function createNotification(input: NotificationInput) {
   notifyOrderEvent(input.userId, { type: "notification", notification: result.rows[0] });
   // Email/Telegram delivery renders the keys in the recipient's preferred_locale
   // inside the job worker (the recipient may use a different language than the actor).
-  await enqueueJob("email_notification", {
+  await enqueueJob("notification_delivery", {
     userId: input.userId,
     subject: fallbackTitle,
     body: fallbackBody ?? undefined,
     titleKey: titleKey ?? undefined,
     bodyKey: bodyKey ?? undefined,
-    params
+    params,
+    notificationType: input.type,
+    orderId: input.orderId,
+    conversationId: input.conversationId,
+    email: input.emailOverride,
+    skipTelegram: input.skipTelegram
   });
   return result.rows[0];
+}
+
+/** Fans a notification out to every admin (or moderator, if included in `roles`). */
+export async function notifyAdmins(
+  input: Omit<NotificationInput, "userId">,
+  roles: Array<"admin" | "moderator"> = ["admin"]
+) {
+  const admins = await pool.query<{ id: string }>(`select id from users where role = any($1::text[])`, [roles]);
+  await Promise.all(admins.rows.map((admin) => createNotification({ ...input, userId: admin.id })));
 }

@@ -9,7 +9,7 @@ import type { AuthedRequest } from "../../common/types.js";
 import { refundEscrow, releaseEscrow } from "../orders/ledger.service.js";
 import { recordOrderEvent } from "../orders/order-events.service.js";
 import { notifyOrderEvent } from "../chat/ws.service.js";
-import { createNotification } from "../notifications/notifications.service.js";
+import { createNotification, notifyAdmins } from "../notifications/notifications.service.js";
 import { getMessages, postOrderSystemMessage } from "../chat/chat.service.js";
 
 const router = Router();
@@ -59,6 +59,7 @@ router.post(
         })
       )
     );
+    await notifyAdmins({ type: "dispute_new_admin", templateKey: "notifications.disputeNewAdmin", orderId });
     await recordOrderEvent({
       orderId,
       actorId: req.user.id,

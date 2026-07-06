@@ -251,7 +251,9 @@ router.post(
   "/jobs/:name",
   adminOnly,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const name = z.enum(["escrow_release", "payout", "dispute_timer", "email_notification", "reconciliation_daily"]).parse(req.params.name);
+    const name = z
+      .enum(["escrow_release", "payout", "dispute_timer", "notification_delivery", "email_notification", "reconciliation_daily"])
+      .parse(req.params.name);
     const job = await enqueueJob(name, z.record(z.string(), z.unknown()).default({}).parse(req.body));
     res.status(201).json({ jobId: job?.id ?? null });
   })

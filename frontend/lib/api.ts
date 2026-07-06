@@ -1,3 +1,5 @@
+import type { CatalogField } from "./catalog-api";
+
 // Routed through the Next.js rewrite in next.config.mjs so the browser always talks to
 // its own origin — this keeps auth/CSRF cookies same-site even when the backend lives on
 // a different domain (e.g. Vercel frontend + Railway backend).
@@ -74,6 +76,15 @@ export type Product = {
   server?: string;
   platform?: string;
   metadata?: Record<string, unknown>;
+  // Set on the section the lot was created under - schema-driven metadata is only ever
+  // labeled/validated against the schema version active at creation time, never whatever
+  // is current for the section now (see catalog.service.ts:getSchemaByVersion).
+  schemaVersion?: number | null;
+  // Only present on the /products/:id detail response - the full field schema (key, label,
+  // type, etc.) the lot's metadata was created under, for rendering specs by proper labels.
+  metadataFields?: CatalogField[];
+  // Only present on list/favorites/seller-products responses - precomputed showInCard fields.
+  cardMetadata?: { key: string; label: string; value: unknown }[];
   deliveryTemplate?: string;
   deliveryType?: "manual" | "instant";
   productType?: "account" | "key" | "topup" | "boosting" | "service" | "item" | "currency";

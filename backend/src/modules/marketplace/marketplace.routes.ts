@@ -9,7 +9,8 @@ import { cacheDel, cacheDelPattern, cacheGet, cacheSet } from "../../common/redi
 import { moneyToCents, paginationSchema } from "../../common/validation.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { isUserOnline } from "../chat/ws.service.js";
-import { validateLotMetadata } from "../catalog/catalog.service.js";
+import { getActiveSchemaForSection, getSchemaByVersion, resolveActiveSectionChain, validateLotMetadata } from "../catalog/catalog.service.js";
+import { buildMetadataFilterClauses, type CatalogSchema } from "../catalog/catalog.validation.js";
 
 const router = Router();
 
@@ -39,6 +40,14 @@ const searchSchema = paginationSchema.extend({
   category: z.string().optional(),
   game: z.string().optional(),
   section: z.string().optional(),
+  // sectionId (not the `section` slug above, which is only unique per item) scopes
+  // metadata filters to one section's schema - a slug alone can't identify which schema
+  // to validate `meta[...]` filter keys against.
+  sectionId: z.string().uuid().optional(),
+  // Shape is `{ [fieldKey]: string | { min?: string; max?: string } }`, validated at
+  // request time against the section's active schema (see buildMetadataFilterClauses) -
+  // not worth statically typing here since it's entirely schema-driven.
+  meta: z.record(z.string(), z.unknown()).optional(),
   server: z.string().optional(),
   platform: z.string().optional(),
   deliveryType: z.enum(["manual", "instant"]).optional(),
@@ -101,6 +110,7 @@ const mediaAggWithStatus = `coalesce(
 const productSelect = `
   select p.id, p.title, p.description, p.price_cents as "priceCents", p.currency, p.stock,
          p.delivery_type as "deliveryType", p.server, p.platform, p.metadata,
+         p.section_id as "sectionId", p.schema_version as "schemaVersion",
          p.product_type as "productType", p.old_price_cents as "oldPriceCents",
          p.sales_count as "salesCount", p.is_hot as "isHot", p.is_recommended as "isRecommended",
          p.created_at as "createdAt",
@@ -129,6 +139,39 @@ function addSellerPresence<T extends { sellerId?: string }>(rows: T[]) {
   }));
 }
 
+/**
+ * Attaches `cardMetadata` (label + value for each `showInCard: true` schema field) to a
+ * batch of product rows in one extra query, keyed by (sectionId, schemaVersion) - not a
+ * per-row lookup, so listing a page of products never turns into N+1 schema fetches.
+ * Products without a section/schema_version (legacy sectionless lots) get an empty array.
+ */
+async function attachCardMetadata<T extends { sectionId?: string | null; schemaVersion?: number | null; metadata?: Record<string, unknown> }>(
+  rows: T[]
+): Promise<(T & { cardMetadata: { key: string; label: string; value: unknown }[] })[]> {
+  const sectionIds = Array.from(new Set(rows.map((row) => row.sectionId).filter((id): id is string => Boolean(id))));
+  const schemaByKey = new Map<string, CatalogSchema>();
+  if (sectionIds.length) {
+    const schemasResult = await pool.query(
+      `select section_id as "sectionId", version, schema from catalog_section_schemas where section_id = any($1::uuid[])`,
+      [sectionIds]
+    );
+    for (const row of schemasResult.rows) {
+      schemaByKey.set(`${row.sectionId}:${row.version}`, row.schema as CatalogSchema);
+    }
+  }
+
+  return rows.map((row) => {
+    const schema = row.sectionId && row.schemaVersion ? schemaByKey.get(`${row.sectionId}:${row.schemaVersion}`) : undefined;
+    const cardMetadata = schema
+      ? schema.fields
+          .filter((field) => field.showInCard)
+          .map((field) => ({ key: field.key, label: field.label, value: row.metadata?.[field.key] }))
+          .filter((entry) => entry.value !== undefined && entry.value !== null && entry.value !== "")
+      : [];
+    return { ...row, cardMetadata };
+  });
+}
+
 router.get(
   "/favorites/ids",
   authenticate,
@@ -153,7 +196,7 @@ router.get(
        order by max(own_favorite.created_at) desc`,
       [req.user.id]
     );
-    res.json({ products: addSellerPresence(result.rows) });
+    res.json({ products: await attachCardMetadata(addSellerPresence(result.rows)) });
   })
 );
 
@@ -302,6 +345,20 @@ router.get(
       values.push(input.section);
       where.push(`gs.slug = $${values.length}`);
     }
+    if (input.sectionId) {
+      values.push(input.sectionId);
+      where.push(`p.section_id = $${values.length}`);
+    }
+    if (input.meta && Object.keys(input.meta).length) {
+      // Metadata filters only make sense scoped to one section's schema - a slug/game
+      // combo can't tell us which schema to validate the filter keys against.
+      if (!input.sectionId) throw badRequest("sectionId is required when filtering by meta");
+      const schema = await getActiveSchemaForSection(input.sectionId);
+      if (!schema) throw badRequest("This section has no active schema to filter by");
+      const { clauses, values: metaValues } = buildMetadataFilterClauses(schema, input.meta, values.length);
+      where.push(...clauses);
+      values.push(...metaValues);
+    }
     if (input.server) {
       values.push(input.server);
       where.push(`lower(coalesce(p.server, '')) = lower($${values.length})`);
@@ -360,6 +417,7 @@ router.get(
     const baseQuery = `
       select p.id, p.title, p.description, p.price_cents as "priceCents", p.currency, p.stock,
               p.delivery_type as "deliveryType", p.server, p.platform, p.metadata,
+              p.section_id as "sectionId", p.schema_version as "schemaVersion",
               p.product_type as "productType", p.old_price_cents as "oldPriceCents",
               p.sales_count as "salesCount", p.is_hot as "isHot", p.is_recommended as "isRecommended",
               p.created_at as "createdAt",
@@ -392,7 +450,7 @@ router.get(
       values
     );
     const total = result.rows[0]?.total ?? 0;
-    const products = addSellerPresence(result.rows.map(({ total: _total, ...row }) => row));
+    const products = await attachCardMetadata(addSellerPresence(result.rows.map(({ total: _total, ...row }) => row)));
     const payload = { products, page: input.page, limit: input.limit, total };
     await cacheSet(cacheKey, payload, 30);
     res.json(payload);
@@ -411,6 +469,7 @@ router.get(
               p.product_type as "productType", p.old_price_cents as "oldPriceCents",
               p.sales_count as "salesCount", p.is_hot as "isHot", p.is_recommended as "isRecommended",
               p.server, p.platform, p.metadata, p.created_at as "createdAt",
+              p.schema_version as "schemaVersion",
               c.id as "categoryId", c.slug as "categorySlug", c.name as "categoryName",
               g.id as "gameId", g.slug as "gameSlug", g.name as "gameName",
               gs.id as "sectionId", gs.slug as "sectionSlug", gs.name as "sectionName",
@@ -445,7 +504,13 @@ router.get(
        limit 5`,
       [result.rows[0].sellerId]
     );
-    const payload = { product: addSellerPresence([result.rows[0]])[0], reviews: reviews.rows };
+    const row = result.rows[0];
+    // Labels come from the *exact* schema version the lot was created under, not whatever
+    // is currently active for the section - a later schema edit must never change how an
+    // already-created lot displays.
+    const metadataFields =
+      row.sectionId && row.schemaVersion ? (await getSchemaByVersion(row.sectionId, row.schemaVersion))?.fields ?? [] : [];
+    const payload = { product: { ...addSellerPresence([row])[0], metadataFields }, reviews: reviews.rows };
     await cacheSet(`marketplace:product:${id}`, payload, 60);
     res.json(payload);
   })
@@ -458,12 +523,13 @@ router.get(
     const result = await pool.query(
       `select p.id, p.title, p.description, p.price_cents as "priceCents", p.currency, p.stock,
               p.status, p.delivery_type as "deliveryType", p.server, p.platform, p.metadata,
+              p.section_id as "sectionId", p.schema_version as "schemaVersion",
               p.product_type as "productType", p.old_price_cents as "oldPriceCents",
               p.sales_count as "salesCount", p.is_hot as "isHot", p.is_recommended as "isRecommended",
               p.created_at as "createdAt",
               c.id as "categoryId", c.name as "categoryName",
               g.id as "gameId", g.name as "gameName",
-              gs.id as "sectionId", gs.name as "sectionName",
+              gs.name as "sectionName",
               ${mediaAggWithStatus}
        from products p
        join categories c on c.id = p.category_id
@@ -475,7 +541,7 @@ router.get(
        order by p.created_at desc`,
       [req.user.id]
     );
-    res.json({ products: addSellerPresence(result.rows) });
+    res.json({ products: await attachCardMetadata(addSellerPresence(result.rows)) });
   })
 );
 
@@ -493,34 +559,47 @@ async function replaceProductMedia(productId: string, urls: string[]) {
   );
 }
 
+type Categorization = {
+  categoryId: string;
+  gameId: string | null;
+  sectionId: string | null;
+  productType: string | null;
+  /** null = no restriction (sectionless legacy path); a section always has a concrete list. */
+  allowedDeliveryTypes: string[] | null;
+};
+
 /**
  * The category — and product type — a product belongs to must follow from its section,
  * not from whatever the client happened to send (the frontend used to guess productType
  * from the section's name via regex; that guess can now disagree with the section's own
- * record). When a sectionId is given, look up the section's own
- * game_id/category_id/product_type and use those, ignoring (and validating) any
- * client-supplied values.
+ * record). When a sectionId is given, this requires the *entire* group -> item -> section
+ * chain to be active and the section to have a published schema (resolveActiveSectionChain
+ * is the single source of truth for that gate - see catalog.service.ts). Ignores (and
+ * validates) any client-supplied categoryId/gameId/productType against the section's own
+ * record.
  */
-async function resolveCategorization(input: { categoryId?: string | null; gameId?: string | null; sectionId?: string | null }) {
+async function resolveCategorization(input: { categoryId?: string | null; gameId?: string | null; sectionId?: string | null }): Promise<Categorization> {
   if (input.sectionId) {
-    const section = await pool.query(
-      `select id, game_id as "gameId", category_id as "categoryId", product_type as "productType"
-       from game_sections where id = $1`,
-      [input.sectionId]
-    );
-    if (!section.rows[0]) throw notFound("Section not found");
-    if (input.gameId && input.gameId !== section.rows[0].gameId) {
+    const chain = await resolveActiveSectionChain(input.sectionId);
+    if (input.gameId && input.gameId !== chain.gameId) {
       throw badRequest("Section does not belong to the selected game");
     }
     return {
-      categoryId: section.rows[0].categoryId as string,
-      gameId: section.rows[0].gameId as string,
-      sectionId: section.rows[0].id as string,
-      productType: section.rows[0].productType as string
+      categoryId: chain.categoryId,
+      gameId: chain.gameId,
+      sectionId: chain.sectionId,
+      productType: chain.productType,
+      allowedDeliveryTypes: chain.allowedDeliveryTypes
     };
   }
   if (!input.categoryId) throw badRequest("categoryId or sectionId is required");
-  return { categoryId: input.categoryId, gameId: input.gameId ?? null, sectionId: null, productType: null };
+  return { categoryId: input.categoryId, gameId: input.gameId ?? null, sectionId: null, productType: null, allowedDeliveryTypes: null };
+}
+
+function assertDeliveryTypeAllowed(allowedDeliveryTypes: string[] | null | undefined, deliveryType: string) {
+  if (allowedDeliveryTypes && !allowedDeliveryTypes.includes(deliveryType)) {
+    throw badRequest(`This section does not allow delivery type "${deliveryType}"`);
+  }
 }
 
 router.post(
@@ -530,6 +609,7 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = productSchema.parse(req.body);
     const categorization = await resolveCategorization(input);
+    assertDeliveryTypeAllowed(categorization.allowedDeliveryTypes, input.deliveryType);
     // The section's schema (not the frontend) decides which metadata keys are valid - see
     // catalog.validation.ts. Unknown keys are dropped; missing required ones reject the lot.
     const { metadata, schemaVersion } = await validateLotMetadata(categorization.sectionId, input.metadata);
@@ -598,7 +678,10 @@ router.patch(
     const id = z.string().uuid().parse(req.params.id);
     const input = productPatchSchema.parse(req.body);
 
-    const existing = await pool.query(`select seller_id, section_id as "sectionId" from products where id = $1 and status != 'deleted'`, [id]);
+    const existing = await pool.query(
+      `select seller_id, section_id as "sectionId", delivery_type as "deliveryType" from products where id = $1 and status != 'deleted'`,
+      [id]
+    );
     if (!existing.rows[0]) throw notFound("Product not found");
     if (existing.rows[0].seller_id !== req.user.id && req.user.role !== "admin") throw forbidden();
 
@@ -607,13 +690,31 @@ router.patch(
     // sectionId === null is a deliberate "detach from this section" request and needs its
     // own categoryId to fall back to, same as creating a sectionless listing does.
     let categorization: { categoryId?: string | null; gameId?: string | null; sectionId?: string | null; productType?: string | null };
+    // null = "no restriction known yet"; undefined stays undefined only for the "section
+    // unchanged and nothing that needs re-checking" case below.
+    let allowedDeliveryTypes: string[] | null | undefined;
     if (input.sectionId) {
-      categorization = await resolveCategorization(input);
+      const resolved = await resolveCategorization(input);
+      categorization = resolved;
+      allowedDeliveryTypes = resolved.allowedDeliveryTypes;
     } else if (input.sectionId === null) {
       if (!input.categoryId) throw badRequest("categoryId is required when clearing sectionId");
       categorization = { categoryId: input.categoryId, gameId: input.gameId ?? null, sectionId: null, productType: input.productType };
+      allowedDeliveryTypes = null;
     } else {
       categorization = { categoryId: input.categoryId, gameId: input.gameId, sectionId: undefined, productType: undefined };
+
+      // sectionId isn't changing, but touching metadata/deliveryType or reactivating the lot
+      // still requires the *existing* section to be a fully active chain right now - plain
+      // cosmetic edits (title/description/price/media) on a lot sitting in an archived
+      // section stay allowed and never reach this check.
+      const needsActiveChainCheck = input.metadata != null || input.deliveryType !== undefined || input.status === "active";
+      if (needsActiveChainCheck && existing.rows[0].sectionId) {
+        allowedDeliveryTypes = (await resolveActiveSectionChain(existing.rows[0].sectionId)).allowedDeliveryTypes;
+      }
+    }
+    if (allowedDeliveryTypes) {
+      assertDeliveryTypeAllowed(allowedDeliveryTypes, input.deliveryType ?? existing.rows[0].deliveryType);
     }
 
     const priceCents = input.price === undefined ? undefined : moneyToCents(input.price);

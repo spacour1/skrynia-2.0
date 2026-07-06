@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { pool } from "../../db/pool.js";
+import { inTx, pool, type DbClient } from "../../db/pool.js";
 import { badRequest, notFound } from "../../common/errors.js";
 import { parseCatalogSchema, validateMetadataAgainstSchema, type CatalogSchema } from "./catalog.validation.js";
 
@@ -42,16 +42,19 @@ function buildDynamicUpdate(id: string, fields: Record<string, unknown>) {
  * only ever captures `{method, path, request_body, params, query}` and has no concept of
  * targetType/before/after.
  */
-export async function recordCatalogAudit(input: {
-  adminId: string;
-  actionType: string;
-  targetType: "catalog_group" | "catalog_item" | "catalog_section" | "catalog_schema";
-  targetId: string;
-  before?: unknown;
-  after?: unknown;
-  metadata?: Record<string, unknown>;
-}): Promise<void> {
-  await pool.query(
+export async function recordCatalogAudit(
+  input: {
+    adminId: string;
+    actionType: string;
+    targetType: "catalog_group" | "catalog_item" | "catalog_section" | "catalog_schema";
+    targetId: string;
+    before?: unknown;
+    after?: unknown;
+    metadata?: Record<string, unknown>;
+  },
+  client: DbClient = pool
+): Promise<void> {
+  await client.query(
     `insert into audit_logs(trace_id, user_id, method, path, endpoint, status_code, action, request_body, metadata)
      values ($1, $2, 'CATALOG', '/admin/catalog', 'catalog_builder', 200, $3, null, $4)`,
     [
@@ -67,6 +70,27 @@ export async function recordCatalogAudit(input: {
       })
     ]
   );
+}
+
+/**
+ * Picks the precise audit action type for a group/item/section update: if `status` is the
+ * field that changed, log the specific transition (published/hidden/archived/deleted)
+ * instead of a generic "updated" - matters for reading the audit trail later.
+ */
+function statusChangeActionType(targetKind: "group" | "item" | "section", previousStatus: string, input: { status?: string }): string {
+  if (input.status === undefined || input.status === previousStatus) return `catalog_${targetKind}_updated`;
+  switch (input.status) {
+    case "active":
+      return `catalog_${targetKind}_published`;
+    case "hidden":
+      return `catalog_${targetKind}_hidden`;
+    case "archived":
+      return `catalog_${targetKind}_archived`;
+    case "deleted":
+      return `catalog_${targetKind}_deleted`;
+    default:
+      return `catalog_${targetKind}_updated`;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +147,14 @@ export async function updateCatalogGroup(id: string, input: Partial<CatalogGroup
     values
   );
   const updated = result.rows[0];
-  await recordCatalogAudit({ adminId, actionType: "catalog_group_updated", targetType: "catalog_group", targetId: id, before: existing, after: updated });
+  await recordCatalogAudit({
+    adminId,
+    actionType: statusChangeActionType("group", existing.status, input),
+    targetType: "catalog_group",
+    targetId: id,
+    before: existing,
+    after: updated
+  });
   return updated;
 }
 
@@ -142,7 +173,7 @@ export async function deleteCatalogGroup(id: string, adminId: string) {
      returning id, slug, name, status`,
     [id]
   );
-  await recordCatalogAudit({ adminId, actionType: "catalog_group_hidden", targetType: "catalog_group", targetId: id, before: existing, after: result.rows[0] });
+  await recordCatalogAudit({ adminId, actionType: "catalog_group_deleted", targetType: "catalog_group", targetId: id, before: existing, after: result.rows[0] });
   return { hardDeleted: false, group: result.rows[0] };
 }
 
@@ -216,22 +247,36 @@ export async function updateCatalogItem(id: string, input: Partial<CatalogItemIn
     values
   );
   const updated = result.rows[0];
-  await recordCatalogAudit({ adminId, actionType: "catalog_item_updated", targetType: "catalog_item", targetId: id, before: existing, after: updated });
+  await recordCatalogAudit({
+    adminId,
+    actionType: statusChangeActionType("item", existing.status, input),
+    targetType: "catalog_item",
+    targetId: id,
+    before: existing,
+    after: updated
+  });
   return updated;
 }
 
 export async function deleteCatalogItem(id: string, adminId: string) {
   const existing = await getCatalogItemRow(id);
-  const children = await pool.query(`select count(*)::int as count from game_sections where game_id = $1`, [id]);
+  const sections = await pool.query(`select count(*)::int as count from game_sections where game_id = $1`, [id]);
+  // Products can reference an item directly via game_id with section_id = null (the legacy
+  // sectionless listing path) - a zero-sections item can still have products attached this
+  // way, so the hard-delete guard must check both, not just game_sections.
+  const directProducts = await pool.query(`select count(*)::int as count from products where game_id = $1`, [id]);
 
-  if (existing.status === "draft" && children.rows[0].count === 0) {
+  if (existing.status === "draft" && sections.rows[0].count === 0 && directProducts.rows[0].count === 0) {
     await pool.query(`delete from games where id = $1`, [id]);
     await recordCatalogAudit({ adminId, actionType: "catalog_item_deleted", targetType: "catalog_item", targetId: id, before: existing });
     return { hardDeleted: true };
   }
+  if (directProducts.rows[0].count > 0) {
+    throw badRequest("Cannot delete item with existing products");
+  }
 
   const result = await pool.query(`update games set status = 'deleted' where id = $1 returning id, slug, name, status`, [id]);
-  await recordCatalogAudit({ adminId, actionType: "catalog_item_hidden", targetType: "catalog_item", targetId: id, before: existing, after: result.rows[0] });
+  await recordCatalogAudit({ adminId, actionType: "catalog_item_deleted", targetType: "catalog_item", targetId: id, before: existing, after: result.rows[0] });
   return { hardDeleted: false, item: result.rows[0] };
 }
 
@@ -356,7 +401,14 @@ export async function updateCatalogSection(id: string, input: Partial<CatalogSec
     values
   );
   const updated = result.rows[0];
-  await recordCatalogAudit({ adminId, actionType: "catalog_section_updated", targetType: "catalog_section", targetId: id, before: existing, after: updated });
+  await recordCatalogAudit({
+    adminId,
+    actionType: statusChangeActionType("section", existing.status, input),
+    targetType: "catalog_section",
+    targetId: id,
+    before: existing,
+    after: updated
+  });
   return updated;
 }
 
@@ -375,7 +427,7 @@ export async function deleteCatalogSection(id: string, adminId: string) {
   }
 
   const result = await pool.query(`update game_sections set status = 'deleted' where id = $1 returning id, slug, name, status`, [id]);
-  await recordCatalogAudit({ adminId, actionType: "catalog_section_hidden", targetType: "catalog_section", targetId: id, before: existing, after: result.rows[0] });
+  await recordCatalogAudit({ adminId, actionType: "catalog_section_deleted", targetType: "catalog_section", targetId: id, before: existing, after: result.rows[0] });
   return { hardDeleted: false, section: result.rows[0] };
 }
 
@@ -465,21 +517,56 @@ export async function updateSchemaVersion(sectionId: string, schemaId: string, r
   return updated;
 }
 
+/**
+ * Archiving the old version, activating the new one, and repointing the section's
+ * current_schema_version must succeed or fail together - a partial write here would leave
+ * a section with either no active schema or two, so this runs in a single transaction.
+ */
 export async function publishSchemaVersion(sectionId: string, schemaId: string, adminId: string) {
   const schemaRow = await getSchemaRow(sectionId, schemaId);
   if (schemaRow.status === "active") return schemaRow;
 
-  await pool.query(`update catalog_section_schemas set status = 'archived' where section_id = $1 and status = 'active'`, [sectionId]);
-  const result = await pool.query(
-    `update catalog_section_schemas set status = 'active', published_at = now() where id = $1
-     returning id, section_id as "sectionId", version, schema, status, published_at as "publishedAt"`,
-    [schemaId]
-  );
-  await pool.query(`update game_sections set current_schema_version = $2 where id = $1`, [sectionId, result.rows[0].version]);
+  return inTx(async (client) => {
+    const previousActive = await client.query(
+      `select id, section_id as "sectionId", version, schema, status
+       from catalog_section_schemas where section_id = $1 and status = 'active'`,
+      [sectionId]
+    );
 
-  const published = result.rows[0];
-  await recordCatalogAudit({ adminId, actionType: "catalog_schema_published", targetType: "catalog_schema", targetId: schemaId, before: schemaRow, after: published, metadata: { sectionId } });
-  return published;
+    if (previousActive.rows[0]) {
+      const archived = await client.query(
+        `update catalog_section_schemas set status = 'archived' where id = $1
+         returning id, section_id as "sectionId", version, schema, status`,
+        [previousActive.rows[0].id]
+      );
+      await recordCatalogAudit(
+        {
+          adminId,
+          actionType: "catalog_schema_archived",
+          targetType: "catalog_schema",
+          targetId: previousActive.rows[0].id,
+          before: previousActive.rows[0],
+          after: archived.rows[0],
+          metadata: { sectionId }
+        },
+        client
+      );
+    }
+
+    const result = await client.query(
+      `update catalog_section_schemas set status = 'active', published_at = now() where id = $1
+       returning id, section_id as "sectionId", version, schema, status, published_at as "publishedAt"`,
+      [schemaId]
+    );
+    await client.query(`update game_sections set current_schema_version = $2 where id = $1`, [sectionId, result.rows[0].version]);
+
+    const published = result.rows[0];
+    await recordCatalogAudit(
+      { adminId, actionType: "catalog_schema_published", targetType: "catalog_schema", targetId: schemaId, before: schemaRow, after: published, metadata: { sectionId } },
+      client
+    );
+    return published;
+  });
 }
 
 async function getSchemaRow(sectionId: string, schemaId: string) {
@@ -492,13 +579,18 @@ async function getSchemaRow(sectionId: string, schemaId: string) {
   return result.rows[0] as { id: string; sectionId: string; version: number; schema: CatalogSchema; status: "draft" | "active" | "archived" };
 }
 
-/** Used by lot creation/update to fetch + validate metadata against the section's live schema. */
+/**
+ * Used by lot creation/update to fetch + validate metadata against the section's live schema.
+ * `cs.status = 'active'` is checked explicitly rather than trusted implicitly from
+ * `current_schema_version` alone - the two are kept in sync by publishSchemaVersion today,
+ * but this is the defense-in-depth check, not a assumption about how that invariant holds.
+ */
 export async function getActiveSchemaForSection(sectionId: string): Promise<CatalogSchema | null> {
   const result = await pool.query(
     `select cs.schema
      from game_sections gs
      join catalog_section_schemas cs on cs.section_id = gs.id and cs.version = gs.current_schema_version
-     where gs.id = $1`,
+     where gs.id = $1 and cs.status = 'active'`,
     [sectionId]
   );
   return (result.rows[0]?.schema as CatalogSchema | undefined) ?? null;
@@ -518,7 +610,7 @@ export async function validateLotMetadata(
   const result = await pool.query(
     `select gs.current_schema_version as "schemaVersion", cs.schema
      from game_sections gs
-     left join catalog_section_schemas cs on cs.section_id = gs.id and cs.version = gs.current_schema_version
+     left join catalog_section_schemas cs on cs.section_id = gs.id and cs.version = gs.current_schema_version and cs.status = 'active'
      where gs.id = $1`,
     [sectionId]
   );
@@ -526,6 +618,67 @@ export async function validateLotMetadata(
   if (!row?.schema) return { metadata: rawMetadata, schemaVersion: null };
 
   return { metadata: validateMetadataAgainstSchema(row.schema, rawMetadata), schemaVersion: row.schemaVersion };
+}
+
+/** Schema for a specific historical version - used to label an existing lot's metadata by
+ * the schema it was actually created under, not whatever is current for the section now. */
+export async function getSchemaByVersion(sectionId: string, version: number): Promise<CatalogSchema | null> {
+  const result = await pool.query(
+    `select schema from catalog_section_schemas where section_id = $1 and version = $2`,
+    [sectionId, version]
+  );
+  return (result.rows[0]?.schema as CatalogSchema | undefined) ?? null;
+}
+
+export type ActiveSectionChain = {
+  sectionId: string;
+  categoryId: string;
+  gameId: string;
+  groupId: string;
+  productType: string;
+  allowedDeliveryTypes: string[];
+};
+
+/**
+ * The only place that decides whether a section is actually open for new/updated lots:
+ * its own status, its parent item's status, its parent group's status, and whether it has
+ * a published (active) schema must all check out. Used by both create and update so a lot
+ * can never be attached to a section that isn't fully live, regardless of which route it
+ * comes through.
+ */
+export async function resolveActiveSectionChain(sectionId: string): Promise<ActiveSectionChain> {
+  const result = await pool.query(
+    `select
+       gs.id as "sectionId", gs.category_id as "categoryId", gs.game_id as "gameId",
+       gs.product_type as "productType", gs.allowed_delivery_types as "allowedDeliveryTypes",
+       gs.status as "sectionStatus", gs.current_schema_version as "currentSchemaVersion",
+       g.group_id as "groupId", g.status as "itemStatus",
+       cg.status as "groupStatus",
+       cs.status as "schemaStatus"
+     from game_sections gs
+     join games g on g.id = gs.game_id
+     join catalog_groups cg on cg.id = g.group_id
+     left join catalog_section_schemas cs on cs.section_id = gs.id and cs.version = gs.current_schema_version
+     where gs.id = $1`,
+    [sectionId]
+  );
+  const row = result.rows[0];
+  if (!row) throw notFound("Section not found");
+  if (row.groupStatus !== "active" || row.itemStatus !== "active" || row.sectionStatus !== "active") {
+    throw badRequest("This section is not available for creating lots");
+  }
+  if (!row.currentSchemaVersion || row.schemaStatus !== "active") {
+    throw badRequest("This section does not have a published schema yet");
+  }
+
+  return {
+    sectionId: row.sectionId,
+    categoryId: row.categoryId,
+    gameId: row.gameId,
+    groupId: row.groupId,
+    productType: row.productType,
+    allowedDeliveryTypes: row.allowedDeliveryTypes
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -588,9 +741,13 @@ export async function getAdminCatalogTree() {
   const result = await pool.query(`
     select
       g.id, g.slug, g.name, g.description, g.icon, g.status,
+      g.sort_order as "sortOrder", g.seo_title as "seoTitle", g.seo_description as "seoDescription",
       i.id as "itemId", i.slug as "itemSlug", i.name as "itemName", i.icon_url as "itemIcon", i.banner as "itemBanner", i.status as "itemStatus",
+      i.sort_order as "itemSortOrder", i.seo_title as "itemSeoTitle", i.seo_description as "itemSeoDescription",
       s.id as "sectionId", s.slug as "sectionSlug", s.name as "sectionName", s.product_type as "listingType",
       s.allowed_delivery_types as "allowedDeliveryTypes", s.status as "sectionStatus", s.category_id as "categoryId",
+      s.requires_moderation as "requiresModeration", s.sort_order as "sectionSortOrder",
+      s.seo_title as "sectionSeoTitle", s.seo_description as "sectionSeoDescription",
       s.current_schema_version as "currentSchemaVersion",
       (select count(*)::int from products p where p.section_id = s.id) as "productCount"
     from catalog_groups g
@@ -608,12 +765,18 @@ type TreeRow = {
   description?: string | null;
   icon?: string | null;
   status?: string;
+  sortOrder?: number;
+  seoTitle?: string | null;
+  seoDescription?: string | null;
   itemId?: string | null;
   itemSlug?: string;
   itemName?: string;
   itemIcon?: string | null;
   itemBanner?: string | null;
   itemStatus?: string;
+  itemSortOrder?: number;
+  itemSeoTitle?: string | null;
+  itemSeoDescription?: string | null;
   sectionId?: string | null;
   sectionSlug?: string;
   sectionName?: string;
@@ -621,6 +784,10 @@ type TreeRow = {
   allowedDeliveryTypes?: string[];
   categoryId?: string | null;
   categoryRiskLevel?: string | null;
+  requiresModeration?: boolean;
+  sectionSortOrder?: number;
+  sectionSeoTitle?: string | null;
+  sectionSeoDescription?: string | null;
   sectionStatus?: string;
   currentSchemaVersion?: number | null;
   productCount?: number;
@@ -638,7 +805,9 @@ function buildTree(rows: TreeRow[], opts: { includeStatus?: boolean } = {}) {
         name: row.name,
         description: row.description ?? null,
         icon: row.icon ?? null,
-        ...(opts.includeStatus ? { status: row.status } : {}),
+        ...(opts.includeStatus
+          ? { status: row.status, sortOrder: row.sortOrder, seoTitle: row.seoTitle ?? null, seoDescription: row.seoDescription ?? null }
+          : {}),
         items: new Map<string, any>()
       };
       groups.set(row.id, group);
@@ -653,7 +822,9 @@ function buildTree(rows: TreeRow[], opts: { includeStatus?: boolean } = {}) {
         name: row.itemName,
         icon: row.itemIcon ?? null,
         banner: row.itemBanner ?? null,
-        ...(opts.includeStatus ? { status: row.itemStatus } : {}),
+        ...(opts.includeStatus
+          ? { status: row.itemStatus, sortOrder: row.itemSortOrder, seoTitle: row.itemSeoTitle ?? null, seoDescription: row.itemSeoDescription ?? null }
+          : {}),
         sections: new Map<string, any>()
       };
       group.items.set(row.itemId, item);
@@ -669,7 +840,16 @@ function buildTree(rows: TreeRow[], opts: { includeStatus?: boolean } = {}) {
         allowedDeliveryTypes: row.allowedDeliveryTypes,
         categoryRiskLevel: row.categoryRiskLevel ?? null,
         ...(opts.includeStatus
-          ? { status: row.sectionStatus, currentSchemaVersion: row.currentSchemaVersion, productCount: row.productCount, categoryId: row.categoryId ?? null }
+          ? {
+              status: row.sectionStatus,
+              currentSchemaVersion: row.currentSchemaVersion,
+              productCount: row.productCount,
+              categoryId: row.categoryId ?? null,
+              requiresModeration: row.requiresModeration ?? false,
+              sortOrder: row.sectionSortOrder,
+              seoTitle: row.sectionSeoTitle ?? null,
+              seoDescription: row.sectionSeoDescription ?? null
+            }
           : {})
       });
     }

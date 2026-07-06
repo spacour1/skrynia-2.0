@@ -25,6 +25,7 @@ import { apiFetch, isEmailNotVerifiedError, money, type Product } from "@/lib/ap
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
 import { fieldLabel, formatFieldValue } from "@/lib/product-fields";
+import type { CatalogField } from "@/lib/catalog-api";
 import { showAppToast } from "@/lib/toast-events";
 import { captureEvent } from "@/lib/posthog";
 
@@ -140,9 +141,19 @@ export function ProductPageClient({ id }: { id: string }) {
       ? Math.round(((item.oldPriceCents - item.priceCents) / item.oldPriceCents) * 100)
       : 0;
   const metadata = item.metadata ?? {};
-  const extraSpecs = Object.entries(metadata).filter(
-    ([key, value]) => !HIDDEN_METADATA_KEYS.has(key) && value !== null && value !== undefined && value !== ""
-  );
+  // A lot created under a catalog-builder section carries its own field schema
+  // (metadataFields, resolved against the schema version it was created under - see
+  // catalog.service.ts:getSchemaByVersion) - its specs must be rendered by that schema's
+  // labels, not the legacy hardcoded key->label heuristics in product-fields.ts, which only
+  // apply to lots from sections that predate the catalog builder.
+  const schemaSpecs = (item.metadataFields ?? [])
+    .map((field) => ({ field, value: metadata[field.key] }))
+    .filter(({ value }) => value !== null && value !== undefined && value !== "");
+  const extraSpecs = schemaSpecs.length
+    ? []
+    : Object.entries(metadata).filter(
+        ([key, value]) => !HIDDEN_METADATA_KEYS.has(key) && value !== null && value !== undefined && value !== ""
+      );
   const tags = [
     item.gameName,
     item.sectionName,
@@ -245,6 +256,9 @@ export function ProductPageClient({ id }: { id: string }) {
               <Spec label={t("product.specPlatform")} value={item.platform} />
               <Spec label={t("product.specRegion")} value={typeof metadata.region === "string" ? metadata.region : undefined} />
               <Spec label={t("product.specRank")} value={typeof metadata.rank === "string" ? metadata.rank : undefined} />
+              {schemaSpecs.map(({ field, value }) => (
+                <Spec key={field.key} label={field.label} value={formatSchemaFieldValue(field, value, t)} />
+              ))}
               {extraSpecs.map(([key, value]) => (
                 <Spec key={key} label={fieldLabel(key)} value={formatFieldValue(key, value)} />
               ))}
@@ -441,6 +455,18 @@ function Spec({ label, value }: { label: string; value?: string | null }) {
       <dd className="mt-1 font-black text-ink">{value || "-"}</dd>
     </div>
   );
+}
+
+function formatSchemaFieldValue(field: CatalogField, value: unknown, t: (key: string) => string): string {
+  switch (field.type) {
+    case "boolean":
+    case "checkbox":
+      return value === true ? t("common.yes") : t("common.no");
+    case "multiselect":
+      return Array.isArray(value) ? value.join(", ") : String(value);
+    default:
+      return String(value);
+  }
 }
 
 function productTypeLabel(t: (key: string) => string, productType?: string | null) {

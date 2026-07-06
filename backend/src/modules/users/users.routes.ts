@@ -20,6 +20,7 @@ import { createTelegramConnectToken, disconnectTelegram } from "./telegram-link.
 import { getNotificationPreferences, updateNotificationPreferences } from "../notifications/preferences.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
 import { confirmTwoFactor, disableTwoFactor, setupTwoFactor } from "../auth/twofa.service.js";
+import { deleteStoredFile } from "../storage/storage.routes.js";
 import { locales } from "../../i18n/config.js";
 import { getRequestLocale } from "../../i18n/t.js";
 
@@ -38,7 +39,12 @@ const updateMeSchema = z.object({
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
-  newPassword: z.string().min(8)
+  newPassword: z
+    .string()
+    .min(8)
+    .refine((value) => /[A-Z]/.test(value), "Password must contain an uppercase letter")
+    .refine((value) => /[0-9]/.test(value), "Password must contain a number")
+    .refine((value) => /[^A-Za-z0-9]/.test(value), "Password must contain a special character")
 });
 
 router.get(
@@ -74,11 +80,15 @@ router.patch(
       if (exists.rows[0]) throw badRequest("Email is already used");
     }
 
+    const avatarCleared = input.avatarUrl === "";
+    const previousAvatar = await pool.query(`select avatar_url as "avatarUrl" from users where id = $1`, [req.user.id]);
+    const previousAvatarUrl: string | null = previousAvatar.rows[0]?.avatarUrl ?? null;
+
     const result = await pool.query(
       `update users
        set display_name = coalesce($2, display_name),
            email = coalesce($3, email),
-           avatar_url = coalesce($4, avatar_url),
+           avatar_url = case when $8 then null else coalesce($4, avatar_url) end,
            push_enabled = coalesce($5, push_enabled),
            settings = coalesce($6, settings),
            email_verified_at = case when $7 then null else email_verified_at end,
@@ -93,10 +103,11 @@ router.patch(
         req.user.id,
         input.displayName,
         input.email?.toLowerCase(),
-        input.avatarUrl === "" ? null : input.avatarUrl,
+        avatarCleared ? null : input.avatarUrl,
         input.pushEnabled,
         input.settings,
-        emailChanged
+        emailChanged,
+        avatarCleared
       ]
     );
     const user = result.rows[0];
@@ -114,6 +125,9 @@ router.patch(
         params: { newEmail: user.email },
         emailOverride: req.user.email
       });
+    }
+    if (previousAvatarUrl && previousAvatarUrl !== user.avatarUrl) {
+      fireAndForget(deleteStoredFile(previousAvatarUrl), "avatar_cleanup_failed");
     }
     res.json({ user });
   })
@@ -396,7 +410,7 @@ router.get(
        group by u.id`,
       [id]
     );
-    if (!user.rows[0]) throw notFound("Seller not found");
+    if (!user.rows[0]) throw notFound("User not found");
 
     const products = await pool.query(
       `select p.id, p.title, p.description, p.price_cents as "priceCents", p.currency, p.stock,

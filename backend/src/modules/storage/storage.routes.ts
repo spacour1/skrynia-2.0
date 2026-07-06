@@ -1,12 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Router } from "express";
 import multer from "multer";
 import { nanoid } from "nanoid";
 import { env } from "../../config/env.js";
 import { asyncHandler, badRequest } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
+import { logger } from "../../common/logger.js";
 
 const router = Router();
 
@@ -95,6 +96,45 @@ async function saveS3(file: Express.Multer.File) {
     })
   );
   return `${env.S3_ENDPOINT}/${env.S3_BUCKET}/${filename}`;
+}
+
+/**
+ * Best-effort deletion of a previously uploaded file (e.g. a replaced avatar). Only
+ * touches URLs that point at our own local uploads dir or our own S3 bucket - anything
+ * else (external URL, default asset) is left alone.
+ */
+export async function deleteStoredFile(url: string): Promise<void> {
+  const localPrefix = `${env.PUBLIC_BACKEND_URL}/uploads/`;
+  if (url.startsWith(localPrefix)) {
+    const filename = url.slice(localPrefix.length);
+    if (!filename || filename.includes("/") || filename.includes("..")) return;
+    try {
+      await fs.unlink(path.join(env.LOCAL_UPLOAD_DIR, filename));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        logger.error({ error }, "Failed to delete local upload file");
+      }
+    }
+    return;
+  }
+
+  if (env.STORAGE_DRIVER === "s3" && env.S3_BUCKET && env.S3_ENDPOINT) {
+    const s3Prefix = `${env.S3_ENDPOINT}/${env.S3_BUCKET}/`;
+    if (!url.startsWith(s3Prefix)) return;
+    const key = url.slice(s3Prefix.length);
+    if (!key || !env.S3_ACCESS_KEY_ID || !env.S3_SECRET_ACCESS_KEY) return;
+    try {
+      const client = new S3Client({
+        endpoint: env.S3_ENDPOINT,
+        region: env.S3_REGION,
+        credentials: { accessKeyId: env.S3_ACCESS_KEY_ID, secretAccessKey: env.S3_SECRET_ACCESS_KEY },
+        forcePathStyle: true
+      });
+      await client.send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
+    } catch (error) {
+      logger.error({ error }, "Failed to delete S3 upload file");
+    }
+  }
 }
 
 router.post(

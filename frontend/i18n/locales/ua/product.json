@@ -42,6 +42,7 @@
     "chatSubtitle": "Уточніть деталі щодо цього лота.",
     "blockedChatNotice": "Ви заблокували користувача. Він не зможе писати вам у приватні повідомлення.",
     "openingChat": "Відкриваємо міні-чат...",
+    "openInMessages": "Відкрити в повідомленнях",
     "loginAndMessage": "Увійти і написати продавцю",
     "ownListingChatNotice": "Це ваш лот. Покупці зможуть написати вам зі сторінки товару.",
     "messageSeller": "Написати продавцю",
@@ -81,6 +82,12 @@
     "noListings": "Товарів ще немає.",
     "available": "Доступно",
     "inEscrow": "В escrow",
-    "releasedNet": "Виплачено чистими"
+    "releasedNet": "Виплачено чистими",
+    "messageUser": "Написати",
+    "openingChat": "Відкриваємо чат...",
+    "saveUser": "Зберегти профіль",
+    "saved": "Збережено",
+    "activeOffersCount": "{count} активних пропозицій",
+    "noActiveOffers": "Активних пропозицій немає."
   }
 }

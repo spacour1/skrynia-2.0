@@ -62,6 +62,11 @@ export function ProductCard({ product }: { product: Product }) {
         <div className="mt-4 flex flex-wrap gap-2 text-xs text-muted">
           <span className="rounded-full bg-panel px-2 py-1">{product.gameName ?? product.categoryName}</span>
           <span className="rounded-full bg-panel px-2 py-1">{product.productType ?? product.sectionName ?? "service"}</span>
+          {(product.cardMetadata ?? []).map((entry) => (
+            <span key={entry.key} className="rounded-full bg-panel px-2 py-1">
+              {entry.label}: {Array.isArray(entry.value) ? entry.value.join(", ") : String(entry.value)}
+            </span>
+          ))}
         </div>
         <div className="mt-5 flex items-end justify-between gap-3 border-t border-line pt-3">
           <Link href={`/sellers/${product.sellerId}`} className="relative z-20 inline-flex min-w-0 items-center gap-1.5 text-sm font-medium text-brand hover:underline" onClick={(event) => event.stopPropagation()}>

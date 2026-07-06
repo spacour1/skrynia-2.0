@@ -55,6 +55,18 @@ export default {
       title: "New message",
       body: "{sender}: {preview}"
     },
+    newMessageDirect: {
+      title: "New message",
+      body: "{sender} sent you a message: {preview}"
+    },
+    newMessageProduct: {
+      title: "Listing message",
+      body: "{sender} wrote about listing: {productTitle}"
+    },
+    newMessageOrder: {
+      title: "Order message",
+      body: "{sender} wrote about order #{orderId}"
+    },
     reconciliationMismatch: {
       title: "Balance reconciliation mismatch",
       body: "Ledger/wallet mismatch detected: {summary}. Check /admin/finance."
@@ -165,6 +177,9 @@ export default {
     connectedGreeting: "✅ Telegram is connected to your SKRYNIA account. You will now receive notifications here.",
     orderCreated: { title: "New order", body: "A buyer created an order for \"{productTitle}\"." },
     newMessage: { title: "New message", body: "{sender}: {preview}" },
+    newMessageDirect: { title: "New message", body: "{sender} sent you a message: {preview}" },
+    newMessageProduct: { title: "Listing message", body: "{sender} wrote about listing: {productTitle}" },
+    newMessageOrder: { title: "Order message", body: "{sender} wrote about order #{orderId}" },
     orderLabel: "Order",
     statusLabel: "Status",
     help: "SKRYNIA bot commands:\n/start [token] — link this chat to your account\n/settings — open notification settings\n/help — show this message",

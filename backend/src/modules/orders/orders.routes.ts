@@ -11,7 +11,7 @@ import { releaseEscrow } from "./ledger.service.js";
 import { recordOrderEvent } from "./order-events.service.js";
 import { notifyOrderEvent, broadcastConversation } from "../chat/ws.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
-import { createSystemMessage, postOrderSystemMessage } from "../chat/chat.service.js";
+import { createSystemMessage, getOrCreateOrderConversation, postOrderSystemMessage } from "../chat/chat.service.js";
 
 const router = Router();
 
@@ -63,18 +63,18 @@ router.post(
       );
       const createdOrder = orderResult.rows[0];
 
-      // Every order gets its own chat: reuse the buyer/seller/product conversation if one
-      // already exists (e.g. they chatted about the listing first, or bought it before),
-      // and attach this order to it if it isn't already tied to an earlier one.
-      const conversationResult = await client.query(
-        `insert into conversations(buyer_id, seller_id, product_id, order_id)
-         values ($1, $2, $3, $4)
-         on conflict (buyer_id, seller_id, product_id) where product_id is not null
-         do update set order_id = coalesce(conversations.order_id, excluded.order_id)
-         returning id`,
-        [req.user.id, product.seller_id, product.id, createdOrder.id]
+      // Every order gets its own chat context. The product chat remains the listing
+      // discussion history; order lifecycle/system messages stay in this order chat.
+      const conversation = await getOrCreateOrderConversation(
+        {
+          buyerId: req.user.id,
+          sellerId: product.seller_id,
+          productId: product.id,
+          orderId: createdOrder.id
+        },
+        client
       );
-      const newConversationId = conversationResult.rows[0].id as string;
+      const newConversationId = conversation.id;
 
       const message = await createSystemMessage(
         {
@@ -93,6 +93,7 @@ router.post(
       userId: order.seller_id,
       type: "order_created",
       templateKey: "notifications.orderCreated",
+      conversationId,
       orderId: order.id,
       productId: order.product_id
     });

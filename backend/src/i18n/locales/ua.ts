@@ -56,6 +56,18 @@ export default {
       title: "Нове повідомлення",
       body: "{sender}: {preview}"
     },
+    newMessageDirect: {
+      title: "Нове повідомлення",
+      body: "{sender} написав вам повідомлення: {preview}"
+    },
+    newMessageProduct: {
+      title: "Повідомлення по оголошенню",
+      body: "{sender} написав по оголошенню: {productTitle}"
+    },
+    newMessageOrder: {
+      title: "Повідомлення по замовленню",
+      body: "{sender} написав по замовленню #{orderId}"
+    },
     reconciliationMismatch: {
       title: "Розбіжність у звірці балансу",
       body: "Виявлено розбіжність у ledger/wallet: {summary}. Перевірте /admin/finance."
@@ -166,6 +178,9 @@ export default {
     connectedGreeting: "✅ Telegram підключено до вашого акаунта SKRYNIA. Тепер ви отримуватимете сповіщення тут.",
     orderCreated: { title: "Нове замовлення", body: "Покупець створив замовлення «{productTitle}»." },
     newMessage: { title: "Нове повідомлення", body: "{sender}: {preview}" },
+    newMessageDirect: { title: "Нове повідомлення", body: "{sender} написав вам повідомлення: {preview}" },
+    newMessageProduct: { title: "Повідомлення по оголошенню", body: "{sender} написав по оголошенню: {productTitle}" },
+    newMessageOrder: { title: "Повідомлення по замовленню", body: "{sender} написав по замовленню #{orderId}" },
     orderLabel: "Замовлення",
     statusLabel: "Статус",
     help: "Команди бота SKRYNIA:\n/start [token] — прив'язати цей чат до акаунта\n/settings — відкрити налаштування сповіщень\n/help — показати це повідомлення",

@@ -12,12 +12,10 @@ import {
   Mail,
   MailCheck,
   MailWarning,
-  Moon,
   Phone,
   Save,
   Send,
   ShieldCheck,
-  Sun,
   Trash2,
   Upload,
   UserRound,
@@ -28,7 +26,6 @@ import { useAuth } from "@/lib/auth-store";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useI18n } from "@/lib/i18n";
 import { localeLabels, locales } from "@/i18n/config";
-import { useTheme } from "@/lib/theme-store";
 
 type ProfileState = {
   displayName: string;
@@ -46,6 +43,10 @@ const emptyProfile: ProfileState = {
   pushEnabled: false
 };
 
+function isStrongPassword(value: string): boolean {
+  return value.length >= 8 && /[A-Z]/.test(value) && /[0-9]/.test(value) && /[^A-Za-z0-9]/.test(value);
+}
+
 export default function SettingsPage() {
   return (
     <RequireAuth>
@@ -59,7 +60,6 @@ function SettingsContent() {
   const setUser = useAuth((state) => state.setUser);
   const queryClient = useQueryClient();
   const { locale, switchLocale, t } = useI18n();
-  const { theme, setThemeAndReload } = useTheme();
   const [profile, setProfile] = useState<ProfileState>(emptyProfile);
   const [profileMessage, setProfileMessage] = useState("");
   const [passwordMessage, setPasswordMessage] = useState("");
@@ -254,6 +254,10 @@ function SettingsContent() {
       setPasswordMessage(t("settings.password.mismatch"));
       return;
     }
+    if (!isStrongPassword(newPassword)) {
+      setPasswordMessage(t("settings.password.weak"));
+      return;
+    }
     changePassword.mutate({
       currentPassword: form.get("currentPassword"),
       newPassword
@@ -380,28 +384,6 @@ function SettingsContent() {
                   <span className={`text-xs font-black ${option === locale ? "text-brand" : "text-muted"}`}>{option.toUpperCase()}</span>
                 </button>
               ))}
-            </div>
-          </section>
-
-          <section className="app-card overflow-hidden">
-            <SectionHeader icon={Sun} title={t("settings.theme.title")} text={t("settings.theme.text")} />
-            <div className="grid gap-3 p-5 sm:grid-cols-2">
-              <button
-                className={`rounded-lg border p-4 text-left transition hover:border-brand/70 ${theme === "light" ? "border-brand/70 bg-brand/10" : "border-line bg-panel/35"}`}
-                type="button"
-                onClick={() => setThemeAndReload("light")}
-              >
-                <Sun className="h-5 w-5 text-brand" />
-                <span className="mt-3 block font-black text-ink">{t("settings.theme.light")}</span>
-              </button>
-              <button
-                className={`rounded-lg border p-4 text-left transition hover:border-brand/70 ${theme === "dark" ? "border-brand/70 bg-brand/10" : "border-line bg-panel/35"}`}
-                type="button"
-                onClick={() => setThemeAndReload("dark")}
-              >
-                <Moon className="h-5 w-5 text-brand" />
-                <span className="mt-3 block font-black text-ink">{t("settings.theme.dark")}</span>
-              </button>
             </div>
           </section>
 

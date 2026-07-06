@@ -15,7 +15,6 @@ import {
   KeyRound,
   Rocket,
   Search,
-  Sparkles,
   Tag,
   UserRound,
   Wrench
@@ -23,33 +22,41 @@ import {
 import { RequireAuth } from "@/components/RequireAuth";
 import { GameIcon } from "@/components/GameIcon";
 import { EmailNotVerifiedNotice } from "@/components/EmailNotVerifiedNotice";
-import { apiFetch, isEmailNotVerifiedError, money, type Game, type GameSection } from "@/lib/api";
+import { apiFetch, isEmailNotVerifiedError, money } from "@/lib/api";
 import { captureEvent } from "@/lib/posthog";
 import { useAuth } from "@/lib/auth-store";
-import { BOOLEAN_FIELD_KEYS, fieldLabel } from "@/lib/product-fields";
+import { catalogApi, type CatalogField, type PublicCatalogItem } from "@/lib/catalog-api";
 
-const catalogKinds = [
-  { id: "games", title: "Игры", hint: "PC и консольные проекты" },
-  { id: "mobile", title: "Мобильные игры", hint: "Мобильные проекты" },
-  { id: "services", title: "Сервисы", hint: "Пополнения и услуги" },
-  { id: "software", title: "Программы", hint: "Ключи и лицензии" }
-];
-
-function iconForSection(section: GameSection) {
-  const key = `${section.slug} ${section.name}`.toLowerCase();
-  if (/key|ключ/.test(key)) return KeyRound;
-  if (/top.?up|пополнен/.test(key)) return CreditCard;
-  if (/boost|буст/.test(key)) return Rocket;
-  if (/account|аккаунт/.test(key)) return UserRound;
-  if (/currency|gold|points|валют/.test(key)) return Coins;
-  if (/item|skin|предмет|скин/.test(key)) return Tag;
-  if (/plus/.test(key)) return Sparkles;
-  return Wrench;
+// listingType is a small backend-controlled enum (not a client-side guess over free text),
+// so mapping it to an icon here is fine - unlike the old regex-over-name/slug classifier.
+function iconForListingType(listingType: string) {
+  switch (listingType) {
+    case "key":
+      return KeyRound;
+    case "topup":
+      return CreditCard;
+    case "boosting":
+      return Rocket;
+    case "account":
+      return UserRound;
+    case "currency":
+      return Coins;
+    case "item":
+      return Tag;
+    default:
+      return Wrench;
+  }
 }
 
-function schemaFieldsOf(section?: GameSection): string[] {
-  const fields = (section?.schema as { fields?: unknown } | undefined)?.fields;
-  return Array.isArray(fields) ? fields.filter((field): field is string => typeof field === "string") : [];
+function emptyValueFor(field: CatalogField): unknown {
+  if (field.type === "multiselect") return [];
+  if (field.type === "boolean" || field.type === "checkbox") return false;
+  return "";
+}
+
+function isEmptyValue(value: unknown) {
+  if (Array.isArray(value)) return value.length === 0;
+  return value === undefined || value === null || value === "";
 }
 
 export default function SellerCreatePage() {
@@ -63,60 +70,75 @@ export default function SellerCreatePage() {
 function SellerCreateContent() {
   const router = useRouter();
   const user = useAuth((state) => state.user);
-  const [kind, setKind] = useState("games");
+  const [groupId, setGroupId] = useState("");
   const [catalogOpen, setCatalogOpen] = useState(false);
-  const [gameId, setGameId] = useState("");
-  const [gameOpen, setGameOpen] = useState(true);
-  const [gameSearch, setGameSearch] = useState("");
+  const [itemId, setItemId] = useState("");
+  const [itemOpen, setItemOpen] = useState(true);
+  const [itemSearch, setItemSearch] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [params, setParams] = useState<Record<string, string>>({});
+  const [params, setParams] = useState<Record<string, unknown>>({});
   const [autoDelivery, setAutoDelivery] = useState(true);
   const [price, setPrice] = useState("");
   const [error, setError] = useState("");
   const [emailBlocked, setEmailBlocked] = useState(false);
 
-  const games = useQuery({
-    queryKey: ["games"],
-    queryFn: () => apiFetch<{ games: Game[] }>("/marketplace/games")
+  const catalog = useQuery({
+    queryKey: ["public-catalog-tree"],
+    queryFn: () => catalogApi.publicTree()
   });
+  const groups = catalog.data?.groups ?? [];
 
-  const selectedGame = games.data?.games.find((game) => game.id === gameId);
-  const gameDetail = useQuery({
-    queryKey: ["game", selectedGame?.slug],
-    queryFn: () => apiFetch<{ game: Game; sections: GameSection[] }>(`/marketplace/games/${selectedGame?.slug}`),
-    enabled: Boolean(selectedGame?.slug)
+  useEffect(() => {
+    if (!groupId && groups.length) setGroupId(groups[0].id);
+  }, [groupId, groups]);
+
+  const selectedGroup = groups.find((group) => group.id === groupId);
+  const selectedItem = selectedGroup?.items.find((item) => item.id === itemId);
+  const selectedSection = selectedItem?.sections.find((section) => section.id === sectionId);
+
+  const visibleItems = useMemo(() => {
+    const term = itemSearch.trim().toLowerCase();
+    const list = selectedGroup?.items ?? [];
+    return term ? list.filter((item) => item.name.toLowerCase().includes(term) || item.slug.includes(term)) : list;
+  }, [itemSearch, selectedGroup]);
+
+  const schemaQuery = useQuery({
+    queryKey: ["section-schema", sectionId],
+    queryFn: () => catalogApi.sectionSchema(sectionId),
+    enabled: Boolean(sectionId)
   });
+  const schemaFields = schemaQuery.data?.schema.fields ?? [];
 
-  const visibleGames = useMemo(() => {
-    const term = gameSearch.trim().toLowerCase();
-    const list = games.data?.games ?? [];
-    const byKind = kind === "mobile"
-      ? list.filter((game) => /mobile|genshin|roblox|brawl|pubg/i.test(`${game.name} ${game.slug}`))
-      : kind === "services"
-        ? list.filter((game) => /steam|discord|telegram|service|playstation|xbox|nintendo|battle|riot|epic|spotify|netflix|youtube|apple|google|amazon/i.test(`${game.name} ${game.slug}`))
-        : kind === "software"
-          ? list.filter((game) => /windows|office|adobe|software|key/i.test(`${game.name} ${game.slug}`))
-          : list;
-    return term ? byKind.filter((game) => game.name.toLowerCase().includes(term) || game.slug.includes(term)) : byKind;
-  }, [gameSearch, games.data?.games, kind]);
+  // The section decides which delivery types a lot in it may use (see
+  // resolveActiveSectionChain + assertDeliveryTypeAllowed server-side) - manual/instant
+  // toggle must follow that, not be a free client-side choice.
+  const allowedDeliveryTypes = selectedSection?.allowedDeliveryTypes ?? ["manual", "instant"];
+  const allowsManual = allowedDeliveryTypes.includes("manual");
+  const allowsInstant = allowedDeliveryTypes.includes("instant");
+  const deliveryChoiceLocked = !(allowsManual && allowsInstant);
 
-  const selectedSection = gameDetail.data?.sections.find((section) => section.id === sectionId);
-  const schemaFields = useMemo(() => schemaFieldsOf(selectedSection), [selectedSection]);
+  useEffect(() => {
+    if (!selectedSection) return;
+    if (allowsInstant && !allowsManual) setAutoDelivery(true);
+    else if (allowsManual && !allowsInstant) setAutoDelivery(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSection?.id]);
+
   const priceNumber = Number(price || 0);
   const fee = Math.round(priceNumber * 0.025);
 
   useEffect(() => {
     setParams((current) => {
-      const next: Record<string, string> = {};
-      schemaFields.forEach((key) => {
-        next[key] = current[key] ?? (key === "platform" && selectedGame ? selectedGame.name : "");
+      const next: Record<string, unknown> = {};
+      schemaFields.forEach((field) => {
+        next[field.key] = field.key in current ? current[field.key] : emptyValueFor(field);
       });
       return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectionId]);
+  }, [sectionId, schemaQuery.data]);
 
   const create = useMutation({
     mutationFn: async ({ draft }: { draft: boolean }) => {
@@ -125,17 +147,16 @@ function SellerCreateContent() {
         body: JSON.stringify({
           title: title.trim(),
           description: description.trim(),
-          gameId,
           sectionId,
           price: price.trim(),
           currency: "UAH",
           stock: 1,
           deliveryType: autoDelivery ? "instant" : "manual",
-          // The server is authoritative on productType (derived from the section record);
-          // sending it here is just so the request body stays self-describing.
-          productType: selectedSection?.productType ?? "service",
           deliveryTemplate: autoDelivery ? "Автовыдача после оплаты. Данные будут отправлены в чат заказа." : null,
-          metadata: { catalogKind: kind, ...params }
+          // sectionId alone drives category/game/section/productType server-side (see
+          // resolveCategorization) - the section's own schema decides which metadata keys
+          // are valid, so there's nothing else client-side to send here.
+          metadata: params
         })
       });
       if (draft) {
@@ -150,8 +171,7 @@ function SellerCreateContent() {
       if (!draft) {
         captureEvent("seller_listing_created", {
           product_id: id,
-          game_id: gameId,
-          section_id: sectionId,
+          section_id: sectionId
         });
       }
       router.push(draft ? "/seller/products" : `/products/${id}`);
@@ -167,18 +187,22 @@ function SellerCreateContent() {
     }
   });
 
-  function chooseGame(game: Game) {
-    setGameId(game.id);
+  function chooseItem(item: PublicCatalogItem) {
+    setItemId(item.id);
     setSectionId("");
-    setGameOpen(false);
+    setItemOpen(false);
   }
 
   function validate(): string | null {
-    if (!gameId) return "Выберите раздел.";
+    if (!groupId) return "Выберите группу каталога.";
+    if (!itemId) return "Выберите раздел.";
     if (!sectionId) return "Выберите тип предложения.";
     if (!title.trim()) return "Укажите название лота.";
     if (!description.trim()) return "Добавьте краткое описание.";
     if (!priceNumber || priceNumber < 1) return "Введите цену.";
+    for (const field of schemaFields) {
+      if (field.required && isEmptyValue(params[field.key])) return `Заполните поле «${field.label}».`;
+    }
     return null;
   }
 
@@ -205,9 +229,9 @@ function SellerCreateContent() {
             <div>
               <h1 className="text-3xl font-black text-ink">Создать лот</h1>
               <nav className="mt-3 flex flex-wrap items-center gap-2 text-sm font-bold text-muted">
-                <span className="text-ink">{catalogKinds.find((item) => item.id === kind)?.title}</span>
+                <span className="text-ink">{selectedGroup?.name ?? "Группа"}</span>
                 <ChevronRight className="h-4 w-4" />
-                <span className={selectedGame ? "text-ink" : undefined}>{selectedGame?.name ?? "Раздел"}</span>
+                <span className={selectedItem ? "text-ink" : undefined}>{selectedItem?.name ?? "Раздел"}</span>
                 <ChevronRight className="h-4 w-4" />
                 <span className={selectedSection ? "text-brand" : undefined}>{selectedSection?.name ?? "Тип предложения"}</span>
               </nav>
@@ -230,7 +254,7 @@ function SellerCreateContent() {
               >
                 <span className="flex items-center gap-3">
                   <Grid2X2 className="h-5 w-5 text-brand" />
-                  {catalogKinds.find((item) => item.id === kind)?.title}
+                  {selectedGroup?.name ?? "Выберите группу"}
                 </span>
                 <ChevronDown className="h-4 w-4 text-muted" />
               </button>
@@ -238,26 +262,27 @@ function SellerCreateContent() {
               {catalogOpen ? (
                 <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-40 overflow-hidden rounded-lg border border-line bg-card shadow-lift">
                   <div className="p-2">
-                    {catalogKinds.map((item) => (
+                    {groups.map((group) => (
                       <button
-                        key={item.id}
+                        key={group.id}
                         type="button"
                         className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left transition hover:bg-panel"
                         onClick={() => {
-                          setKind(item.id);
-                          setGameId("");
+                          setGroupId(group.id);
+                          setItemId("");
                           setSectionId("");
                           setCatalogOpen(false);
-                          setGameOpen(true);
+                          setItemOpen(true);
                         }}
                       >
                         <span>
-                          <span className="block font-bold text-ink">{item.title}</span>
-                          <span className="block text-xs text-muted">{item.hint}</span>
+                          <span className="block font-bold text-ink">{group.name}</span>
+                          {group.description ? <span className="block text-xs text-muted">{group.description}</span> : null}
                         </span>
-                        {item.id === kind ? <Check className="h-4 w-4 text-brand" /> : null}
+                        {group.id === groupId ? <Check className="h-4 w-4 text-brand" /> : null}
                       </button>
                     ))}
+                    {!groups.length ? <p className="p-3 text-sm text-muted">Каталог ещё не настроен.</p> : null}
                   </div>
                 </div>
               ) : null}
@@ -268,32 +293,32 @@ function SellerCreateContent() {
               <button
                 className="mt-2 flex h-12 w-full items-center justify-between rounded-lg border border-line bg-card px-4 text-left font-bold text-ink shadow-soft transition hover:border-brand/60"
                 type="button"
-                onClick={() => setGameOpen((value) => !value)}
+                onClick={() => setItemOpen((value) => !value)}
               >
                 <span className="flex items-center gap-3">
-                  {selectedGame ? <GameIcon name={selectedGame.name} slug={selectedGame.slug} className="h-7 w-7 rounded-md" /> : <Gamepad2 className="h-5 w-5 text-muted" />}
-                  {selectedGame?.name ?? "Выберите игру или сервис"}
+                  {selectedItem ? <GameIcon name={selectedItem.name} slug={selectedItem.slug} className="h-7 w-7 rounded-md" /> : <Gamepad2 className="h-5 w-5 text-muted" />}
+                  {selectedItem?.name ?? "Выберите игру или сервис"}
                 </span>
                 <ChevronDown className="h-4 w-4 text-muted" />
               </button>
 
-              {gameOpen ? (
+              {itemOpen ? (
                 <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-40 overflow-hidden rounded-lg border border-line bg-card shadow-lift">
                   <div className="relative border-b border-line p-3">
                     <Search className="pointer-events-none absolute left-6 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-                    <input className="app-input h-10 w-full pl-10" value={gameSearch} onChange={(event) => setGameSearch(event.target.value)} placeholder="Поиск раздела..." />
+                    <input className="app-input h-10 w-full pl-10" value={itemSearch} onChange={(event) => setItemSearch(event.target.value)} placeholder="Поиск раздела..." />
                   </div>
                   <div className="max-h-[260px] overflow-y-auto p-2">
-                    {visibleGames.map((game) => (
-                      <button key={game.id} type="button" className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left transition hover:bg-panel" onClick={() => chooseGame(game)}>
+                    {visibleItems.map((item) => (
+                      <button key={item.id} type="button" className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left transition hover:bg-panel" onClick={() => chooseItem(item)}>
                         <span className="flex items-center gap-3">
-                          <GameIcon name={game.name} slug={game.slug} className="h-8 w-8 rounded-md" />
-                          <span className="font-bold text-ink">{game.name}</span>
+                          <GameIcon name={item.name} slug={item.slug} className="h-8 w-8 rounded-md" />
+                          <span className="font-bold text-ink">{item.name}</span>
                         </span>
-                        {game.id === gameId ? <Check className="h-4 w-4 text-brand" /> : null}
+                        {item.id === itemId ? <Check className="h-4 w-4 text-brand" /> : null}
                       </button>
                     ))}
-                    {!visibleGames.length ? <p className="p-3 text-sm text-muted">Ничего не найдено.</p> : null}
+                    {!visibleItems.length ? <p className="p-3 text-sm text-muted">Ничего не найдено.</p> : null}
                   </div>
                 </div>
               ) : null}
@@ -302,12 +327,12 @@ function SellerCreateContent() {
 
           <section className="space-y-3">
             <Label>Тип предложения</Label>
-            {!selectedGame ? (
+            {!selectedItem ? (
               <p className="rounded-lg border border-line bg-panel/25 px-4 py-3 text-sm text-muted">Сначала выберите раздел (игру или сервис).</p>
             ) : (
               <div className="grid gap-2 sm:grid-cols-3">
-                {(gameDetail.data?.sections ?? []).map((section) => {
-                  const Icon = iconForSection(section);
+                {(selectedItem.sections ?? []).map((section) => {
+                  const Icon = iconForListingType(section.listingType);
                   return (
                     <button
                       key={section.id}
@@ -320,7 +345,7 @@ function SellerCreateContent() {
                     </button>
                   );
                 })}
-                {gameDetail.isLoading ? <p className="text-sm text-muted">Загружаем варианты...</p> : null}
+                {!selectedItem.sections?.length ? <p className="text-sm text-muted">В этом разделе пока нет доступных типов предложений.</p> : null}
               </div>
             )}
             {selectedSection?.categoryRiskLevel === "high" ? (
@@ -348,24 +373,34 @@ function SellerCreateContent() {
             <Label>Параметры</Label>
             {!selectedSection ? (
               <p className="rounded-lg border border-line bg-panel/25 px-4 py-3 text-sm text-muted">Сначала выберите тип предложения, чтобы увидеть параметры.</p>
+            ) : schemaQuery.isLoading ? (
+              <p className="text-sm text-muted">Загружаем параметры...</p>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
-                {schemaFields.map((fieldKey) => (
-                  <ParamField
-                    key={fieldKey}
-                    fieldKey={fieldKey}
-                    value={params[fieldKey] ?? ""}
-                    onChange={(value) => setParams((current) => ({ ...current, [fieldKey]: value }))}
-                  />
+                {schemaFields.map((field) => (
+                  <ParamField key={field.key} field={field} value={params[field.key]} onChange={(value) => setParams((current) => ({ ...current, [field.key]: value }))} />
                 ))}
+                {!schemaFields.length ? <p className="text-sm text-muted sm:col-span-2">У этого типа предложения нет дополнительных параметров.</p> : null}
               </div>
             )}
             <label className="flex items-center justify-between rounded-lg border border-line bg-panel/25 px-4 py-3">
               <span>
                 <span className="block text-sm font-black text-ink">Автовыдача после покупки</span>
-                <span className="mt-1 block text-xs text-muted">Покупатель получит данные сразу после оплаты</span>
+                <span className="mt-1 block text-xs text-muted">
+                  {deliveryChoiceLocked
+                    ? allowsInstant
+                      ? "Этот тип предложения поддерживает только автовыдачу."
+                      : "Этот тип предложения поддерживает только ручную выдачу."
+                    : "Покупатель получит данные сразу после оплаты"}
+                </span>
               </span>
-              <input className="h-5 w-5 accent-[rgb(var(--color-brand))]" type="checkbox" checked={autoDelivery} onChange={(event) => setAutoDelivery(event.target.checked)} />
+              <input
+                className="h-5 w-5 accent-[rgb(var(--color-brand))]"
+                type="checkbox"
+                checked={autoDelivery}
+                disabled={deliveryChoiceLocked}
+                onChange={(event) => setAutoDelivery(event.target.checked)}
+              />
             </label>
           </section>
 
@@ -403,10 +438,10 @@ function SellerCreateContent() {
           <div className="p-5">
             <div className="rounded-lg border border-line bg-panel/25 p-4">
               <div className="flex items-center gap-3">
-                {selectedGame ? <GameIcon name={selectedGame.name} slug={selectedGame.slug} className="h-12 w-12 rounded-lg" /> : <span className="grid h-12 w-12 place-items-center rounded-lg bg-brand/10 text-brand"><Gamepad2 className="h-6 w-6" /></span>}
+                {selectedItem ? <GameIcon name={selectedItem.name} slug={selectedItem.slug} className="h-12 w-12 rounded-lg" /> : <span className="grid h-12 w-12 place-items-center rounded-lg bg-brand/10 text-brand"><Gamepad2 className="h-6 w-6" /></span>}
                 <div>
-                  <p className="font-black text-ink">{selectedGame?.name ?? "Раздел не выбран"}</p>
-                  <span className="mt-1 inline-flex rounded bg-brand/10 px-2 py-0.5 text-xs font-black text-brand">{catalogKinds.find((item) => item.id === kind)?.title}</span>
+                  <p className="font-black text-ink">{selectedItem?.name ?? "Раздел не выбран"}</p>
+                  <span className="mt-1 inline-flex rounded bg-brand/10 px-2 py-0.5 text-xs font-black text-brand">{selectedGroup?.name ?? "Группа"}</span>
                 </div>
               </div>
               <div className="mt-5 space-y-3 text-sm">
@@ -425,24 +460,79 @@ function SellerCreateContent() {
   );
 }
 
-function ParamField({ fieldKey, value, onChange }: { fieldKey: string; value: string; onChange: (value: string) => void }) {
-  const label = fieldLabel(fieldKey);
-  if (BOOLEAN_FIELD_KEYS.has(fieldKey)) {
+function ParamField({ field, value, onChange }: { field: CatalogField; value: unknown; onChange: (value: unknown) => void }) {
+  if (field.type === "select") {
     return (
       <label className="block space-y-2">
-        <span className="block text-xs font-bold text-muted">{label}</span>
-        <select className="app-input h-11 w-full" value={value} onChange={(event) => onChange(event.target.value)}>
+        <span className="block text-xs font-bold text-muted">{field.label}{field.required ? " *" : ""}</span>
+        <select className="app-input h-11 w-full" value={(value as string) ?? ""} onChange={(event) => onChange(event.target.value)}>
           <option value="">Выберите</option>
-          <option value="yes">Да</option>
-          <option value="no">Нет</option>
+          {(field.options ?? []).map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
         </select>
+        {field.helpText ? <span className="block text-xs text-muted">{field.helpText}</span> : null}
       </label>
     );
   }
+
+  if (field.type === "multiselect") {
+    const selected = Array.isArray(value) ? (value as string[]) : [];
+    return (
+      <div className="space-y-2 sm:col-span-2">
+        <span className="block text-xs font-bold text-muted">{field.label}{field.required ? " *" : ""}</span>
+        <div className="flex flex-wrap gap-2">
+          {(field.options ?? []).map((option) => {
+            const active = selected.includes(option);
+            return (
+              <button
+                key={option}
+                type="button"
+                className={`rounded-full border px-3 py-1.5 text-xs font-bold transition ${active ? "border-brand bg-brand/10 text-brand" : "border-line text-muted hover:border-brand/50"}`}
+                onClick={() => onChange(active ? selected.filter((item) => item !== option) : [...selected, option])}
+              >
+                {option}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  if (field.type === "boolean" || field.type === "checkbox") {
+    return (
+      <label className="flex items-center justify-between rounded-lg border border-line bg-panel/25 px-4 py-3">
+        <span className="text-sm font-bold text-ink">{field.label}{field.required ? " *" : ""}</span>
+        <input className="h-5 w-5 accent-[rgb(var(--color-brand))]" type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} />
+      </label>
+    );
+  }
+
+  if (field.type === "textarea") {
+    return (
+      <label className="block space-y-2 sm:col-span-2">
+        <span className="block text-xs font-bold text-muted">{field.label}{field.required ? " *" : ""}</span>
+        <textarea className="app-input min-h-20 w-full" value={(value as string) ?? ""} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value)} />
+      </label>
+    );
+  }
+
   return (
     <label className="block space-y-2">
-      <span className="block text-xs font-bold text-muted">{label}</span>
-      <input className="app-input h-11 w-full" value={value} onChange={(event) => onChange(event.target.value)} placeholder={`Введите: ${label.toLowerCase()}`} />
+      <span className="block text-xs font-bold text-muted">{field.label}{field.required ? " *" : ""}</span>
+      <input
+        className="app-input h-11 w-full"
+        type={field.type === "number" ? "number" : "text"}
+        min={field.type === "number" ? field.min : undefined}
+        max={field.type === "number" ? field.max : undefined}
+        value={(value as string | number) ?? ""}
+        placeholder={field.placeholder ?? `Введите: ${field.label.toLowerCase()}`}
+        onChange={(event) => onChange(field.type === "number" ? (event.target.value === "" ? "" : Number(event.target.value)) : event.target.value)}
+      />
+      {field.helpText ? <span className="block text-xs text-muted">{field.helpText}</span> : null}
     </label>
   );
 }

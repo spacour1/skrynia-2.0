@@ -34,7 +34,9 @@
     "noNotifications": "Уведомлений пока нет. Заказы, оплаты, доставка и споры будут появляться здесь.",
     "language": "Язык",
     "comingSoon": "Скоро",
-    "home": "Главная"
+    "home": "Главная",
+    "collapseSidebar": "Свернуть меню",
+    "expandSidebar": "Развернуть меню"
   },
   "catalogMenu": {
     "games": "Игры",

@@ -4,7 +4,7 @@ import { pool } from "../../db/pool.js";
 import { defaultLocale } from "../../i18n/config.js";
 import { t, type TranslateParams } from "../../i18n/t.js";
 import { createNotification } from "../notifications/notifications.service.js";
-import { broadcastConversation } from "./ws.service.js";
+import { broadcastConversation, isUserOnline } from "./ws.service.js";
 
 export type ConversationParties = { buyerId: string; sellerId: string };
 
@@ -20,6 +20,37 @@ export type Message = {
   kind?: "user" | "system";
   systemType?: string | null;
   metadata?: Record<string, unknown>;
+};
+
+export type ConversationContextType = "direct" | "product" | "order";
+
+export type GroupedConversationContext = {
+  conversationId: string;
+  type: ConversationContextType;
+  label: string;
+  productId: string | null;
+  productTitle: string | null;
+  orderId: string | null;
+  orderStatus: string | null;
+  amountCents: number | null;
+  currency: string | null;
+  unreadCount: number;
+  lastMessageAt: string | null;
+  lastMessageBody: string | null;
+  blocked: boolean;
+  canSendMessage: boolean;
+  createdAt: string;
+};
+
+export type GroupedConversation = {
+  peerUserId: string;
+  peerDisplayName: string;
+  peerAvatarUrl: string | null;
+  isOnline: boolean;
+  totalUnreadCount: number;
+  lastMessageAt: string | null;
+  lastMessageBody: string | null;
+  contexts: GroupedConversationContext[];
 };
 
 const SYSTEM_SENDER_DISPLAY_NAME = "Система";
@@ -86,21 +117,26 @@ export async function assertCanSendMessage(conversationId: string, userId: strin
 
 async function findConversation(input: { buyerId: string; sellerId: string; productId: string | null }) {
   const lookupSql = input.productId
-    ? `select id from conversations where buyer_id = $1 and seller_id = $2 and product_id = $3`
-    : `select id from conversations where buyer_id = $1 and seller_id = $2 and product_id is null`;
+    ? `select id from conversations where buyer_id = $1 and seller_id = $2 and product_id = $3 and order_id is null`
+    : `select id from conversations
+       where product_id is null and order_id is null
+         and ((buyer_id = $1 and seller_id = $2) or (buyer_id = $2 and seller_id = $1))`;
   const lookupValues = input.productId ? [input.buyerId, input.sellerId, input.productId] : [input.buyerId, input.sellerId];
   return { lookupSql, lookupValues };
 }
 
-async function getOrCreateConversation(input: { buyerId: string; sellerId: string; productId: string | null }) {
+async function getOrCreateConversation(
+  input: { buyerId: string; sellerId: string; productId: string | null },
+  client: DbClient = pool
+) {
   if (input.buyerId === input.sellerId) throw badRequest("You cannot message yourself");
   if (await isBlockedPair(input.buyerId, input.sellerId)) throw messagingBlocked();
 
   const { lookupSql, lookupValues } = await findConversation(input);
-  const existing = await pool.query(lookupSql, lookupValues);
+  const existing = await client.query(lookupSql, lookupValues);
   if (existing.rows[0]) return { id: existing.rows[0].id as string, existing: true };
 
-  const created = await pool.query(
+  const created = await client.query(
     `insert into conversations(buyer_id, seller_id, product_id)
      values ($1, $2, $3)
      on conflict do nothing
@@ -109,16 +145,76 @@ async function getOrCreateConversation(input: { buyerId: string; sellerId: strin
   );
   if (created.rows[0]) return { id: created.rows[0].id as string, existing: false };
 
-  const reread = await pool.query(lookupSql, lookupValues);
+  const reread = await client.query(lookupSql, lookupValues);
   return { id: reread.rows[0].id as string, existing: true };
 }
 
-export function getOrCreateProductConversation(input: { buyerId: string; sellerId: string; productId: string }) {
-  return getOrCreateConversation({ buyerId: input.buyerId, sellerId: input.sellerId, productId: input.productId });
+export function getOrCreateProductConversation(
+  input: { buyerId: string; sellerId: string; productId: string },
+  client: DbClient = pool
+) {
+  return getOrCreateConversation({ buyerId: input.buyerId, sellerId: input.sellerId, productId: input.productId }, client);
 }
 
-export function getOrCreateDirectConversation(input: { buyerId: string; sellerId: string }) {
-  return getOrCreateConversation({ buyerId: input.buyerId, sellerId: input.sellerId, productId: null });
+export async function getExistingProductConversation(input: { buyerId: string; sellerId: string; productId: string }) {
+  const result = await pool.query<{ id: string }>(
+    `select id
+     from conversations
+     where buyer_id = $1
+       and seller_id = $2
+       and product_id = $3
+       and order_id is null`,
+    [input.buyerId, input.sellerId, input.productId]
+  );
+  return result.rows[0]?.id ?? null;
+}
+
+export function getOrCreateDirectConversation(input: { buyerId: string; sellerId: string }, client: DbClient = pool) {
+  return getOrCreateConversation({ buyerId: input.buyerId, sellerId: input.sellerId, productId: null }, client);
+}
+
+export async function getOrCreateOrderConversation(
+  input: { buyerId: string; sellerId: string; productId: string; orderId: string },
+  client: DbClient = pool
+) {
+  if (input.buyerId === input.sellerId) throw badRequest("You cannot message yourself");
+
+  const existing = await client.query(`select id from conversations where order_id = $1`, [input.orderId]);
+  if (existing.rows[0]) return { id: existing.rows[0].id as string, existing: true };
+
+  const created = await client.query(
+    `insert into conversations(buyer_id, seller_id, product_id, order_id)
+     values ($1, $2, $3, $4)
+     on conflict do nothing
+     returning id`,
+    [input.buyerId, input.sellerId, input.productId, input.orderId]
+  );
+  if (created.rows[0]) return { id: created.rows[0].id as string, existing: false };
+
+  const reread = await client.query(`select id from conversations where order_id = $1`, [input.orderId]);
+  return { id: reread.rows[0].id as string, existing: true };
+}
+
+async function getConversationNotificationContext(conversationId: string) {
+  const result = await pool.query(
+    `select c.product_id as "productId", c.order_id as "orderId",
+            p.title as "productTitle", o.status as "orderStatus"
+     from conversations c
+     left join products p on p.id = c.product_id
+     left join orders o on o.id = c.order_id
+     where c.id = $1`,
+    [conversationId]
+  );
+  const row = result.rows[0];
+  if (!row) throw notFound("Conversation not found");
+  const type: ConversationContextType = row.orderId ? "order" : row.productId ? "product" : "direct";
+  return {
+    type,
+    productId: (row.productId as string | null) ?? null,
+    productTitle: (row.productTitle as string | null) ?? null,
+    orderId: (row.orderId as string | null) ?? null,
+    orderStatus: (row.orderStatus as string | null) ?? null
+  };
 }
 
 export async function sendMessage(input: {
@@ -143,12 +239,26 @@ export async function sendMessage(input: {
   const message = result.rows[0] as Message;
 
   const recipientId = parties.buyerId === input.senderId ? parties.sellerId : parties.buyerId;
+  const context = await getConversationNotificationContext(input.conversationId);
+  const templateKey =
+    context.type === "order"
+      ? "notifications.newMessageOrder"
+      : context.type === "product"
+        ? "notifications.newMessageProduct"
+        : "notifications.newMessageDirect";
   await createNotification({
     userId: recipientId,
     type: "message",
-    templateKey: "notifications.newMessage",
-    params: { sender: message.senderDisplayName, preview: body.slice(0, 120) },
-    conversationId: input.conversationId
+    templateKey,
+    params: {
+      sender: message.senderDisplayName,
+      preview: body.slice(0, 120),
+      productTitle: context.productTitle ?? "",
+      orderId: context.orderId ? context.orderId.slice(0, 8) : ""
+    },
+    conversationId: input.conversationId,
+    productId: context.productId ?? undefined,
+    orderId: context.orderId ?? undefined
   });
 
   return message;
@@ -296,4 +406,89 @@ export async function getUserConversations(userId: string, role: string) {
     [role, userId]
   );
   return result.rows.map((row) => ({ ...row, canSendMessage: !row.blocked }));
+}
+
+function rowContextType(row: { orderId?: string | null; productId?: string | null }): ConversationContextType {
+  if (row.orderId) return "order";
+  if (row.productId) return "product";
+  return "direct";
+}
+
+function rowContextLabel(type: ConversationContextType, row: { productTitle?: string | null; orderId?: string | null }) {
+  if (type === "direct") return "Direct chat";
+  if (type === "order") return `Order #${row.orderId?.slice(0, 8) ?? ""}`;
+  return row.productTitle ?? "Product chat";
+}
+
+function newestTimestamp(left?: string | null, right?: string | null) {
+  if (!left) return right ?? null;
+  if (!right) return left;
+  return new Date(left).getTime() >= new Date(right).getTime() ? left : right;
+}
+
+export async function getGroupedUserConversations(userId: string, role: string): Promise<GroupedConversation[]> {
+  const rows = await getUserConversations(userId, role);
+  const groups = new Map<string, GroupedConversation>();
+
+  for (const row of rows) {
+    const isBuyer = row.buyerId === userId;
+    const peerUserId = isBuyer ? row.sellerId : row.buyerId;
+    const peerDisplayName = isBuyer ? row.sellerDisplayName : row.buyerDisplayName;
+    const peerAvatarUrl = isBuyer ? row.sellerAvatarUrl : row.buyerAvatarUrl;
+    if (!peerUserId) continue;
+
+    const type = rowContextType(row);
+    const lastMessageAt = (row.lastMessageAt ?? row.createdAt ?? null) as string | null;
+    const group: GroupedConversation = groups.get(peerUserId) ?? {
+      peerUserId,
+      peerDisplayName: peerDisplayName ?? "Participant",
+      peerAvatarUrl: peerAvatarUrl ?? null,
+      isOnline: isUserOnline(peerUserId),
+      totalUnreadCount: 0,
+      lastMessageAt: null,
+      lastMessageBody: null,
+      contexts: []
+    };
+
+    group.totalUnreadCount += Number(row.unreadCount ?? 0);
+    const nextLastMessageAt = newestTimestamp(group.lastMessageAt, lastMessageAt);
+    if (nextLastMessageAt !== group.lastMessageAt) {
+      group.lastMessageAt = nextLastMessageAt;
+      group.lastMessageBody = row.lastMessageBody ?? null;
+    }
+
+    group.contexts.push({
+      conversationId: row.id,
+      type,
+      label: rowContextLabel(type, row),
+      productId: row.productId ?? null,
+      productTitle: row.productTitle ?? null,
+      orderId: row.orderId ?? null,
+      orderStatus: row.orderStatus ?? null,
+      amountCents: row.amountCents ?? null,
+      currency: row.currency ?? null,
+      unreadCount: Number(row.unreadCount ?? 0),
+      lastMessageAt,
+      lastMessageBody: row.lastMessageBody ?? null,
+      blocked: Boolean(row.blocked),
+      canSendMessage: Boolean(row.canSendMessage),
+      createdAt: row.createdAt
+    });
+
+    groups.set(peerUserId, group);
+  }
+
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      contexts: group.contexts.sort(
+        (a, b) =>
+          new Date(b.lastMessageAt ?? b.createdAt).getTime() - new Date(a.lastMessageAt ?? a.createdAt).getTime()
+      )
+    }))
+    .sort(
+      (a, b) =>
+        new Date(b.lastMessageAt ?? b.contexts[0]?.createdAt ?? 0).getTime() -
+        new Date(a.lastMessageAt ?? a.contexts[0]?.createdAt ?? 0).getTime()
+    );
 }

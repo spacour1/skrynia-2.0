@@ -7,7 +7,6 @@ import { ToastCenter } from "@/components/ToastCenter";
 import { LanguageGate } from "@/components/LanguageGate";
 import { readCachedUser, useAuth } from "@/lib/auth-store";
 import { apiFetch, DISPLAY_CURRENCY_EVENT, setCurrencyRates, type CurrencyRatesResponse } from "@/lib/api";
-import { useThemeStore } from "@/lib/theme-store";
 import { rememberReturnPath } from "@/lib/return-path";
 import { PostHogProvider } from "@/components/PostHogProvider";
 
@@ -15,7 +14,6 @@ export function Providers({ children }: { children: ReactNode }) {
   const [client] = useState(() => new QueryClient());
   const [currencyVersion, setCurrencyVersion] = useState(0);
   const hydrate = useAuth((s) => s.hydrate);
-  const hydrateTheme = useThemeStore((s) => s.hydrate);
   // usePathname alone (no useSearchParams) so this stays compatible with static rendering;
   // the query string is read straight from window.location inside the effect instead.
   const pathname = usePathname();
@@ -31,8 +29,7 @@ export function Providers({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     hydrate();
-    hydrateTheme();
-  }, [hydrate, hydrateTheme]);
+  }, [hydrate]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

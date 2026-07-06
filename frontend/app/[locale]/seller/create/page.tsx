@@ -111,6 +111,21 @@ function SellerCreateContent() {
   });
   const schemaFields = schemaQuery.data?.schema.fields ?? [];
 
+  // The section decides which delivery types a lot in it may use (see
+  // resolveActiveSectionChain + assertDeliveryTypeAllowed server-side) - manual/instant
+  // toggle must follow that, not be a free client-side choice.
+  const allowedDeliveryTypes = selectedSection?.allowedDeliveryTypes ?? ["manual", "instant"];
+  const allowsManual = allowedDeliveryTypes.includes("manual");
+  const allowsInstant = allowedDeliveryTypes.includes("instant");
+  const deliveryChoiceLocked = !(allowsManual && allowsInstant);
+
+  useEffect(() => {
+    if (!selectedSection) return;
+    if (allowsInstant && !allowsManual) setAutoDelivery(true);
+    else if (allowsManual && !allowsInstant) setAutoDelivery(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSection?.id]);
+
   const priceNumber = Number(price || 0);
   const fee = Math.round(priceNumber * 0.025);
 
@@ -371,9 +386,21 @@ function SellerCreateContent() {
             <label className="flex items-center justify-between rounded-lg border border-line bg-panel/25 px-4 py-3">
               <span>
                 <span className="block text-sm font-black text-ink">Автовыдача после покупки</span>
-                <span className="mt-1 block text-xs text-muted">Покупатель получит данные сразу после оплаты</span>
+                <span className="mt-1 block text-xs text-muted">
+                  {deliveryChoiceLocked
+                    ? allowsInstant
+                      ? "Этот тип предложения поддерживает только автовыдачу."
+                      : "Этот тип предложения поддерживает только ручную выдачу."
+                    : "Покупатель получит данные сразу после оплаты"}
+                </span>
               </span>
-              <input className="h-5 w-5 accent-[rgb(var(--color-brand))]" type="checkbox" checked={autoDelivery} onChange={(event) => setAutoDelivery(event.target.checked)} />
+              <input
+                className="h-5 w-5 accent-[rgb(var(--color-brand))]"
+                type="checkbox"
+                checked={autoDelivery}
+                disabled={deliveryChoiceLocked}
+                onChange={(event) => setAutoDelivery(event.target.checked)}
+              />
             </label>
           </section>
 

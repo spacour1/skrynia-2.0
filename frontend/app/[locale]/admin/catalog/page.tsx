@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Loader2, Package, Plus, Store, Trash2 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -10,11 +10,34 @@ import { useI18n } from "@/lib/i18n";
 import { showAppToast } from "@/lib/toast-events";
 import {
   catalogApi,
+  slugify,
   type AdminCatalogGroup,
   type AdminCatalogItem,
   type AdminCatalogSection,
   type CatalogStatus
 } from "@/lib/catalog-api";
+
+/**
+ * Keeps `slug` auto-derived from `name` while the entity is still a draft (and the admin
+ * hasn't hand-edited the slug themselves) - mirrors the backend's slug-lock-after-draft
+ * rule so the two never disagree about when a slug is still safe to change.
+ */
+function useAutoSlug(name: string, initialSlug: string, editable: boolean) {
+  const [slug, setSlug] = useState(initialSlug);
+  const [touched, setTouched] = useState(initialSlug.length > 0);
+
+  useEffect(() => {
+    if (editable && !touched) setSlug(slugify(name));
+  }, [name, editable, touched]);
+
+  return {
+    slug,
+    setSlug: (value: string) => {
+      setTouched(true);
+      setSlug(value);
+    }
+  };
+}
 
 type Selection =
   | { kind: "group"; id: string }
@@ -220,23 +243,23 @@ function StatusPill({ status }: { status: CatalogStatus }) {
 }
 
 function DetailPanel({ selection, groups, onSelect }: { selection: NonNullable<Selection>; groups: AdminCatalogGroup[]; onSelect: (s: Selection) => void }) {
-  if (selection.kind === "new-group") return <GroupForm onSelect={onSelect} />;
+  if (selection.kind === "new-group") return <GroupForm key="new-group" onSelect={onSelect} />;
   if (selection.kind === "group") {
     const group = groups.find((g) => g.id === selection.id);
     if (!group) return null;
-    return <GroupForm group={group} onSelect={onSelect} />;
+    return <GroupForm key={group.id} group={group} onSelect={onSelect} />;
   }
-  if (selection.kind === "new-item") return <ItemForm groupId={selection.groupId} onSelect={onSelect} />;
+  if (selection.kind === "new-item") return <ItemForm key={`new-item:${selection.groupId}`} groupId={selection.groupId} onSelect={onSelect} />;
   if (selection.kind === "item") {
     const item = groups.flatMap((g) => g.items).find((i) => i.id === selection.id);
     if (!item) return null;
-    return <ItemForm item={item} groupId={selection.groupId} onSelect={onSelect} />;
+    return <ItemForm key={item.id} item={item} groupId={selection.groupId} onSelect={onSelect} />;
   }
-  if (selection.kind === "new-section") return <SectionForm itemId={selection.itemId} onSelect={onSelect} />;
+  if (selection.kind === "new-section") return <SectionForm key={`new-section:${selection.itemId}`} itemId={selection.itemId} onSelect={onSelect} />;
   if (selection.kind === "section") {
     const section = groups.flatMap((g) => g.items).flatMap((i) => i.sections).find((s) => s.id === selection.id);
     if (!section) return null;
-    return <SectionForm section={section} itemId={selection.itemId} onSelect={onSelect} />;
+    return <SectionForm key={section.id} section={section} itemId={selection.itemId} onSelect={onSelect} />;
   }
   return null;
 }
@@ -251,9 +274,13 @@ function GroupForm({ group, onSelect }: { group?: AdminCatalogGroup; onSelect: (
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const [name, setName] = useState(group?.name ?? "");
-  const [slug, setSlug] = useState(group?.slug ?? "");
-  const [description, setDescription] = useState(group?.description ?? "");
   const isDraft = !group || group.status === "draft";
+  const { slug, setSlug } = useAutoSlug(name, group?.slug ?? "", isDraft);
+  const [description, setDescription] = useState(group?.description ?? "");
+  const [icon, setIcon] = useState(group?.icon ?? "");
+  const [sortOrder, setSortOrder] = useState(group?.sortOrder ?? 0);
+  const [seoTitle, setSeoTitle] = useState(group?.seoTitle ?? "");
+  const [seoDescription, setSeoDescription] = useState(group?.seoDescription ?? "");
 
   function invalidate() {
     queryClient.invalidateQueries({ queryKey: ["admin-catalog-tree"] });
@@ -262,8 +289,16 @@ function GroupForm({ group, onSelect }: { group?: AdminCatalogGroup; onSelect: (
   const save = useMutation({
     mutationFn: () =>
       group
-        ? catalogApi.updateGroup(group.id, { name, slug: isDraft ? slug : undefined, description })
-        : catalogApi.createGroup({ name, slug, description }),
+        ? catalogApi.updateGroup(group.id, {
+            name,
+            slug: isDraft ? slug : undefined,
+            description,
+            icon: icon || null,
+            sortOrder,
+            seoTitle: seoTitle || null,
+            seoDescription: seoDescription || null
+          })
+        : catalogApi.createGroup({ name, slug, description, icon: icon || undefined, sortOrder, seoTitle: seoTitle || undefined, seoDescription: seoDescription || undefined }),
     onSuccess: (data) => {
       invalidate();
       showAppToast({ title: group ? t("adminCatalog.group.updated") : t("adminCatalog.group.created") });
@@ -307,6 +342,23 @@ function GroupForm({ group, onSelect }: { group?: AdminCatalogGroup; onSelect: (
         <textarea className="app-input min-h-20" value={description ?? ""} onChange={(e) => setDescription(e.target.value)} />
       </Field>
 
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label={t("adminCatalog.iconLabel")}>
+          <input className="app-input h-10" value={icon} onChange={(e) => setIcon(e.target.value)} />
+        </Field>
+        <Field label={t("adminCatalog.sortOrderLabel")}>
+          <input className="app-input h-10" type="number" value={sortOrder} onChange={(e) => setSortOrder(Number(e.target.value) || 0)} />
+        </Field>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label={t("adminCatalog.seoTitleLabel")}>
+          <input className="app-input h-10" value={seoTitle} onChange={(e) => setSeoTitle(e.target.value)} />
+        </Field>
+        <Field label={t("adminCatalog.seoDescriptionLabel")}>
+          <input className="app-input h-10" value={seoDescription} onChange={(e) => setSeoDescription(e.target.value)} />
+        </Field>
+      </div>
+
       <FormError error={save.error} />
 
       <div className="flex flex-wrap gap-2">
@@ -330,8 +382,13 @@ function ItemForm({ item, groupId, onSelect }: { item?: AdminCatalogItem; groupI
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const [name, setName] = useState(item?.name ?? "");
-  const [slug, setSlug] = useState(item?.slug ?? "");
   const isDraft = !item || item.status === "draft";
+  const { slug, setSlug } = useAutoSlug(name, item?.slug ?? "", isDraft);
+  const [icon, setIcon] = useState(item?.icon ?? "");
+  const [banner, setBanner] = useState(item?.banner ?? "");
+  const [sortOrder, setSortOrder] = useState(item?.sortOrder ?? 0);
+  const [seoTitle, setSeoTitle] = useState(item?.seoTitle ?? "");
+  const [seoDescription, setSeoDescription] = useState(item?.seoDescription ?? "");
 
   function invalidate() {
     queryClient.invalidateQueries({ queryKey: ["admin-catalog-tree"] });
@@ -340,8 +397,25 @@ function ItemForm({ item, groupId, onSelect }: { item?: AdminCatalogItem; groupI
   const save = useMutation({
     mutationFn: () =>
       item
-        ? catalogApi.updateItem(item.id, { name, slug: isDraft ? slug : undefined })
-        : catalogApi.createItem({ groupId, name, slug }),
+        ? catalogApi.updateItem(item.id, {
+            name,
+            slug: isDraft ? slug : undefined,
+            icon: icon || null,
+            banner: banner || null,
+            sortOrder,
+            seoTitle: seoTitle || null,
+            seoDescription: seoDescription || null
+          })
+        : catalogApi.createItem({
+            groupId,
+            name,
+            slug,
+            icon: icon || undefined,
+            banner: banner || undefined,
+            sortOrder,
+            seoTitle: seoTitle || undefined,
+            seoDescription: seoDescription || undefined
+          }),
     onSuccess: (data) => {
       invalidate();
       showAppToast({ title: item ? t("adminCatalog.item.updated") : t("adminCatalog.item.created") });
@@ -382,6 +456,26 @@ function ItemForm({ item, groupId, onSelect }: { item?: AdminCatalogItem; groupI
         </Field>
       </div>
 
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label={t("adminCatalog.iconLabel")}>
+          <input className="app-input h-10" value={icon} onChange={(e) => setIcon(e.target.value)} />
+        </Field>
+        <Field label={t("adminCatalog.bannerLabel")}>
+          <input className="app-input h-10" value={banner} onChange={(e) => setBanner(e.target.value)} />
+        </Field>
+        <Field label={t("adminCatalog.sortOrderLabel")}>
+          <input className="app-input h-10" type="number" value={sortOrder} onChange={(e) => setSortOrder(Number(e.target.value) || 0)} />
+        </Field>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label={t("adminCatalog.seoTitleLabel")}>
+          <input className="app-input h-10" value={seoTitle} onChange={(e) => setSeoTitle(e.target.value)} />
+        </Field>
+        <Field label={t("adminCatalog.seoDescriptionLabel")}>
+          <input className="app-input h-10" value={seoDescription} onChange={(e) => setSeoDescription(e.target.value)} />
+        </Field>
+      </div>
+
       <FormError error={save.error} />
 
       <div className="flex flex-wrap gap-2">
@@ -408,11 +502,15 @@ function SectionForm({ section, itemId, onSelect }: { section?: AdminCatalogSect
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const [name, setName] = useState(section?.name ?? "");
-  const [slug, setSlug] = useState(section?.slug ?? "");
+  const isDraft = !section || section.status === "draft";
+  const { slug, setSlug } = useAutoSlug(name, section?.slug ?? "", isDraft);
   const [categoryId, setCategoryId] = useState(section?.categoryId ?? "");
   const [listingType, setListingType] = useState(section?.listingType ?? "service");
   const [deliveryTypes, setDeliveryTypes] = useState<string[]>(section?.allowedDeliveryTypes ?? ["manual", "instant"]);
-  const isDraft = !section || section.status === "draft";
+  const [requiresModeration, setRequiresModeration] = useState(section?.requiresModeration ?? false);
+  const [sortOrder, setSortOrder] = useState(section?.sortOrder ?? 0);
+  const [seoTitle, setSeoTitle] = useState(section?.seoTitle ?? "");
+  const [seoDescription, setSeoDescription] = useState(section?.seoDescription ?? "");
 
   const categories = useQuery({ queryKey: ["legacy-categories"], queryFn: () => catalogApi.categories() });
 
@@ -423,8 +521,29 @@ function SectionForm({ section, itemId, onSelect }: { section?: AdminCatalogSect
   const save = useMutation({
     mutationFn: () =>
       section
-        ? catalogApi.updateSection(section.id, { name, slug: isDraft ? slug : undefined, categoryId, listingType, allowedDeliveryTypes: deliveryTypes })
-        : catalogApi.createSection({ itemId, categoryId, name, slug, listingType, allowedDeliveryTypes: deliveryTypes }),
+        ? catalogApi.updateSection(section.id, {
+            name,
+            slug: isDraft ? slug : undefined,
+            categoryId,
+            listingType,
+            allowedDeliveryTypes: deliveryTypes,
+            requiresModeration,
+            sortOrder,
+            seoTitle: seoTitle || null,
+            seoDescription: seoDescription || null
+          })
+        : catalogApi.createSection({
+            itemId,
+            categoryId,
+            name,
+            slug,
+            listingType,
+            allowedDeliveryTypes: deliveryTypes,
+            requiresModeration,
+            sortOrder,
+            seoTitle: seoTitle || undefined,
+            seoDescription: seoDescription || undefined
+          }),
     onSuccess: (data) => {
       invalidate();
       showAppToast({ title: section ? t("adminCatalog.section.updated") : t("adminCatalog.section.created") });
@@ -506,6 +625,23 @@ function SectionForm({ section, itemId, onSelect }: { section?: AdminCatalogSect
               </label>
             ))}
           </div>
+        </Field>
+        <Field label={t("adminCatalog.sortOrderLabel")}>
+          <input className="app-input h-10" type="number" value={sortOrder} onChange={(e) => setSortOrder(Number(e.target.value) || 0)} />
+        </Field>
+      </div>
+
+      <label className="inline-flex items-center gap-1.5 text-sm font-bold text-muted">
+        <input type="checkbox" checked={requiresModeration} onChange={(e) => setRequiresModeration(e.target.checked)} />
+        {t("adminCatalog.requiresModerationLabel")}
+      </label>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label={t("adminCatalog.seoTitleLabel")}>
+          <input className="app-input h-10" value={seoTitle} onChange={(e) => setSeoTitle(e.target.value)} />
+        </Field>
+        <Field label={t("adminCatalog.seoDescriptionLabel")}>
+          <input className="app-input h-10" value={seoDescription} onChange={(e) => setSeoDescription(e.target.value)} />
         </Field>
       </div>
 

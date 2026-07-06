@@ -131,3 +131,76 @@ export function validateMetadataAgainstSchema(schema: CatalogSchema, rawMetadata
 
   return clean;
 }
+
+/**
+ * Builds SQL WHERE clause fragments + parameter values for `meta[key]=value` /
+ * `meta[key][min|max]=value` product-list filters, validated against a section's active
+ * schema. Every key must both exist on the schema and be `filterable: true` - unknown or
+ * non-filterable keys are a hard error (never silently ignored), so a stale/buggy frontend
+ * finds out immediately rather than a filter silently doing nothing. Empty values are
+ * skipped (an empty string means "no filter for this field", not "filter for empty").
+ *
+ * Field keys are safe to interpolate directly into the SQL text: they're only ever taken
+ * from `schema.fields` (validated by KEY_PATTERN at schema-creation time - lowercase
+ * letters/digits/underscore only), never from the raw query key itself.
+ */
+export function buildMetadataFilterClauses(
+  schema: CatalogSchema,
+  metaQuery: Record<string, unknown>,
+  startParamIndex: number
+): { clauses: string[]; values: unknown[] } {
+  const fieldsByKey = new Map(schema.fields.map((field) => [field.key, field]));
+  const clauses: string[] = [];
+  const values: unknown[] = [];
+  let paramIndex = startParamIndex;
+
+  for (const [key, rawValue] of Object.entries(metaQuery)) {
+    if (rawValue === undefined || rawValue === null || rawValue === "") continue;
+    const field = fieldsByKey.get(key);
+    if (!field || !field.filterable) {
+      throw badRequest(`Unknown or non-filterable metadata filter: ${key}`);
+    }
+
+    if (field.type === "number") {
+      if (typeof rawValue !== "object" || Array.isArray(rawValue)) {
+        throw badRequest(`Invalid filter for ${key}: expected {min, max}`);
+      }
+      const { min, max } = rawValue as { min?: string; max?: string };
+      if (min !== undefined && min !== "") {
+        if (Number.isNaN(Number(min))) throw badRequest(`Invalid filter for ${key}: min must be a number`);
+        paramIndex += 1;
+        clauses.push(`(p.metadata->>'${key}')::numeric >= $${paramIndex}`);
+        values.push(Number(min));
+      }
+      if (max !== undefined && max !== "") {
+        if (Number.isNaN(Number(max))) throw badRequest(`Invalid filter for ${key}: max must be a number`);
+        paramIndex += 1;
+        clauses.push(`(p.metadata->>'${key}')::numeric <= $${paramIndex}`);
+        values.push(Number(max));
+      }
+      continue;
+    }
+
+    if (typeof rawValue !== "string") {
+      throw badRequest(`Invalid filter for ${key}`);
+    }
+
+    if (field.type === "boolean" || field.type === "checkbox") {
+      if (rawValue !== "true" && rawValue !== "false") throw badRequest(`Invalid filter for ${key}: expected true or false`);
+      paramIndex += 1;
+      clauses.push(`(p.metadata->>'${key}')::boolean = $${paramIndex}`);
+      values.push(rawValue === "true");
+    } else if (field.type === "multiselect") {
+      paramIndex += 1;
+      clauses.push(`p.metadata->'${key}' @> to_jsonb($${paramIndex}::text)`);
+      values.push(rawValue);
+    } else {
+      // select / text / textarea: exact match
+      paramIndex += 1;
+      clauses.push(`p.metadata->>'${key}' = $${paramIndex}`);
+      values.push(rawValue);
+    }
+  }
+
+  return { clauses, values };
+}

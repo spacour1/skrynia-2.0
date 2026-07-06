@@ -38,6 +38,10 @@ export type AdminCatalogSection = {
   listingType: string;
   allowedDeliveryTypes: string[];
   categoryId: string | null;
+  requiresModeration: boolean;
+  sortOrder: number;
+  seoTitle: string | null;
+  seoDescription: string | null;
   status: CatalogStatus;
   currentSchemaVersion: number | null;
   productCount: number;
@@ -49,6 +53,9 @@ export type AdminCatalogItem = {
   name: string;
   icon: string | null;
   banner: string | null;
+  sortOrder: number;
+  seoTitle: string | null;
+  seoDescription: string | null;
   status: CatalogStatus;
   sections: AdminCatalogSection[];
 };
@@ -59,6 +66,9 @@ export type AdminCatalogGroup = {
   name: string;
   description: string | null;
   icon: string | null;
+  sortOrder: number;
+  seoTitle: string | null;
+  seoDescription: string | null;
   status: CatalogStatus;
   items: AdminCatalogItem[];
 };
@@ -101,14 +111,29 @@ export const catalogApi = {
 
   adminTree: () => apiFetch<{ groups: AdminCatalogGroup[] }>("/admin/catalog/tree"),
 
-  createGroup: (input: { name: string; slug: string; description?: string; icon?: string; sortOrder?: number }) =>
-    apiFetch<{ group: AdminCatalogGroup }>("/admin/catalog/groups", { method: "POST", body: JSON.stringify(input) }),
+  createGroup: (input: {
+    name: string;
+    slug: string;
+    description?: string;
+    icon?: string;
+    sortOrder?: number;
+    seoTitle?: string;
+    seoDescription?: string;
+  }) => apiFetch<{ group: AdminCatalogGroup }>("/admin/catalog/groups", { method: "POST", body: JSON.stringify(input) }),
   updateGroup: (id: string, input: Record<string, unknown>) =>
     apiFetch<{ group: AdminCatalogGroup }>(`/admin/catalog/groups/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
   deleteGroup: (id: string) => apiFetch<{ hardDeleted: boolean }>(`/admin/catalog/groups/${id}`, { method: "DELETE" }),
 
-  createItem: (input: { groupId: string; name: string; slug: string; icon?: string; banner?: string; sortOrder?: number }) =>
-    apiFetch<{ item: AdminCatalogItem }>("/admin/catalog/items", { method: "POST", body: JSON.stringify(input) }),
+  createItem: (input: {
+    groupId: string;
+    name: string;
+    slug: string;
+    icon?: string;
+    banner?: string;
+    sortOrder?: number;
+    seoTitle?: string;
+    seoDescription?: string;
+  }) => apiFetch<{ item: AdminCatalogItem }>("/admin/catalog/items", { method: "POST", body: JSON.stringify(input) }),
   updateItem: (id: string, input: Record<string, unknown>) =>
     apiFetch<{ item: AdminCatalogItem }>(`/admin/catalog/items/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
   deleteItem: (id: string) => apiFetch<{ hardDeleted: boolean }>(`/admin/catalog/items/${id}`, { method: "DELETE" }),
@@ -122,6 +147,8 @@ export const catalogApi = {
     allowedDeliveryTypes?: string[];
     requiresModeration?: boolean;
     sortOrder?: number;
+    seoTitle?: string;
+    seoDescription?: string;
   }) => apiFetch<{ section: AdminCatalogSection }>("/admin/catalog/sections", { method: "POST", body: JSON.stringify(input) }),
   updateSection: (id: string, input: Record<string, unknown>) =>
     apiFetch<{ section: AdminCatalogSection }>(`/admin/catalog/sections/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
@@ -164,4 +191,26 @@ export function emptyCatalogField(sortOrder: number): CatalogField {
     showInCard: true,
     sortOrder
   };
+}
+
+// i18n-exempt: transliteration data, not UI copy - these are Cyrillic source characters
+// being mapped to Latin, not user-facing strings.
+const CYRILLIC_TO_LATIN: Record<string, string> = {
+  а: "a", б: "b", в: "v", г: "h", ґ: "g", д: "d", е: "e", є: "ie", ж: "zh", з: "z", // i18n-exempt
+  и: "y", і: "i", ї: "i", й: "i", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", // i18n-exempt
+  р: "r", с: "s", т: "t", у: "u", ф: "f", х: "kh", ц: "ts", ч: "ch", ш: "sh", щ: "shch", // i18n-exempt
+  ь: "", ю: "iu", я: "ia", ъ: "", ы: "y", э: "e", ё: "e" // i18n-exempt
+};
+
+// Admin catalog forms auto-generate a slug from the entered name (including Cyrillic
+// group/item/section names) so admins don't have to hand-type ASCII slugs themselves.
+export function slugify(name: string): string {
+  const transliterated = name
+    .toLowerCase()
+    .split("")
+    .map((ch) => CYRILLIC_TO_LATIN[ch] ?? ch)
+    .join("");
+  return transliterated
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }

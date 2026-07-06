@@ -2,7 +2,7 @@
 
 import Link from "@/lib/navigation";
 import { useRouter } from "@/lib/navigation";
-import { ReactNode, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -16,9 +16,12 @@ import {
 } from "lucide-react";
 import { GameIcon } from "@/components/GameIcon";
 import { apiFetch, money, type Game, type GameSection, type Product } from "@/lib/api";
+import { catalogApi, type CatalogField } from "@/lib/catalog-api";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
 import { showAppToast } from "@/lib/toast-events";
+
+type MetaFilterValue = string | { min: string; max: string };
 
 const productTypes = [
   ["", "catalog.allSections"],
@@ -58,11 +61,36 @@ export function GameCatalogClient({ slug }: { slug: string }) {
   const [autoDeliveryOnly, setAutoDeliveryOnly] = useState(false);
   const [onlineOnly, setOnlineOnly] = useState(false);
   const [sort, setSort] = useState("newest");
+  const [metaFilters, setMetaFilters] = useState<Record<string, MetaFilterValue>>({});
 
   const gameDetail = useQuery({
     queryKey: ["game-page", slug],
     queryFn: () => apiFetch<{ game: Game; sections: GameSection[] }>(`/marketplace/games/${slug}`)
   });
+  const sections = gameDetail.data?.sections ?? [];
+
+  // A "section" filter row here is the section's slug (legacy, kept as-is - see the
+  // buildSectionRows fallback for games with no real sections). Metadata filters need the
+  // section's id, not its slug, because slugs aren't guaranteed globally unique - only
+  // within a single game they are.
+  const selectedSectionObj = section ? (sections.find((candidate) => candidate.slug === section) ?? null) : null;
+
+  const sectionSchema = useQuery({
+    queryKey: ["public-section-schema", selectedSectionObj?.id],
+    queryFn: () => catalogApi.sectionSchema(selectedSectionObj!.id),
+    enabled: Boolean(selectedSectionObj)
+  });
+  const filterableFields = useMemo(
+    () => (sectionSchema.data?.schema.fields ?? []).filter((field) => field.filterable),
+    [sectionSchema.data]
+  );
+
+  // Metadata filter values only make sense for the section they were entered against -
+  // switching sections (or clearing the section filter) drops them rather than silently
+  // carrying over a filter the new section's schema may not even have.
+  useEffect(() => {
+    setMetaFilters({});
+  }, [selectedSectionObj?.id]);
 
   const query = useMemo(() => {
     const search = new URLSearchParams();
@@ -72,8 +100,21 @@ export function GameCatalogClient({ slug }: { slug: string }) {
     if (section) search.set("section", section);
     if (productType) search.set("productType", productType);
     if (autoDeliveryOnly) search.set("deliveryType", "instant");
+    if (selectedSectionObj) {
+      search.set("sectionId", selectedSectionObj.id);
+      for (const field of filterableFields) {
+        const value = metaFilters[field.key];
+        if (value === undefined) continue;
+        if (typeof value === "object") {
+          if (value.min) search.set(`meta[${field.key}][min]`, value.min);
+          if (value.max) search.set(`meta[${field.key}][max]`, value.max);
+        } else if (value !== "") {
+          search.set(`meta[${field.key}]`, value);
+        }
+      }
+    }
     return search.toString();
-  }, [slug, section, productType, autoDeliveryOnly, sort]);
+  }, [slug, section, productType, autoDeliveryOnly, sort, selectedSectionObj, filterableFields, metaFilters]);
 
   const products = useQuery({
     queryKey: ["game-products", query],
@@ -112,7 +153,6 @@ export function GameCatalogClient({ slug }: { slug: string }) {
   });
 
   const game = gameDetail.data?.game;
-  const sections = gameDetail.data?.sections ?? [];
   const list = products.data?.products ?? [];
   const visibleList = onlineOnly ? list.filter((product) => product.sellerOnline) : list;
   const total = products.data?.total ?? visibleList.length;
@@ -126,6 +166,7 @@ export function GameCatalogClient({ slug }: { slug: string }) {
     setAutoDeliveryOnly(false);
     setOnlineOnly(false);
     setSort("newest");
+    setMetaFilters({});
   }
 
   return (
@@ -230,6 +271,28 @@ export function GameCatalogClient({ slug }: { slug: string }) {
                   {t("catalog.onlineSellersOnly")}
                 </label>
               </FilterBlock>
+
+              {filterableFields.length ? (
+                <FilterBlock label={t("catalog.additionalFilters")}>
+                  <div className="space-y-3">
+                    {filterableFields.map((field) => (
+                      <SchemaFilterControl
+                        key={field.key}
+                        field={field}
+                        value={metaFilters[field.key]}
+                        onChange={(value) =>
+                          setMetaFilters((current) => {
+                            const next = { ...current };
+                            if (value === undefined) delete next[field.key];
+                            else next[field.key] = value;
+                            return next;
+                          })
+                        }
+                      />
+                    ))}
+                  </div>
+                </FilterBlock>
+              ) : null}
 
               <div className="p-4">
                 <button
@@ -399,6 +462,96 @@ function FilterBlock({ label, children }: { label: string; children: ReactNode }
     <div className="p-4">
       <p className="mb-3 text-xs font-black text-slate-300">{label}</p>
       {children}
+    </div>
+  );
+}
+
+// Built entirely from the section's own active schema (key/label/type/options) - no
+// hardcoded field names or per-game special cases, matching the no-code catalog principle.
+function SchemaFilterControl({
+  field,
+  value,
+  onChange
+}: {
+  field: CatalogField;
+  value: MetaFilterValue | undefined;
+  onChange: (value: MetaFilterValue | undefined) => void;
+}) {
+  const { t } = useI18n();
+  const inputClass =
+    "h-9 w-full rounded-md border border-slate-800 bg-slate-950 px-2 text-sm font-semibold text-slate-100 outline-none transition focus:border-amber-400";
+
+  if (field.type === "number") {
+    const current = (value as { min: string; max: string } | undefined) ?? { min: "", max: "" };
+    return (
+      <div>
+        <p className="mb-1.5 text-xs font-bold text-slate-400">{field.label}</p>
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            className={inputClass}
+            type="number"
+            placeholder={t("catalog.filterFrom")}
+            value={current.min}
+            onChange={(event) => onChange({ ...current, min: event.target.value })}
+          />
+          <input
+            className={inputClass}
+            type="number"
+            placeholder={t("catalog.filterTo")}
+            value={current.max}
+            onChange={(event) => onChange({ ...current, max: event.target.value })}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (field.type === "boolean" || field.type === "checkbox") {
+    return (
+      <div>
+        <p className="mb-1.5 text-xs font-bold text-slate-400">{field.label}</p>
+        <select
+          className={inputClass}
+          value={(value as string | undefined) ?? ""}
+          onChange={(event) => onChange(event.target.value === "" ? undefined : event.target.value)}
+        >
+          <option value="">{t("catalog.filterAny")}</option>
+          <option value="true">{t("common.yes")}</option>
+          <option value="false">{t("common.no")}</option>
+        </select>
+      </div>
+    );
+  }
+
+  if (field.type === "select" || field.type === "multiselect") {
+    return (
+      <div>
+        <p className="mb-1.5 text-xs font-bold text-slate-400">{field.label}</p>
+        <select
+          className={inputClass}
+          value={(value as string | undefined) ?? ""}
+          onChange={(event) => onChange(event.target.value === "" ? undefined : event.target.value)}
+        >
+          <option value="">{t("catalog.filterAny")}</option>
+          {(field.options ?? []).map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p className="mb-1.5 text-xs font-bold text-slate-400">{field.label}</p>
+      <input
+        className={inputClass}
+        type="text"
+        value={(value as string | undefined) ?? ""}
+        onChange={(event) => onChange(event.target.value === "" ? undefined : event.target.value)}
+      />
     </div>
   );
 }

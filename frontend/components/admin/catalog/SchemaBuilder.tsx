@@ -237,6 +237,23 @@ function FieldRow({
         </label>
       </div>
 
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        <input
+          className="app-input h-10"
+          placeholder={t("adminCatalog.schema.placeholderLabel")}
+          value={field.placeholder ?? ""}
+          disabled={!editable}
+          onChange={(e) => onChange({ placeholder: e.target.value || undefined })}
+        />
+        <input
+          className="app-input h-10"
+          placeholder={t("adminCatalog.schema.helpTextLabel")}
+          value={field.helpText ?? ""}
+          disabled={!editable}
+          onChange={(e) => onChange({ helpText: e.target.value || undefined })}
+        />
+      </div>
+
       {needsOptions ? (
         <div className="mt-2">
           <input

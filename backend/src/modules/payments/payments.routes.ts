@@ -10,13 +10,14 @@ import type { AuthedRequest } from "../../common/types.js";
 import { lockEscrow } from "../orders/ledger.service.js";
 import { recordOrderEvent } from "../orders/order-events.service.js";
 import { notifyOrderEvent } from "../chat/ws.service.js";
-import { createNotification } from "../notifications/notifications.service.js";
+import { createNotification, notifyAdmins } from "../notifications/notifications.service.js";
 import { postOrderSystemMessage } from "../chat/chat.service.js";
 import { t } from "../../i18n/t.js";
 import { paymentAttemptsTotal } from "../../common/metrics.js";
 import { webhookRateLimit } from "../../common/middleware/security.js";
 import { logger } from "../../common/logger.js";
-import { moneyToCents } from "../../common/validation.js";
+import { moneyToCents, centsToDecimalString } from "../../common/validation.js";
+import { cacheGet, cacheSet } from "../../common/redis.js";
 import { createWalletTopup, completeWalletTopup } from "../users/wallet.service.js";
 import { buildLiqpayCheckout, decodeLiqpayCallback, isLiqpaySuccessStatus, verifyLiqpaySignature } from "./liqpay.service.js";
 import { createMonobankInvoice, getMonobankInvoiceStatus, isMonobankSuccessStatus } from "./monobank.service.js";
@@ -201,6 +202,20 @@ router.get(
 
     if (!env.MANUAL_PAYMENT_CARD_NUMBER || !env.MANUAL_PAYMENT_RECEIVER_NAME) {
       throw badRequest("Manual transfer is not configured on this server");
+    }
+
+    // The buyer only ever fetches these details to go make the transfer themselves, so the
+    // first fetch is the signal admins need to watch for an incoming manual transfer. Dedup
+    // via Redis so refreshing this page doesn't re-page every admin.
+    const dedupKey = `manual_payment_notified:${orderId}`;
+    if (!(await cacheGet(dedupKey))) {
+      await cacheSet(dedupKey, true, 60 * 60 * 24);
+      await notifyAdmins({
+        type: "manual_payment_pending_admin",
+        templateKey: "notifications.manualPaymentPendingAdmin",
+        orderId,
+        params: { amount: centsToDecimalString(Number(order.amount_cents)), currency: order.currency }
+      });
     }
 
     res.json({

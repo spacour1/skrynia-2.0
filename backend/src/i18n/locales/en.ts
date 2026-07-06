@@ -58,6 +58,58 @@ export default {
     reconciliationMismatch: {
       title: "Balance reconciliation mismatch",
       body: "Ledger/wallet mismatch detected: {summary}. Check /admin/finance."
+    },
+    payoutRequested: {
+      title: "Payout requested",
+      body: "Your withdrawal request for {amount} {currency} was submitted for review."
+    },
+    payoutApproved: {
+      title: "Payout completed",
+      body: "Your withdrawal of {amount} {currency} was sent."
+    },
+    payoutRejected: {
+      title: "Payout rejected",
+      body: "Your withdrawal of {amount} {currency} was rejected: {reason}. The funds were returned to your wallet."
+    },
+    payoutPendingAdmin: {
+      title: "Payout pending review",
+      body: "A new withdrawal request for {amount} {currency} needs review."
+    },
+    reportSubmitted: {
+      title: "New report submitted",
+      body: "A user submitted a report ({reason})."
+    },
+    disputeNewAdmin: {
+      title: "New dispute opened",
+      body: "A dispute was opened and needs admin review."
+    },
+    manualPaymentPendingAdmin: {
+      title: "Manual bank transfer pending",
+      body: "A buyer requested bank transfer details for {amount} {currency}. Confirm once the transfer arrives."
+    },
+    passwordChanged: {
+      title: "Password changed",
+      body: "Your account password was changed. If this wasn't you, contact support immediately."
+    },
+    emailChanged: {
+      title: "Email address changed",
+      body: "Your account email was changed to {newEmail}. If this wasn't you, contact support immediately."
+    },
+    twoFactorEnabled: {
+      title: "Two-factor authentication enabled",
+      body: "2FA is now required to sign in to your account."
+    },
+    twoFactorDisabled: {
+      title: "Two-factor authentication disabled",
+      body: "2FA was turned off for your account. If this wasn't you, contact support immediately."
+    },
+    telegramConnected: {
+      title: "Telegram connected",
+      body: "Your Telegram account is now linked for notifications."
+    },
+    telegramDisconnected: {
+      title: "Telegram disconnected",
+      body: "Your Telegram account was unlinked. You will no longer receive notifications there."
     }
   },
   orderEvents: {
@@ -112,6 +164,20 @@ export default {
   telegram: {
     connectedGreeting: "✅ Telegram is connected to your SKRYNIA account. You will now receive notifications here.",
     orderCreated: { title: "New order", body: "A buyer created an order for \"{productTitle}\"." },
-    newMessage: { title: "New message", body: "{sender}: {preview}" }
+    newMessage: { title: "New message", body: "{sender}: {preview}" },
+    orderLabel: "Order",
+    statusLabel: "Status",
+    help: "SKRYNIA bot commands:\n/start [token] — link this chat to your account\n/settings — open notification settings\n/help — show this message",
+    settingsPrompt: "Manage your notification channels and Telegram connection in account settings.",
+    alreadyConnected: "This chat is already connected to a SKRYNIA account.",
+    invalidToken: "This connection link is invalid or has expired. Request a new one from your account settings.",
+    buttons: {
+      openOrder: "Open order",
+      openChat: "Open chat",
+      openDispute: "Open dispute",
+      openWallet: "Open wallet",
+      openAdminPanel: "Open admin panel",
+      settings: "Notification settings"
+    }
   }
 } as const;

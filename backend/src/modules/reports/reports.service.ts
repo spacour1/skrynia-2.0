@@ -1,6 +1,7 @@
 import { badRequest, notFound } from "../../common/errors.js";
 import { pool } from "../../db/pool.js";
 import { assertConversationAccess } from "../chat/chat.service.js";
+import { notifyAdmins } from "../notifications/notifications.service.js";
 
 export type ModerationActionType =
   | "hide_message"
@@ -75,7 +76,12 @@ export async function createUserReport(
                status, priority, created_at as "createdAt"`,
     [reporterId, input.reportedUserId, input.reason, input.description ?? null]
   );
-  return result.rows[0];
+  const report = result.rows[0];
+  await notifyAdmins(
+    { type: "report_submitted", templateKey: "notifications.reportSubmitted", params: { reason: input.reason } },
+    ["admin", "moderator"]
+  );
+  return report;
 }
 
 export async function createMessageReport(
@@ -100,5 +106,10 @@ export async function createMessageReport(
                reported_user_id as "reportedUserId", reason, description, status, priority, created_at as "createdAt"`,
     [reporterId, row.id, row.conversationId, row.senderId, input.reason, input.description ?? null, priority]
   );
-  return result.rows[0];
+  const report = result.rows[0];
+  await notifyAdmins(
+    { type: "report_submitted", templateKey: "notifications.reportSubmitted", params: { reason: input.reason } },
+    ["admin", "moderator"]
+  );
+  return report;
 }

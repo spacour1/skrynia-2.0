@@ -18,6 +18,7 @@ import { checkPhoneResendRateLimit } from "./phone-verification.service.js";
 import { sendPhoneVerificationCode, checkPhoneVerificationCode } from "../../common/sms.js";
 import { createTelegramConnectToken, disconnectTelegram } from "./telegram-link.service.js";
 import { getNotificationPreferences, updateNotificationPreferences } from "../notifications/preferences.service.js";
+import { createNotification } from "../notifications/notifications.service.js";
 import { confirmTwoFactor, disableTwoFactor, setupTwoFactor } from "../auth/twofa.service.js";
 import { locales } from "../../i18n/config.js";
 import { getRequestLocale } from "../../i18n/t.js";
@@ -104,6 +105,15 @@ router.patch(
         createAndSendVerificationEmail(user, getRequestLocale(req)).then((created) => created.sendPromise),
         "profile_email_change_verification_failed"
       );
+      // Alerts the address being replaced, not the new one — the account may not be the
+      // one who changed it, so the old inbox is the one that needs to know.
+      await createNotification({
+        userId: user.id,
+        type: "email_changed",
+        templateKey: "notifications.emailChanged",
+        params: { newEmail: user.email },
+        emailOverride: req.user.email
+      });
     }
     res.json({ user });
   })
@@ -138,6 +148,11 @@ router.post(
     // Kill every other session on a password change, but keep the tab that just made the
     // change logged in - it just proved it knows the new password.
     await revokeAllUserSessions(req.user.id, { exceptJti: req.sessionId });
+    await createNotification({
+      userId: req.user.id,
+      type: "password_changed",
+      templateKey: "notifications.passwordChanged"
+    });
     res.json({ ok: true });
   })
 );

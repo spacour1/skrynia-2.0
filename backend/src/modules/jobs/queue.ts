@@ -6,15 +6,23 @@ import { pool } from "../../db/pool.js";
 import { releaseEscrow } from "../orders/ledger.service.js";
 import { notifyOrderEvent } from "../chat/ws.service.js";
 import { createReconciliationSnapshot } from "../admin/reconciliation.service.js";
-import { createNotification } from "../notifications/notifications.service.js";
+import { createNotification, notifyAdmins } from "../notifications/notifications.service.js";
 import { getNotificationPreferences } from "../notifications/preferences.service.js";
 import { getTelegramChatId } from "../users/telegram-link.service.js";
 import { sendEmail, renderBrandedEmail } from "../../common/mailer.js";
-import { sendTelegramMessage } from "../../common/telegram-bot.js";
+import { sendTelegramMessage, type TelegramButton } from "../../common/telegram-bot.js";
 import { normalizeLocale } from "../../i18n/config.js";
 import { t } from "../../i18n/t.js";
 
-export type MarketplaceJobName = "escrow_release" | "payout" | "dispute_timer" | "email_notification" | "reconciliation_daily";
+export type MarketplaceJobName =
+  | "escrow_release"
+  | "payout"
+  | "dispute_timer"
+  | "notification_delivery"
+  // Historical name for "notification_delivery" — some already-enqueued/repeatable jobs may
+  // still carry it, so the worker keeps handling it rather than dropping them on deploy.
+  | "email_notification"
+  | "reconciliation_daily";
 
 export type MarketplaceJobPayload = {
   orderId?: string;
@@ -28,6 +36,11 @@ export type MarketplaceJobPayload = {
   titleKey?: string;
   bodyKey?: string;
   params?: Record<string, string | number>;
+  // Carried through from createNotification() so delivery can render an Order:/Status:
+  // line and pick a contextual inline button on the Telegram leg.
+  notificationType?: string;
+  conversationId?: string;
+  skipTelegram?: boolean;
 };
 
 let connection: ConnectionOptions | null = null;
@@ -103,6 +116,16 @@ async function processEscrowRelease(orderId?: string) {
       await releaseEscrow(order.id);
       notifyOrderEvent(order.buyer_id, { type: "order_auto_completed", orderId: order.id });
       notifyOrderEvent(order.seller_id, { type: "order_auto_completed", orderId: order.id });
+      await Promise.all(
+        [order.buyer_id, order.seller_id].map((userId) =>
+          createNotification({
+            userId,
+            type: "order_auto_released",
+            templateKey: "notifications.orderAutoReleased",
+            orderId: order.id
+          })
+        )
+      );
     } catch (err) {
       // Log and continue — a single bad order (e.g. seed data without matching escrow)
       // must not crash the whole sweep or cause BullMQ to retry and spam logs.
@@ -134,13 +157,67 @@ async function processPayout(userId?: string) {
   logger.info({ userId }, "payout_job_placeholder");
 }
 
+// Maps a notification's `type` to the Telegram inline button shown under it. Grouped by
+// destination rather than spelled out per type, so a new order/dispute/payout event only
+// needs adding to the right set, not a whole new branch.
+const ORDER_BUTTON_TYPES = new Set([
+  "order_created",
+  "order_paid",
+  "order_started",
+  "order_delivered",
+  "order_completed",
+  "order_auto_released",
+  "review_created"
+]);
+const DISPUTE_BUTTON_TYPES = new Set(["order_disputed", "dispute_resolved"]);
+const WALLET_BUTTON_TYPES = new Set(["payout_requested", "payout_approved", "payout_rejected"]);
+const SECURITY_BUTTON_TYPES = new Set([
+  "password_changed",
+  "email_changed",
+  "two_factor_enabled",
+  "two_factor_disabled",
+  "telegram_connected",
+  "telegram_disconnected"
+]);
+const ADMIN_PANEL_ROUTES: Record<string, string> = {
+  report_submitted: "/admin/reports",
+  dispute_new_admin: "/admin/disputes",
+  payout_pending_admin: "/admin/payouts",
+  manual_payment_pending_admin: "/admin/finance",
+  reconciliation_mismatch: "/admin/finance"
+};
+
+function buildNotificationButton(data: MarketplaceJobPayload, locale: ReturnType<typeof normalizeLocale>): TelegramButton | null {
+  const type = data.notificationType;
+  if (!type) return null;
+  if (type === "message" && data.conversationId) {
+    return { text: t(locale, "telegram.buttons.openChat"), url: `${env.FRONTEND_URL}/messages?conversation=${data.conversationId}` };
+  }
+  if (DISPUTE_BUTTON_TYPES.has(type) && data.orderId) {
+    return { text: t(locale, "telegram.buttons.openDispute"), url: `${env.FRONTEND_URL}/orders/${data.orderId}` };
+  }
+  if (ORDER_BUTTON_TYPES.has(type) && data.orderId) {
+    return { text: t(locale, "telegram.buttons.openOrder"), url: `${env.FRONTEND_URL}/orders/${data.orderId}` };
+  }
+  if (WALLET_BUTTON_TYPES.has(type)) {
+    return { text: t(locale, "telegram.buttons.openWallet"), url: `${env.FRONTEND_URL}/wallet` };
+  }
+  if (type in ADMIN_PANEL_ROUTES) {
+    return { text: t(locale, "telegram.buttons.openAdminPanel"), url: `${env.FRONTEND_URL}${ADMIN_PANEL_ROUTES[type]}` };
+  }
+  if (SECURITY_BUTTON_TYPES.has(type)) {
+    return { text: t(locale, "telegram.buttons.settings"), url: `${env.FRONTEND_URL}/settings` };
+  }
+  return null;
+}
+
 /**
- * Delivers a notification over every channel the user has enabled. Named "email" for
- * historical reasons (createNotification has always enqueued it as "email_notification"),
- * but it now also handles Telegram - splitting it into two job types would only mean two
- * lookups of the same user/preferences for no real benefit.
+ * Delivers a notification over every channel the user has enabled. Handles both the
+ * current "notification_delivery" job name and the historical "email_notification" one
+ * (createNotification used to enqueue only that) so already-scheduled/repeatable jobs
+ * queued under the old name keep being processed after this deploy.
  */
-async function processEmail(data: MarketplaceJobPayload) {
+export async function processNotificationDelivery(data: MarketplaceJobPayload) {
   if (!data.userId) {
     logger.warn({ data }, "notification_job_missing_user_id");
     return;
@@ -165,7 +242,7 @@ async function processEmail(data: MarketplaceJobPayload) {
 
   if (preferences.emailEnabled) {
     const sent = await sendEmail({
-      to: user.email,
+      to: data.email ?? user.email,
       subject,
       text: body,
       html: renderBrandedEmail({
@@ -179,9 +256,20 @@ async function processEmail(data: MarketplaceJobPayload) {
     if (!sent) logger.info({ userId: data.userId, subject }, "email_notification_not_sent");
   }
 
-  if (preferences.telegramEnabled) {
+  if (preferences.telegramEnabled && !data.skipTelegram) {
     const chatId = await getTelegramChatId(data.userId);
-    if (chatId) await sendTelegramMessage(chatId, `<b>${safeSubject}</b>\n${safeBody}`);
+    if (chatId) {
+      let text = `<b>${safeSubject}</b>\n${safeBody}`;
+      if (data.orderId) {
+        const orderResult = await pool.query<{ status: string }>(`select status from orders where id = $1`, [data.orderId]);
+        const status = orderResult.rows[0]?.status;
+        if (status) {
+          text += `\n\n${t(locale, "telegram.orderLabel")}: #${data.orderId.slice(0, 8)}\n${t(locale, "telegram.statusLabel")}: ${status}`;
+        }
+      }
+      const button = buildNotificationButton(data, locale);
+      await sendTelegramMessage(chatId, text, { buttons: button ? [button] : undefined });
+    }
   }
 }
 
@@ -204,18 +292,12 @@ async function processReconciliationDaily() {
   if (!mismatches.length) return;
 
   logger.error({ mismatches }, "reconciliation_mismatch_detected");
-  const admins = await pool.query<{ id: string }>(`select id from users where role = 'admin'`);
   const summary = mismatches.map((m) => `${m.currency}: ${m.differenceCents}`).join(", ");
-  await Promise.all(
-    admins.rows.map((admin) =>
-      createNotification({
-        userId: admin.id,
-        type: "reconciliation_mismatch",
-        templateKey: "notifications.reconciliationMismatch",
-        params: { summary }
-      })
-    )
-  );
+  await notifyAdmins({
+    type: "reconciliation_mismatch",
+    templateKey: "notifications.reconciliationMismatch",
+    params: { summary }
+  });
 }
 
 export function startJobWorker() {
@@ -229,7 +311,7 @@ export function startJobWorker() {
       if (job.name === "escrow_release") await processEscrowRelease(job.data.orderId);
       if (job.name === "dispute_timer") await processDisputeTimers(job.data.disputeId);
       if (job.name === "payout") await processPayout(job.data.userId);
-      if (job.name === "email_notification") await processEmail(job.data);
+      if (job.name === "notification_delivery" || job.name === "email_notification") await processNotificationDelivery(job.data);
       if (job.name === "reconciliation_daily") await processReconciliationDaily();
     },
     { connection: redis, concurrency: 5 }

@@ -58,6 +58,58 @@ export default {
     reconciliationMismatch: {
       title: "Расхождение в сверке баланса",
       body: "Обнаружено расхождение в ledger/wallet: {summary}. Проверьте /admin/finance."
+    },
+    payoutRequested: {
+      title: "Запрос на выплату создан",
+      body: "Ваш запрос на вывод {amount} {currency} отправлен на проверку."
+    },
+    payoutApproved: {
+      title: "Выплата завершена",
+      body: "Ваш вывод {amount} {currency} отправлен."
+    },
+    payoutRejected: {
+      title: "Выплата отклонена",
+      body: "Ваш вывод {amount} {currency} отклонен: {reason}. Средства возвращены на баланс."
+    },
+    payoutPendingAdmin: {
+      title: "Выплата ожидает проверки",
+      body: "Новый запрос на вывод {amount} {currency} требует проверки."
+    },
+    reportSubmitted: {
+      title: "Отправлена новая жалоба",
+      body: "Пользователь отправил жалобу ({reason})."
+    },
+    disputeNewAdmin: {
+      title: "Открыт новый спор",
+      body: "Открыт спор, который требует проверки администратора."
+    },
+    manualPaymentPendingAdmin: {
+      title: "Ожидается ручной банковский перевод",
+      body: "Покупатель запросил реквизиты для перевода {amount} {currency}. Подтвердите после поступления средств."
+    },
+    passwordChanged: {
+      title: "Пароль изменен",
+      body: "Пароль вашего аккаунта был изменен. Если это были не вы, немедленно обратитесь в поддержку."
+    },
+    emailChanged: {
+      title: "Email изменен",
+      body: "Email вашего аккаунта изменен на {newEmail}. Если это были не вы, немедленно обратитесь в поддержку."
+    },
+    twoFactorEnabled: {
+      title: "Двухфакторная аутентификация включена",
+      body: "Теперь для входа в аккаунт требуется код 2FA."
+    },
+    twoFactorDisabled: {
+      title: "Двухфакторная аутентификация отключена",
+      body: "2FA для вашего аккаунта отключена. Если это были не вы, немедленно обратитесь в поддержку."
+    },
+    telegramConnected: {
+      title: "Telegram подключен",
+      body: "Ваш аккаунт Telegram теперь привязан для уведомлений."
+    },
+    telegramDisconnected: {
+      title: "Telegram отключен",
+      body: "Ваш аккаунт Telegram отвязан. Вы больше не будете получать уведомления там."
     }
   },
   orderEvents: {
@@ -112,6 +164,20 @@ export default {
   telegram: {
     connectedGreeting: "✅ Telegram подключен к вашему аккаунту SKRYNIA. Теперь вы будете получать уведомления здесь.",
     orderCreated: { title: "Новый заказ", body: "Покупатель создал заказ «{productTitle}»." },
-    newMessage: { title: "Новое сообщение", body: "{sender}: {preview}" }
+    newMessage: { title: "Новое сообщение", body: "{sender}: {preview}" },
+    orderLabel: "Заказ",
+    statusLabel: "Статус",
+    help: "Команды бота SKRYNIA:\n/start [token] — привязать этот чат к аккаунту\n/settings — открыть настройки уведомлений\n/help — показать это сообщение",
+    settingsPrompt: "Управляйте каналами уведомлений и подключением Telegram в настройках аккаунта.",
+    alreadyConnected: "Этот чат уже подключен к аккаунту SKRYNIA.",
+    invalidToken: "Эта ссылка для подключения недействительна или устарела. Получите новую в настройках аккаунта.",
+    buttons: {
+      openOrder: "Открыть заказ",
+      openChat: "Открыть чат",
+      openDispute: "Открыть спор",
+      openWallet: "Открыть кошелек",
+      openAdminPanel: "Открыть админ-панель",
+      settings: "Настройки уведомлений"
+    }
   }
 } as const;

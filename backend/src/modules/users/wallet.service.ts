@@ -2,6 +2,7 @@ import { pool } from "../../db/pool.js";
 import { inSerializableTx } from "../../db/pool.js";
 import { badRequest, notFound } from "../../common/errors.js";
 import { cacheDel } from "../../common/redis.js";
+import { centsToDecimalString } from "../../common/validation.js";
 import { ensureWallet } from "../orders/ledger.service.js";
 import {
   recordManualAdjustmentLedger,
@@ -12,6 +13,7 @@ import {
 import { nanoid } from "nanoid";
 import type { PayoutDestination } from "../payments/payout.providers.js";
 import { getPayoutProvider } from "../payments/payout.providers.js";
+import { createNotification, notifyAdmins } from "../notifications/notifications.service.js";
 
 export async function createWalletTopup(userId: string, amountCents: number, currency: string) {
   const result = await pool.query(
@@ -77,7 +79,7 @@ export async function requestWithdrawal(
   currency: string,
   destination: PayoutDestination
 ) {
-  return inSerializableTx(async (client) => {
+  const payout = await inSerializableTx(async (client) => {
     const walletId = await ensureWallet(client, userId, currency);
     const walletResult = await client.query<{ available_cents: number }>(
       `select available_cents from wallets where id = $1 for update`,
@@ -113,6 +115,20 @@ export async function requestWithdrawal(
     await cacheDel(`user:${userId}:wallet`);
     return payout.rows[0];
   });
+
+  const amount = centsToDecimalString(amountCents);
+  await createNotification({
+    userId,
+    type: "payout_requested",
+    templateKey: "notifications.payoutRequested",
+    params: { amount, currency }
+  });
+  await notifyAdmins({
+    type: "payout_pending_admin",
+    templateKey: "notifications.payoutPendingAdmin",
+    params: { amount, currency }
+  });
+  return payout;
 }
 
 /**
@@ -214,12 +230,19 @@ export async function completePayout(payoutId: string, adminId: string, adminRef
                reference, processed_at as "processedAt"`,
     [payoutId, outcome.reference, adminId]
   );
-  return updated.rows[0];
+  const paid = updated.rows[0];
+  await createNotification({
+    userId: paid.userId,
+    type: "payout_approved",
+    templateKey: "notifications.payoutApproved",
+    params: { amount: centsToDecimalString(Number(paid.amountCents)), currency: paid.currency }
+  });
+  return paid;
 }
 
 /** Admin can't fulfil the payout (bad destination, etc.) - refund the wallet balance back. */
 export async function rejectPayout(payoutId: string, adminId: string, reason: string) {
-  return inSerializableTx(async (client) => {
+  const rejected = await inSerializableTx(async (client) => {
     const result = await client.query(
       `select id, user_id as "userId", transaction_id as "transactionId", amount_cents as "amountCents", currency, status
        from payouts where id = $1 for update`,
@@ -257,4 +280,16 @@ export async function rejectPayout(payoutId: string, adminId: string, reason: st
     await cacheDel(`user:${payout.userId}:wallet`);
     return updated.rows[0];
   });
+
+  await createNotification({
+    userId: rejected.userId,
+    type: "payout_rejected",
+    templateKey: "notifications.payoutRejected",
+    params: {
+      amount: centsToDecimalString(Number(rejected.amountCents)),
+      currency: rejected.currency,
+      reason
+    }
+  });
+  return rejected;
 }

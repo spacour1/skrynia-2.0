@@ -11,9 +11,11 @@ import {
   type CatalogSchema
 } from "@/lib/catalog-api";
 import { ApiError } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 import { showAppToast } from "@/lib/toast-events";
 
 export function SchemaBuilder({ sectionId }: { sectionId: string }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const versions = useQuery({
     queryKey: ["admin-catalog-schema-versions", sectionId],
@@ -51,20 +53,20 @@ export function SchemaBuilder({ sectionId }: { sectionId: string }) {
     mutationFn: () => catalogApi.updateSchemaVersion(sectionId, draftVersion!.id, { fields }),
     onSuccess: () => {
       invalidate();
-      showAppToast({ title: "Черновик схемы сохранён" });
+      showAppToast({ title: t("adminCatalog.schema.draftSaved") });
       setError("");
     },
-    onError: (err) => setError(err instanceof ApiError ? err.message : "Не удалось сохранить")
+    onError: (err) => setError(err instanceof ApiError ? err.message : t("adminCatalog.schema.saveFailed"))
   });
 
   const publish = useMutation({
     mutationFn: () => catalogApi.publishSchemaVersion(sectionId, draftVersion!.id),
     onSuccess: () => {
       invalidate();
-      showAppToast({ title: "Схема опубликована" });
+      showAppToast({ title: t("adminCatalog.schema.published") });
       setError("");
     },
-    onError: (err) => setError(err instanceof ApiError ? err.message : "Не удалось опубликовать")
+    onError: (err) => setError(err instanceof ApiError ? err.message : t("adminCatalog.schema.publishFailed"))
   });
 
   function updateField(index: number, patch: Partial<CatalogField>) {
@@ -100,7 +102,7 @@ export function SchemaBuilder({ sectionId }: { sectionId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-sm font-bold text-muted">Версии схемы:</p>
+        <p className="text-sm font-bold text-muted">{t("adminCatalog.schema.versionsLabel")}</p>
         {allVersions.map((version) => (
           <button
             key={version.id}
@@ -119,13 +121,13 @@ export function SchemaBuilder({ sectionId }: { sectionId: string }) {
           onClick={() => createDraft.mutate()}
         >
           <Plus className="h-3.5 w-3.5" />
-          Новый черновик
+          {t("adminCatalog.schema.newDraft")}
         </button>
       </div>
 
       {!draftVersion ? (
         <p className="rounded-lg border border-dashed border-line/70 bg-panel/25 p-4 text-sm text-muted">
-          У этого раздела ещё нет схемы. Создайте черновик, чтобы добавить поля.
+          {t("adminCatalog.schema.noSchema")}
         </p>
       ) : (
         <>
@@ -144,7 +146,7 @@ export function SchemaBuilder({ sectionId }: { sectionId: string }) {
             {isEditable ? (
               <button className="app-button-secondary h-10 w-full" type="button" onClick={addField}>
                 <Plus className="h-4 w-4" />
-                Добавить поле
+                {t("adminCatalog.schema.addField")}
               </button>
             ) : null}
           </div>
@@ -155,15 +157,17 @@ export function SchemaBuilder({ sectionId }: { sectionId: string }) {
             <div className="flex flex-wrap gap-2">
               <button className="app-button h-10 px-4" type="button" disabled={saveDraft.isPending} onClick={() => saveDraft.mutate()}>
                 {saveDraft.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Сохранить черновик
+                {t("adminCatalog.schema.saveDraft")}
               </button>
               <button className="app-button-action h-10 px-4" type="button" disabled={publish.isPending || !fields.length} onClick={() => publish.mutate()}>
                 {publish.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Опубликовать эту версию
+                {t("adminCatalog.schema.publishVersion")}
               </button>
             </div>
           ) : (
-            <p className="text-xs text-muted">Эта версия {draftVersion.status === "active" ? "активна" : "в архиве"} - редактирование недоступно, создайте новый черновик.</p>
+            <p className="text-xs text-muted">
+              {draftVersion.status === "active" ? t("adminCatalog.schema.versionActiveNote") : t("adminCatalog.schema.versionArchivedNote")}
+            </p>
           )}
 
           <SchemaPreview fields={fields} />
@@ -188,6 +192,7 @@ function FieldRow({
   onMoveUp?: () => void;
   onMoveDown?: () => void;
 }) {
+  const { t } = useI18n();
   const needsOptions = field.type === "select" || field.type === "multiselect";
   const isNumber = field.type === "number";
 
@@ -203,15 +208,15 @@ function FieldRow({
         />
         <input
           className="app-input h-10"
-          placeholder="Название поля"
+          placeholder={t("adminCatalog.schema.fieldLabelPlaceholder")}
           value={field.label}
           disabled={!editable}
           onChange={(e) => onChange({ label: e.target.value })}
         />
         <select className="app-input h-10" value={field.type} disabled={!editable} onChange={(e) => onChange({ type: e.target.value as CatalogField["type"] })}>
           {CATALOG_FIELD_TYPES.map((type) => (
-            <option key={type.value} value={type.value}>
-              {type.label}
+            <option key={type} value={type}>
+              {t(`adminCatalog.fieldType.${type}`)}
             </option>
           ))}
         </select>
@@ -220,15 +225,15 @@ function FieldRow({
       <div className="mt-2 flex flex-wrap items-center gap-4 text-xs font-bold text-muted">
         <label className="inline-flex items-center gap-1.5">
           <input type="checkbox" checked={field.required} disabled={!editable} onChange={(e) => onChange({ required: e.target.checked })} />
-          Обязательное
+          {t("adminCatalog.schema.required")}
         </label>
         <label className="inline-flex items-center gap-1.5">
           <input type="checkbox" checked={field.filterable} disabled={!editable} onChange={(e) => onChange({ filterable: e.target.checked })} />
-          Показывать в фильтрах
+          {t("adminCatalog.schema.filterable")}
         </label>
         <label className="inline-flex items-center gap-1.5">
           <input type="checkbox" checked={field.showInCard} disabled={!editable} onChange={(e) => onChange({ showInCard: e.target.checked })} />
-          Показывать в карточке
+          {t("adminCatalog.schema.showInCard")}
         </label>
       </div>
 
@@ -236,7 +241,7 @@ function FieldRow({
         <div className="mt-2">
           <input
             className="app-input h-10 w-full"
-            placeholder="Варианты через запятую: Herald, Guardian, Divine"
+            placeholder={t("adminCatalog.schema.optionsPlaceholder")}
             disabled={!editable}
             value={(field.options ?? []).join(", ")}
             onChange={(e) => onChange({ options: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) })}
@@ -279,7 +284,7 @@ function FieldRow({
           ) : null}
           <button className="ml-auto inline-flex items-center gap-1 rounded-md border border-rose-500/30 px-2 py-1 text-xs font-bold text-rose-400 hover:bg-rose-500/10" type="button" onClick={onRemove}>
             <Trash2 className="h-3.5 w-3.5" />
-            Удалить поле
+            {t("adminCatalog.schema.removeField")}
           </button>
         </div>
       ) : null}
@@ -288,14 +293,15 @@ function FieldRow({
 }
 
 function SchemaPreview({ fields }: { fields: CatalogField[] }) {
+  const { t } = useI18n();
   return (
     <div className="rounded-lg border border-line bg-card p-4">
-      <p className="text-xs font-black uppercase text-brand">Preview: форма продавца</p>
+      <p className="text-xs font-black uppercase text-brand">{t("adminCatalog.schema.previewTitle")}</p>
       <div className="mt-3 space-y-3">
         {fields.map((field) => (
           <div key={field.key || field.label}>
             <label className="text-sm font-bold text-ink">
-              {field.label || field.key || "Без названия"}
+              {field.label || field.key || t("adminCatalog.schema.unnamedField")}
               {field.required ? <span className="text-rose-500"> *</span> : null}
             </label>
             {field.type === "textarea" ? (
@@ -316,7 +322,7 @@ function SchemaPreview({ fields }: { fields: CatalogField[] }) {
               </div>
             ) : field.type === "boolean" || field.type === "checkbox" ? (
               <label className="mt-1 flex items-center gap-2 text-sm text-muted">
-                <input type="checkbox" disabled /> {field.helpText || "Да / нет"}
+                <input type="checkbox" disabled /> {field.helpText || t("adminCatalog.schema.booleanFallback")}
               </label>
             ) : (
               <input className="app-input mt-1 w-full" disabled type={field.type === "number" ? "number" : "text"} placeholder={field.placeholder} />
@@ -324,7 +330,7 @@ function SchemaPreview({ fields }: { fields: CatalogField[] }) {
             {field.helpText && field.type !== "boolean" && field.type !== "checkbox" ? <p className="mt-1 text-xs text-muted">{field.helpText}</p> : null}
           </div>
         ))}
-        {!fields.length ? <p className="text-sm text-muted">Пока нет полей.</p> : null}
+        {!fields.length ? <p className="text-sm text-muted">{t("adminCatalog.schema.noFields")}</p> : null}
       </div>
     </div>
   );

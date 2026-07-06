@@ -150,15 +150,9 @@ export const catalogApi = {
     })
 };
 
-export const CATALOG_FIELD_TYPES: { value: CatalogFieldType; label: string }[] = [
-  { value: "text", label: "Текст" },
-  { value: "textarea", label: "Текст (многострочный)" },
-  { value: "number", label: "Число" },
-  { value: "select", label: "Список (один вариант)" },
-  { value: "multiselect", label: "Список (несколько вариантов)" },
-  { value: "boolean", label: "Да / Нет" },
-  { value: "checkbox", label: "Флажок" }
-];
+// Labels live in i18n (adminCatalog.fieldType.*) - this is just the stable value order
+// for rendering the type <select>, resolved to a label via useI18n() in the component.
+export const CATALOG_FIELD_TYPES: CatalogFieldType[] = ["text", "textarea", "number", "select", "multiselect", "boolean", "checkbox"];
 
 export function emptyCatalogField(sortOrder: number): CatalogField {
   return {

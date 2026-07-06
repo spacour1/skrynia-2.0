@@ -1,0 +1,91 @@
+{
+  "adminCatalog": {
+    "title": "Catalog builder",
+    "addGroup": "Group",
+    "addItem": "Add item",
+    "addSection": "Add section",
+    "emptyGroups": "No catalog groups yet.",
+    "selectPrompt": "Select an item on the left or create a new group.",
+    "genericError": "Something went wrong",
+    "save": "Save",
+    "delete": "Delete",
+    "publish": "Publish",
+    "hide": "Hide",
+    "archive": "Archive",
+    "statusUpdated": "Status updated",
+    "nameLabel": "Name",
+    "descriptionLabel": "Description",
+    "categoryLabel": "Category (risk level)",
+    "selectCategory": "Select a category",
+    "categoryOption": "{name} · risk: {risk}",
+    "deliveryTypesLabel": "Delivery types",
+    "status": {
+      "draft": "Draft",
+      "active": "Active",
+      "hidden": "Hidden",
+      "archived": "Archived",
+      "deleted": "Deleted"
+    },
+    "group": {
+      "title": "Catalog group",
+      "newTitle": "New group",
+      "updated": "Group updated",
+      "created": "Group created",
+      "deletedHard": "Group deleted",
+      "deletedSoft": "Group marked as deleted"
+    },
+    "item": {
+      "title": "Catalog item",
+      "newTitle": "New item",
+      "updated": "Item updated",
+      "created": "Item created",
+      "deletedHard": "Item deleted",
+      "deletedSoft": "Item marked as deleted"
+    },
+    "section": {
+      "title": "Catalog section",
+      "newTitle": "New section",
+      "updated": "Section updated",
+      "created": "Section created",
+      "deletedHard": "Section deleted",
+      "deletedSoft": "Section marked as deleted",
+      "published": "Section published",
+      "publishFailed": "Failed to publish",
+      "deleteFailed": "Failed to delete",
+      "schemaTitle": "Field schema ({count} lots)"
+    },
+    "schema": {
+      "versionsLabel": "Schema versions:",
+      "newDraft": "New draft",
+      "noSchema": "This section has no schema yet. Create a draft to add fields.",
+      "addField": "Add field",
+      "saveDraft": "Save draft",
+      "publishVersion": "Publish this version",
+      "versionActiveNote": "This version is active - editing is unavailable, create a new draft.",
+      "versionArchivedNote": "This version is archived - editing is unavailable, create a new draft.",
+      "draftSaved": "Schema draft saved",
+      "published": "Schema published",
+      "saveFailed": "Failed to save",
+      "publishFailed": "Failed to publish",
+      "fieldLabelPlaceholder": "Field label",
+      "required": "Required",
+      "filterable": "Show in filters",
+      "showInCard": "Show on card",
+      "optionsPlaceholder": "Comma-separated options: Herald, Guardian, Divine",
+      "removeField": "Remove field",
+      "previewTitle": "Preview: seller's form",
+      "unnamedField": "Untitled",
+      "booleanFallback": "Yes / no",
+      "noFields": "No fields yet."
+    },
+    "fieldType": {
+      "text": "Text",
+      "textarea": "Text (multiline)",
+      "number": "Number",
+      "select": "List (single choice)",
+      "multiselect": "List (multiple choice)",
+      "boolean": "Yes / No",
+      "checkbox": "Checkbox"
+    }
+  }
+}

@@ -6,6 +6,7 @@ import { ChevronRight, Loader2, Package, Plus, Store, Trash2 } from "lucide-reac
 import { RequireAuth } from "@/components/RequireAuth";
 import { SchemaBuilder } from "@/components/admin/catalog/SchemaBuilder";
 import { ApiError } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 import { showAppToast } from "@/lib/toast-events";
 import {
   catalogApi,
@@ -24,14 +25,6 @@ type Selection =
   | { kind: "new-section"; itemId: string }
   | null;
 
-const STATUS_LABELS: Record<CatalogStatus, string> = {
-  draft: "Черновик",
-  active: "Активно",
-  hidden: "Скрыто",
-  archived: "В архиве",
-  deleted: "Удалено"
-};
-
 const STATUS_COLORS: Record<CatalogStatus, string> = {
   draft: "bg-panel text-muted",
   active: "bg-emerald-500/15 text-emerald-500",
@@ -49,6 +42,7 @@ export default function AdminCatalogPage() {
 }
 
 function AdminCatalogContent() {
+  const { t } = useI18n();
   const [selection, setSelection] = useState<Selection>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
@@ -70,10 +64,10 @@ function AdminCatalogContent() {
     <div className="grid gap-5 lg:grid-cols-[380px_minmax(0,1fr)]">
       <aside className="app-card p-4">
         <div className="flex items-center justify-between gap-3">
-          <h1 className="text-lg font-black text-ink">Конструктор каталога</h1>
+          <h1 className="text-lg font-black text-ink">{t("adminCatalog.title")}</h1>
           <button className="app-button-secondary h-9 px-3 text-xs" onClick={() => setSelection({ kind: "new-group" })}>
             <Plus className="h-3.5 w-3.5" />
-            Группа
+            {t("adminCatalog.addGroup")}
           </button>
         </div>
 
@@ -95,7 +89,7 @@ function AdminCatalogContent() {
                 onSelect={setSelection}
               />
             ))}
-            {!groups.length ? <p className="p-3 text-sm text-muted">Пока нет групп каталога.</p> : null}
+            {!groups.length ? <p className="p-3 text-sm text-muted">{t("adminCatalog.emptyGroups")}</p> : null}
           </div>
         )}
       </aside>
@@ -105,7 +99,7 @@ function AdminCatalogContent() {
           <DetailPanel selection={selection} groups={groups} onSelect={setSelection} />
         ) : (
           <div className="grid min-h-[360px] place-items-center text-center text-muted">
-            Выберите элемент слева или создайте новую группу.
+            {t("adminCatalog.selectPrompt")}
           </div>
         )}
       </section>
@@ -130,6 +124,7 @@ function GroupNode({
   selection: Selection;
   onSelect: (s: Selection) => void;
 }) {
+  const { t } = useI18n();
   const active = selection?.kind === "group" && selection.id === group.id;
   return (
     <div className="rounded-lg border border-line/60">
@@ -158,7 +153,7 @@ function GroupNode({
           ))}
           <button className="mt-1 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-bold text-brand hover:bg-brand/10" onClick={() => onSelect({ kind: "new-item", groupId: group.id })}>
             <Plus className="h-3.5 w-3.5" />
-            Добавить item
+            {t("adminCatalog.addItem")}
           </button>
         </div>
       ) : null}
@@ -181,6 +176,7 @@ function ItemNode({
   selection: Selection;
   onSelect: (s: Selection) => void;
 }) {
+  const { t } = useI18n();
   const active = selection?.kind === "item" && selection.id === item.id;
   return (
     <div className="rounded-lg border border-line/40">
@@ -210,7 +206,7 @@ function ItemNode({
           ))}
           <button className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-bold text-brand hover:bg-brand/10" onClick={() => onSelect({ kind: "new-section", itemId: item.id })}>
             <Plus className="h-3.5 w-3.5" />
-            Добавить раздел
+            {t("adminCatalog.addSection")}
           </button>
         </div>
       ) : null}
@@ -219,7 +215,8 @@ function ItemNode({
 }
 
 function StatusPill({ status }: { status: CatalogStatus }) {
-  return <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${STATUS_COLORS[status]}`}>{STATUS_LABELS[status]}</span>;
+  const { t } = useI18n();
+  return <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${STATUS_COLORS[status]}`}>{t(`adminCatalog.status.${status}`)}</span>;
 }
 
 function DetailPanel({ selection, groups, onSelect }: { selection: NonNullable<Selection>; groups: AdminCatalogGroup[]; onSelect: (s: Selection) => void }) {
@@ -245,11 +242,13 @@ function DetailPanel({ selection, groups, onSelect }: { selection: NonNullable<S
 }
 
 function FormError({ error }: { error: unknown }) {
+  const { t } = useI18n();
   if (!error) return null;
-  return <p className="rounded-lg bg-rose-500/10 p-3 text-sm font-bold text-rose-400">{error instanceof ApiError ? error.message : "Что-то пошло не так"}</p>;
+  return <p className="rounded-lg bg-rose-500/10 p-3 text-sm font-bold text-rose-400">{error instanceof ApiError ? error.message : t("adminCatalog.genericError")}</p>;
 }
 
 function GroupForm({ group, onSelect }: { group?: AdminCatalogGroup; onSelect: (s: Selection) => void }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [name, setName] = useState(group?.name ?? "");
   const [slug, setSlug] = useState(group?.slug ?? "");
@@ -267,7 +266,7 @@ function GroupForm({ group, onSelect }: { group?: AdminCatalogGroup; onSelect: (
         : catalogApi.createGroup({ name, slug, description }),
     onSuccess: (data) => {
       invalidate();
-      showAppToast({ title: group ? "Группа обновлена" : "Группа создана" });
+      showAppToast({ title: group ? t("adminCatalog.group.updated") : t("adminCatalog.group.created") });
       if (!group) onSelect({ kind: "group", id: data.group.id });
     }
   });
@@ -276,7 +275,7 @@ function GroupForm({ group, onSelect }: { group?: AdminCatalogGroup; onSelect: (
     mutationFn: (status: CatalogStatus) => catalogApi.updateGroup(group!.id, { status }),
     onSuccess: () => {
       invalidate();
-      showAppToast({ title: "Статус обновлён" });
+      showAppToast({ title: t("adminCatalog.statusUpdated") });
     }
   });
 
@@ -284,7 +283,7 @@ function GroupForm({ group, onSelect }: { group?: AdminCatalogGroup; onSelect: (
     mutationFn: () => catalogApi.deleteGroup(group!.id),
     onSuccess: (result) => {
       invalidate();
-      showAppToast({ title: result.hardDeleted ? "Группа удалена" : "Группа помечена как удалённая" });
+      showAppToast({ title: result.hardDeleted ? t("adminCatalog.group.deletedHard") : t("adminCatalog.group.deletedSoft") });
       onSelect(null);
     }
   });
@@ -292,19 +291,19 @@ function GroupForm({ group, onSelect }: { group?: AdminCatalogGroup; onSelect: (
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-black text-ink">{group ? "Группа каталога" : "Новая группа"}</h2>
+        <h2 className="text-lg font-black text-ink">{group ? t("adminCatalog.group.title") : t("adminCatalog.group.newTitle")}</h2>
         {group ? <StatusPill status={group.status} /> : null}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Название">
+        <Field label={t("adminCatalog.nameLabel")}>
           <input className="app-input h-10" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
         <Field label="Slug">
           <input className="app-input h-10" value={slug} disabled={!isDraft} onChange={(e) => setSlug(e.target.value)} />
         </Field>
       </div>
-      <Field label="Описание">
+      <Field label={t("adminCatalog.descriptionLabel")}>
         <textarea className="app-input min-h-20" value={description ?? ""} onChange={(e) => setDescription(e.target.value)} />
       </Field>
 
@@ -313,13 +312,13 @@ function GroupForm({ group, onSelect }: { group?: AdminCatalogGroup; onSelect: (
       <div className="flex flex-wrap gap-2">
         <button className="app-button h-10 px-4" disabled={save.isPending || !name || !slug} onClick={() => save.mutate()}>
           {save.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          Сохранить
+          {t("adminCatalog.save")}
         </button>
         {group ? <StatusActions status={group.status} onSetStatus={(s) => setStatus.mutate(s)} /> : null}
         {group ? (
           <button className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-rose-500/30 px-3 py-2 text-xs font-bold text-rose-400 hover:bg-rose-500/10" onClick={() => remove.mutate()}>
             <Trash2 className="h-3.5 w-3.5" />
-            Удалить
+            {t("adminCatalog.delete")}
           </button>
         ) : null}
       </div>
@@ -328,6 +327,7 @@ function GroupForm({ group, onSelect }: { group?: AdminCatalogGroup; onSelect: (
 }
 
 function ItemForm({ item, groupId, onSelect }: { item?: AdminCatalogItem; groupId: string; onSelect: (s: Selection) => void }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [name, setName] = useState(item?.name ?? "");
   const [slug, setSlug] = useState(item?.slug ?? "");
@@ -344,7 +344,7 @@ function ItemForm({ item, groupId, onSelect }: { item?: AdminCatalogItem; groupI
         : catalogApi.createItem({ groupId, name, slug }),
     onSuccess: (data) => {
       invalidate();
-      showAppToast({ title: item ? "Item обновлён" : "Item создан" });
+      showAppToast({ title: item ? t("adminCatalog.item.updated") : t("adminCatalog.item.created") });
       if (!item) onSelect({ kind: "item", id: data.item.id, groupId });
     }
   });
@@ -353,7 +353,7 @@ function ItemForm({ item, groupId, onSelect }: { item?: AdminCatalogItem; groupI
     mutationFn: (status: CatalogStatus) => catalogApi.updateItem(item!.id, { status }),
     onSuccess: () => {
       invalidate();
-      showAppToast({ title: "Статус обновлён" });
+      showAppToast({ title: t("adminCatalog.statusUpdated") });
     }
   });
 
@@ -361,7 +361,7 @@ function ItemForm({ item, groupId, onSelect }: { item?: AdminCatalogItem; groupI
     mutationFn: () => catalogApi.deleteItem(item!.id),
     onSuccess: (result) => {
       invalidate();
-      showAppToast({ title: result.hardDeleted ? "Item удалён" : "Item помечен как удалённый" });
+      showAppToast({ title: result.hardDeleted ? t("adminCatalog.item.deletedHard") : t("adminCatalog.item.deletedSoft") });
       onSelect({ kind: "group", id: groupId });
     }
   });
@@ -369,12 +369,12 @@ function ItemForm({ item, groupId, onSelect }: { item?: AdminCatalogItem; groupI
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-black text-ink">{item ? "Item каталога" : "Новый item"}</h2>
+        <h2 className="text-lg font-black text-ink">{item ? t("adminCatalog.item.title") : t("adminCatalog.item.newTitle")}</h2>
         {item ? <StatusPill status={item.status} /> : null}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Название">
+        <Field label={t("adminCatalog.nameLabel")}>
           <input className="app-input h-10" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
         <Field label="Slug">
@@ -387,13 +387,13 @@ function ItemForm({ item, groupId, onSelect }: { item?: AdminCatalogItem; groupI
       <div className="flex flex-wrap gap-2">
         <button className="app-button h-10 px-4" disabled={save.isPending || !name || !slug} onClick={() => save.mutate()}>
           {save.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          Сохранить
+          {t("adminCatalog.save")}
         </button>
         {item ? <StatusActions status={item.status} onSetStatus={(s) => setStatus.mutate(s)} /> : null}
         {item ? (
           <button className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-rose-500/30 px-3 py-2 text-xs font-bold text-rose-400 hover:bg-rose-500/10" onClick={() => remove.mutate()}>
             <Trash2 className="h-3.5 w-3.5" />
-            Удалить
+            {t("adminCatalog.delete")}
           </button>
         ) : null}
       </div>
@@ -405,6 +405,7 @@ const LISTING_TYPES = ["account", "key", "topup", "boosting", "service", "item",
 const DELIVERY_TYPES = ["manual", "instant", "service"];
 
 function SectionForm({ section, itemId, onSelect }: { section?: AdminCatalogSection; itemId: string; onSelect: (s: Selection) => void }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [name, setName] = useState(section?.name ?? "");
   const [slug, setSlug] = useState(section?.slug ?? "");
@@ -426,7 +427,7 @@ function SectionForm({ section, itemId, onSelect }: { section?: AdminCatalogSect
         : catalogApi.createSection({ itemId, categoryId, name, slug, listingType, allowedDeliveryTypes: deliveryTypes }),
     onSuccess: (data) => {
       invalidate();
-      showAppToast({ title: section ? "Раздел обновлён" : "Раздел создан" });
+      showAppToast({ title: section ? t("adminCatalog.section.updated") : t("adminCatalog.section.created") });
       if (!section) onSelect({ kind: "section", id: data.section.id, itemId });
     }
   });
@@ -435,9 +436,9 @@ function SectionForm({ section, itemId, onSelect }: { section?: AdminCatalogSect
     mutationFn: () => catalogApi.publishSection(section!.id),
     onSuccess: () => {
       invalidate();
-      showAppToast({ title: "Раздел опубликован" });
+      showAppToast({ title: t("adminCatalog.section.published") });
     },
-    onError: (err) => showAppToast({ title: err instanceof ApiError ? err.message : "Не удалось опубликовать" })
+    onError: (err) => showAppToast({ title: err instanceof ApiError ? err.message : t("adminCatalog.section.publishFailed") })
   });
   const hide = useMutation({
     mutationFn: () => catalogApi.hideSection(section!.id),
@@ -452,11 +453,11 @@ function SectionForm({ section, itemId, onSelect }: { section?: AdminCatalogSect
     mutationFn: () => catalogApi.deleteSection(section!.id),
     onSuccess: (result) => {
       invalidate();
-      showAppToast({ title: result.hardDeleted ? "Раздел удалён" : "Раздел помечен как удалённый" });
+      showAppToast({ title: result.hardDeleted ? t("adminCatalog.section.deletedHard") : t("adminCatalog.section.deletedSoft") });
       // itemId's real groupId isn't known here - deselect instead of guessing a wrong one.
       onSelect(null);
     },
-    onError: (err) => showAppToast({ title: err instanceof ApiError ? err.message : "Не удалось удалить" })
+    onError: (err) => showAppToast({ title: err instanceof ApiError ? err.message : t("adminCatalog.section.deleteFailed") })
   });
 
   function toggleDeliveryType(type: string) {
@@ -466,12 +467,12 @@ function SectionForm({ section, itemId, onSelect }: { section?: AdminCatalogSect
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-black text-ink">{section ? "Раздел каталога" : "Новый раздел"}</h2>
+        <h2 className="text-lg font-black text-ink">{section ? t("adminCatalog.section.title") : t("adminCatalog.section.newTitle")}</h2>
         {section ? <StatusPill status={section.status} /> : null}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Название">
+        <Field label={t("adminCatalog.nameLabel")}>
           <input className="app-input h-10" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
         <Field label="Slug">
@@ -486,17 +487,17 @@ function SectionForm({ section, itemId, onSelect }: { section?: AdminCatalogSect
             ))}
           </select>
         </Field>
-        <Field label="Категория (уровень риска)">
+        <Field label={t("adminCatalog.categoryLabel")}>
           <select className="app-input h-10" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-            <option value="">Выберите категорию</option>
+            <option value="">{t("adminCatalog.selectCategory")}</option>
             {(categories.data?.categories ?? []).map((category) => (
               <option key={category.id} value={category.id}>
-                {category.name} · risk: {category.riskLevel}
+                {t("adminCatalog.categoryOption", { name: category.name, risk: category.riskLevel })}
               </option>
             ))}
           </select>
         </Field>
-        <Field label="Способы доставки">
+        <Field label={t("adminCatalog.deliveryTypesLabel")}>
           <div className="flex flex-wrap gap-3 pt-2 text-sm font-bold text-muted">
             {DELIVERY_TYPES.map((type) => (
               <label key={type} className="inline-flex items-center gap-1.5">
@@ -513,34 +514,34 @@ function SectionForm({ section, itemId, onSelect }: { section?: AdminCatalogSect
       <div className="flex flex-wrap gap-2">
         <button className="app-button h-10 px-4" disabled={save.isPending || !name || !slug || !categoryId} onClick={() => save.mutate()}>
           {save.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          Сохранить
+          {t("adminCatalog.save")}
         </button>
         {section && section.status !== "active" ? (
           <button className="app-button-action h-10 px-4" disabled={publish.isPending} onClick={() => publish.mutate()}>
-            Опубликовать
+            {t("adminCatalog.publish")}
           </button>
         ) : null}
         {section && section.status === "active" ? (
           <button className="app-button-secondary h-10 px-4" disabled={hide.isPending} onClick={() => hide.mutate()}>
-            Скрыть
+            {t("adminCatalog.hide")}
           </button>
         ) : null}
         {section && section.status !== "archived" ? (
           <button className="app-button-secondary h-10 px-4" disabled={archive.isPending} onClick={() => archive.mutate()}>
-            В архив
+            {t("adminCatalog.archive")}
           </button>
         ) : null}
         {section ? (
           <button className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-rose-500/30 px-3 py-2 text-xs font-bold text-rose-400 hover:bg-rose-500/10" onClick={() => remove.mutate()}>
             <Trash2 className="h-3.5 w-3.5" />
-            Удалить
+            {t("adminCatalog.delete")}
           </button>
         ) : null}
       </div>
 
       {section ? (
         <div className="border-t border-line pt-4">
-          <h3 className="text-sm font-black uppercase text-brand">Схема параметров ({section.productCount} лотов)</h3>
+          <h3 className="text-sm font-black uppercase text-brand">{t("adminCatalog.section.schemaTitle", { count: section.productCount })}</h3>
           <div className="mt-3">
             <SchemaBuilder sectionId={section.id} />
           </div>
@@ -551,21 +552,22 @@ function SectionForm({ section, itemId, onSelect }: { section?: AdminCatalogSect
 }
 
 function StatusActions({ status, onSetStatus }: { status: CatalogStatus; onSetStatus: (status: CatalogStatus) => void }) {
+  const { t } = useI18n();
   return (
     <div className="flex flex-wrap gap-2">
       {status !== "active" ? (
         <button className="app-button-secondary h-10 px-3 text-xs" onClick={() => onSetStatus("active")}>
-          Опубликовать
+          {t("adminCatalog.publish")}
         </button>
       ) : null}
       {status !== "hidden" ? (
         <button className="app-button-secondary h-10 px-3 text-xs" onClick={() => onSetStatus("hidden")}>
-          Скрыть
+          {t("adminCatalog.hide")}
         </button>
       ) : null}
       {status !== "archived" ? (
         <button className="app-button-secondary h-10 px-3 text-xs" onClick={() => onSetStatus("archived")}>
-          В архив
+          {t("adminCatalog.archive")}
         </button>
       ) : null}
     </div>

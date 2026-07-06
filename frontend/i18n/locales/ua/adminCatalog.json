@@ -1,0 +1,91 @@
+{
+  "adminCatalog": {
+    "title": "Конструктор каталогу",
+    "addGroup": "Група",
+    "addItem": "Додати item",
+    "addSection": "Додати розділ",
+    "emptyGroups": "Поки немає груп каталогу.",
+    "selectPrompt": "Виберіть елемент зліва або створіть нову групу.",
+    "genericError": "Щось пішло не так",
+    "save": "Зберегти",
+    "delete": "Видалити",
+    "publish": "Опублікувати",
+    "hide": "Сховати",
+    "archive": "В архів",
+    "statusUpdated": "Статус оновлено",
+    "nameLabel": "Назва",
+    "descriptionLabel": "Опис",
+    "categoryLabel": "Категорія (рівень ризику)",
+    "selectCategory": "Виберіть категорію",
+    "categoryOption": "{name} · risk: {risk}",
+    "deliveryTypesLabel": "Способи доставки",
+    "status": {
+      "draft": "Чернетка",
+      "active": "Активно",
+      "hidden": "Приховано",
+      "archived": "В архіві",
+      "deleted": "Видалено"
+    },
+    "group": {
+      "title": "Група каталогу",
+      "newTitle": "Нова група",
+      "updated": "Групу оновлено",
+      "created": "Групу створено",
+      "deletedHard": "Групу видалено",
+      "deletedSoft": "Групу позначено як видалену"
+    },
+    "item": {
+      "title": "Item каталогу",
+      "newTitle": "Новий item",
+      "updated": "Item оновлено",
+      "created": "Item створено",
+      "deletedHard": "Item видалено",
+      "deletedSoft": "Item позначено як видалений"
+    },
+    "section": {
+      "title": "Розділ каталогу",
+      "newTitle": "Новий розділ",
+      "updated": "Розділ оновлено",
+      "created": "Розділ створено",
+      "deletedHard": "Розділ видалено",
+      "deletedSoft": "Розділ позначено як видалений",
+      "published": "Розділ опубліковано",
+      "publishFailed": "Не вдалося опублікувати",
+      "deleteFailed": "Не вдалося видалити",
+      "schemaTitle": "Схема параметрів ({count} лотів)"
+    },
+    "schema": {
+      "versionsLabel": "Версії схеми:",
+      "newDraft": "Нова чернетка",
+      "noSchema": "У цього розділу ще немає схеми. Створіть чернетку, щоб додати поля.",
+      "addField": "Додати поле",
+      "saveDraft": "Зберегти чернетку",
+      "publishVersion": "Опублікувати цю версію",
+      "versionActiveNote": "Ця версія активна - редагування недоступне, створіть нову чернетку.",
+      "versionArchivedNote": "Ця версія в архіві - редагування недоступне, створіть нову чернетку.",
+      "draftSaved": "Чернетку схеми збережено",
+      "published": "Схему опубліковано",
+      "saveFailed": "Не вдалося зберегти",
+      "publishFailed": "Не вдалося опублікувати",
+      "fieldLabelPlaceholder": "Назва поля",
+      "required": "Обов'язкове",
+      "filterable": "Показувати у фільтрах",
+      "showInCard": "Показувати в картці",
+      "optionsPlaceholder": "Варіанти через кому: Herald, Guardian, Divine",
+      "removeField": "Видалити поле",
+      "previewTitle": "Preview: форма продавця",
+      "unnamedField": "Без назви",
+      "booleanFallback": "Так / ні",
+      "noFields": "Поки немає полів."
+    },
+    "fieldType": {
+      "text": "Текст",
+      "textarea": "Текст (багаторядковий)",
+      "number": "Число",
+      "select": "Список (один варіант)",
+      "multiselect": "Список (кілька варіантів)",
+      "boolean": "Так / Ні",
+      "checkbox": "Прапорець"
+    }
+  }
+}

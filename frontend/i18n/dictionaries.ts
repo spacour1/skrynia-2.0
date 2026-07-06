@@ -17,6 +17,7 @@ import uaWallet from "./locales/ua/wallet.json";
 import uaSettings from "./locales/ua/settings.json";
 import uaNotifications from "./locales/ua/notifications.json";
 import uaAdmin from "./locales/ua/admin.json";
+import uaAdminCatalog from "./locales/ua/adminCatalog.json";
 import uaErrors from "./locales/ua/errors.json";
 
 import ruCommon from "./locales/ru/common.json";
@@ -32,6 +33,7 @@ import ruWallet from "./locales/ru/wallet.json";
 import ruSettings from "./locales/ru/settings.json";
 import ruNotifications from "./locales/ru/notifications.json";
 import ruAdmin from "./locales/ru/admin.json";
+import ruAdminCatalog from "./locales/ru/adminCatalog.json";
 import ruErrors from "./locales/ru/errors.json";
 
 import enCommon from "./locales/en/common.json";
@@ -47,6 +49,7 @@ import enWallet from "./locales/en/wallet.json";
 import enSettings from "./locales/en/settings.json";
 import enNotifications from "./locales/en/notifications.json";
 import enAdmin from "./locales/en/admin.json";
+import enAdminCatalog from "./locales/en/adminCatalog.json";
 import enErrors from "./locales/en/errors.json";
 
 type NestedDictionary = { [key: string]: string | NestedDictionary };
@@ -70,15 +73,15 @@ function buildDictionary(namespaces: NestedDictionary[]): FlatDictionary {
 const dictionaries: Record<Locale, FlatDictionary> = {
   ua: buildDictionary([
     uaCommon, uaHome, uaNav, uaAuth, uaMarketplace, uaProduct, uaCreateLot, uaOrders,
-    uaChat, uaWallet, uaSettings, uaNotifications, uaAdmin, uaErrors
+    uaChat, uaWallet, uaSettings, uaNotifications, uaAdmin, uaAdminCatalog, uaErrors
   ] as NestedDictionary[]),
   ru: buildDictionary([
     ruCommon, ruHome, ruNav, ruAuth, ruMarketplace, ruProduct, ruCreateLot, ruOrders,
-    ruChat, ruWallet, ruSettings, ruNotifications, ruAdmin, ruErrors
+    ruChat, ruWallet, ruSettings, ruNotifications, ruAdmin, ruAdminCatalog, ruErrors
   ] as NestedDictionary[]),
   en: buildDictionary([
     enCommon, enHome, enNav, enAuth, enMarketplace, enProduct, enCreateLot, enOrders,
-    enChat, enWallet, enSettings, enNotifications, enAdmin, enErrors
+    enChat, enWallet, enSettings, enNotifications, enAdmin, enAdminCatalog, enErrors
   ] as NestedDictionary[])
 };
 

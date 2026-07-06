@@ -9,6 +9,7 @@ import { cacheDel, cacheDelPattern, cacheGet, cacheSet } from "../../common/redi
 import { moneyToCents, paginationSchema } from "../../common/validation.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { isUserOnline } from "../chat/ws.service.js";
+import { validateLotMetadata } from "../catalog/catalog.service.js";
 
 const router = Router();
 
@@ -529,12 +530,15 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = productSchema.parse(req.body);
     const categorization = await resolveCategorization(input);
+    // The section's schema (not the frontend) decides which metadata keys are valid - see
+    // catalog.validation.ts. Unknown keys are dropped; missing required ones reject the lot.
+    const { metadata, schemaVersion } = await validateLotMetadata(categorization.sectionId, input.metadata);
     const result = await pool.query(
       `insert into products(
          seller_id, category_id, game_id, section_id, title, description, price_cents, old_price_cents,
-         currency, stock, delivery_type, product_type, server, platform, delivery_template, metadata
+         currency, stock, delivery_type, product_type, server, platform, delivery_template, metadata, schema_version
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
        returning id`,
       [
         req.user.id,
@@ -552,7 +556,8 @@ router.post(
         input.server ?? null,
         input.platform ?? null,
         input.deliveryTemplate ?? null,
-        input.metadata
+        metadata,
+        schemaVersion
       ]
     );
     if (input.media?.length) await replaceProductMedia(result.rows[0].id, input.media);
@@ -593,7 +598,7 @@ router.patch(
     const id = z.string().uuid().parse(req.params.id);
     const input = productPatchSchema.parse(req.body);
 
-    const existing = await pool.query(`select seller_id from products where id = $1 and status != 'deleted'`, [id]);
+    const existing = await pool.query(`select seller_id, section_id as "sectionId" from products where id = $1 and status != 'deleted'`, [id]);
     if (!existing.rows[0]) throw notFound("Product not found");
     if (existing.rows[0].seller_id !== req.user.id && req.user.role !== "admin") throw forbidden();
 
@@ -614,6 +619,20 @@ router.patch(
     const priceCents = input.price === undefined ? undefined : moneyToCents(input.price);
     const oldPriceCents = input.oldPrice === undefined ? undefined : input.oldPrice === null ? null : moneyToCents(input.oldPrice);
 
+    // Only re-validate metadata when the caller is actually sending new metadata content;
+    // an explicit null (clear to {}) or an omitted field needs no schema check. schema_version
+    // is only updated alongside a metadata re-validation - changing sectionId alone (without
+    // resending metadata in the same request) leaves the old metadata/version pair as-is
+    // rather than silently pointing schema_version at a schema for a different section.
+    const effectiveSectionId = categorization.sectionId !== undefined ? categorization.sectionId : existing.rows[0].sectionId;
+    let validatedMetadata: Record<string, unknown> | null | undefined = input.metadata;
+    let schemaVersion: number | undefined;
+    if (input.metadata != null) {
+      const validated = await validateLotMetadata(effectiveSectionId, input.metadata);
+      validatedMetadata = validated.metadata;
+      schemaVersion = validated.schemaVersion ?? undefined;
+    }
+
     const { sets, values } = buildDynamicUpdate(id, {
       category_id: categorization.categoryId,
       game_id: categorization.gameId,
@@ -631,7 +650,8 @@ router.patch(
       delivery_template: input.deliveryTemplate,
       // metadata's column is `not null default '{}'`, so an explicit null "clears" to {}
       // rather than to an actual SQL null.
-      metadata: input.metadata === null ? {} : input.metadata,
+      metadata: validatedMetadata === null ? {} : validatedMetadata,
+      schema_version: schemaVersion,
       status: input.status
     });
     if (sets.length) {

@@ -27,6 +27,8 @@ import supportRoutes from "./modules/support/support.routes.js";
 import notificationRoutes from "./modules/notifications/notifications.routes.js";
 import telegramWebhookRoutes from "./modules/notifications/telegram-webhook.routes.js";
 import currencyRoutes from "./modules/currencies/currencies.routes.js";
+import catalogRoutes from "./modules/catalog/catalog.routes.js";
+import adminCatalogRoutes from "./modules/catalog/admin-catalog.routes.js";
 
 export function createApp() {
   const app = express();
@@ -59,7 +61,9 @@ export function createApp() {
   app.use("/auth", authRoutes);
   app.use("/users", userRoutes);
   app.use("/users", userBlockRoutes);
+  app.use("/marketplace/catalog", publicReadRateLimit, catalogRoutes);
   app.use("/marketplace", publicReadRateLimit, marketplaceRoutes);
+  app.use("/admin/catalog", adminCatalogRoutes);
   app.use("/orders", orderRoutes);
   app.use("/payments", paymentRoutes);
   app.use("/payments", testPaymentRoutes);

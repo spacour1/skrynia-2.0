@@ -5,7 +5,6 @@ import type { TranslateParams } from "@/i18n/dictionaries";
 
 export type SellerTab = { key: string; label: string; count: number };
 
-/** Groups a seller's products into tabs: by game name, then category name, then product type. */
 export function buildSellerTabs(products: Product[], t: (key: string, params?: TranslateParams) => string): SellerTab[] {
   const counts = new Map<string, number>();
   for (const product of products) {
@@ -30,19 +29,22 @@ export function SellerTabs({
   onSelect: (key: string) => void;
 }) {
   return (
-    <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+    <div className="flex gap-3 overflow-x-auto pb-0">
       {tabs.map((tab) => (
         <button
           key={tab.key}
           type="button"
-          className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+          className={`inline-flex h-10 shrink-0 items-center gap-3 whitespace-nowrap rounded-xl border px-4 text-sm font-bold transition ${
             activeTab === tab.key
-              ? "border-brand bg-brand text-stone-950"
-              : "border-line bg-card text-muted hover:border-brand/60 hover:text-ink"
+              ? "border-brand bg-brand text-stone-950 shadow-[0_12px_28px_rgba(246,190,78,0.18)]"
+              : "border-line bg-card text-slate-200 hover:border-brand/60 hover:text-white"
           }`}
           onClick={() => onSelect(tab.key)}
         >
-          {tab.label} <span className="opacity-70">{tab.count}</span>
+          <span>{tab.label}</span>
+          <span className={`rounded-lg px-2 py-1 text-xs leading-none ${activeTab === tab.key ? "bg-stone-950/10 text-stone-950" : "bg-panel text-slate-300"}`}>
+            {tab.count}
+          </span>
         </button>
       ))}
     </div>

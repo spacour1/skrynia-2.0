@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1724 360" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <radialGradient id="gold-glow" cx="48%" cy="24%" r="28%">
+      <stop offset="0" stop-color="#ffd76a" stop-opacity=".78"/>
+      <stop offset=".36" stop-color="#d77a14" stop-opacity=".36"/>
+      <stop offset="1" stop-color="#020711" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="blue-glow" cx="73%" cy="19%" r="24%">
+      <stop offset="0" stop-color="#2dd4ff" stop-opacity=".5"/>
+      <stop offset=".45" stop-color="#2563eb" stop-opacity=".24"/>
+      <stop offset="1" stop-color="#020711" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="purple-glow" cx="67%" cy="24%" r="17%">
+      <stop offset="0" stop-color="#c026d3" stop-opacity=".44"/>
+      <stop offset="1" stop-color="#020711" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2=".25">
+      <stop offset="0" stop-color="#020711"/>
+      <stop offset=".32" stop-color="#07111c"/>
+      <stop offset=".52" stop-color="#102338"/>
+      <stop offset=".74" stop-color="#06101c"/>
+      <stop offset="1" stop-color="#020711"/>
+    </linearGradient>
+    <linearGradient id="chest" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7b43b"/>
+      <stop offset=".42" stop-color="#8a3f13"/>
+      <stop offset="1" stop-color="#160b05"/>
+    </linearGradient>
+    <linearGradient id="vignette" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#000" stop-opacity=".1"/>
+      <stop offset=".52" stop-color="#000" stop-opacity=".18"/>
+      <stop offset="1" stop-color="#000" stop-opacity=".86"/>
+    </linearGradient>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+  </defs>
+
+  <rect width="1724" height="360" fill="url(#sky)"/>
+  <rect width="1724" height="360" fill="url(#gold-glow)"/>
+  <rect width="1724" height="360" fill="url(#blue-glow)"/>
+  <rect width="1724" height="360" fill="url(#purple-glow)"/>
+
+  <g opacity=".34" stroke="#7a4318" stroke-width="4" fill="none">
+    <path d="M505 356C470 252 483 147 548 63c34-44 78-70 126-83"/>
+    <path d="M560 356C532 245 548 142 617 61c31-37 72-61 122-74"/>
+    <path d="M616 354c-21-100-2-194 61-268 32-37 72-61 118-74"/>
+    <path d="M503 121h210M486 174h248M492 235h232"/>
+  </g>
+
+  <g opacity=".34" stroke="#1b2e43" stroke-width="5" fill="none">
+    <path d="M1290 4c-48 70-55 155-21 256"/>
+    <path d="M1390 2c-62 88-75 189-36 306"/>
+    <path d="M1482 0c-46 96-45 204-3 340"/>
+    <path d="M1210 108h335M1196 178h402M1218 248h348"/>
+  </g>
+
+  <ellipse cx="816" cy="121" rx="190" ry="82" fill="#f59e0b" opacity=".12" filter="url(#soft)"/>
+  <g transform="translate(750 86)">
+    <path d="M22 33c2-24 21-43 47-43h90c27 0 47 19 49 43l3 56H18l4-56Z" fill="url(#chest)" stroke="#fbbf24" stroke-opacity=".44" stroke-width="2"/>
+    <path d="M0 65c0-12 10-22 22-22h184c12 0 22 10 22 22v70H0V65Z" fill="#2a1308" stroke="#f59e0b" stroke-opacity=".38" stroke-width="2"/>
+    <path d="M18 57h192v28H18z" fill="#74360f" opacity=".95"/>
+    <path d="M106 43h18v91h-18z" fill="#f59e0b" opacity=".35"/>
+    <path d="M2 104h224" stroke="#fbbf24" stroke-opacity=".18" stroke-width="3"/>
+    <circle cx="115" cy="93" r="6" fill="#fbbf24" opacity=".8"/>
+  </g>
+
+  <g transform="translate(1098 50)">
+    <polygon points="58 0 91 45 74 139 38 139 21 45" fill="#38bdf8" opacity=".64"/>
+    <polygon points="112 38 150 89 130 190 88 190 71 89" fill="#2563eb" opacity=".45"/>
+    <polygon points="0 76 31 110 21 172 -14 172 -27 110" fill="#c026d3" opacity=".58"/>
+    <polygon points="194 95 225 136 210 205 175 205 160 136" fill="#0ea5e9" opacity=".36"/>
+  </g>
+
+  <g opacity=".55" fill="#fbbf24">
+    <circle cx="722" cy="73" r="3"/>
+    <circle cx="687" cy="103" r="2"/>
+    <circle cx="935" cy="86" r="2"/>
+    <circle cx="961" cy="142" r="3"/>
+    <path d="M690 62l5 9 9 5-9 5-5 9-5-9-9-5 9-5z"/>
+    <path d="M966 119l4 7 7 4-7 4-4 7-4-7-7-4 7-4z"/>
+  </g>
+
+  <rect width="1724" height="360" fill="url(#vignette)"/>
+  <rect width="1724" height="360" fill="none" stroke="#1f2937" stroke-opacity=".42"/>
+</svg>

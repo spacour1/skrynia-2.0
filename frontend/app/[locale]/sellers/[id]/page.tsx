@@ -154,15 +154,15 @@ export default function SellerPage({ params }: { params: { id: string } }) {
 
   if (seller.isLoading) {
     return (
-      <div className="w-full max-w-none space-y-3">
-        <div className="app-card h-[290px] animate-pulse bg-panel/40" />
+      <div className="w-full max-w-none space-y-3 lg:-mt-[17px] lg:ml-[6px] lg:w-[calc(100vw-196px)] lg:max-w-none min-[1720px]:ml-[calc(866px-50vw)]">
+        <div className="app-card h-[360px] animate-pulse bg-panel/40" />
         <div className="app-card h-32 animate-pulse bg-panel/40" />
       </div>
     );
   }
 
   if (seller.isError || !seller.data) {
-    return <p className="w-full max-w-none text-rose-600">{t("orders.notFound")}</p>;
+    return <p className="w-full max-w-none text-rose-600 lg:-mt-[17px] lg:ml-[6px] lg:w-[calc(100vw-196px)] lg:max-w-none min-[1720px]:ml-[calc(866px-50vw)]">{t("orders.notFound")}</p>;
   }
 
   const { user, stats } = seller.data;
@@ -217,7 +217,7 @@ export default function SellerPage({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="w-full max-w-none space-y-3">
+    <div className="w-full max-w-none space-y-3 lg:-mt-[17px] lg:ml-[6px] lg:w-[calc(100vw-196px)] lg:max-w-none min-[1720px]:ml-[calc(866px-50vw)]">
       <SellerHero
         displayName={user.displayName}
         avatarUrl={user.avatarUrl}
@@ -249,24 +249,25 @@ export default function SellerPage({ params }: { params: { id: string } }) {
 
       <SellerTabs tabs={tabs} activeTab={activeTab} onSelect={setActiveTab} />
 
-      <div className="space-y-2">
-        {visibleProducts.map((product) => (
-          <SellerListingRow
-            key={product.id}
-            product={product}
-            sellerDisplayName={user.displayName}
-            sellerAvatarUrl={user.avatarUrl}
-            sellerRating={rating}
-            sellerMemberSince={new Date(user.createdAt).getFullYear().toString()}
-            isFavorite={favoriteProductIds.has(product.id)}
-            favoritePending={productFavoriteMutation.isPending && productFavoriteMutation.variables?.productId === product.id}
-            onToggleFavorite={handleToggleProductFavorite}
-          />
-        ))}
-        {!visibleProducts.length ? (
-          <div className="app-card grid min-h-[140px] place-items-center p-6 text-center text-sm text-muted">{t("seller.noActiveOffers")}</div>
-        ) : null}
-      </div>
+      {visibleProducts.length ? (
+        <div className="overflow-hidden rounded-xl border border-line/80 bg-[#050a12] shadow-soft">
+          {visibleProducts.map((product) => (
+            <SellerListingRow
+              key={product.id}
+              product={product}
+              sellerDisplayName={user.displayName}
+              sellerAvatarUrl={user.avatarUrl}
+              sellerRating={rating}
+              sellerCreatedAt={user.createdAt}
+              isFavorite={favoriteProductIds.has(product.id)}
+              favoritePending={productFavoriteMutation.isPending && productFavoriteMutation.variables?.productId === product.id}
+              onToggleFavorite={handleToggleProductFavorite}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="app-card grid min-h-[140px] place-items-center p-6 text-center text-sm text-muted">{t("seller.noActiveOffers")}</div>
+      )}
 
       <section className="app-card p-4">
         <h2 className="text-base font-black text-ink">{t("seller.reviews")}</h2>

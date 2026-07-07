@@ -43,6 +43,9 @@
     "txWalletCredit": "Поповнення балансу",
     "txWalletDebit": "Вивід коштів",
     "statusCompleted": "Завершено",
-    "securePayments": "Безпечні платежі та виплати"
+    "securePayments": "Безпечні платежі та виплати",
+    "phoneNotVerifiedTitle": "Підтвердьте номер телефону",
+    "phoneNotVerifiedText": "Для виводу коштів потрібно підтвердити номер телефону в налаштуваннях профілю.",
+    "phoneNotVerifiedOpenSettings": "Відкрити налаштування"
   }
 }

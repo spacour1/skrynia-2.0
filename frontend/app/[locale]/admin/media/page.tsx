@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { RequireAuth } from "@/components/RequireAuth";
+import { useI18n } from "@/lib/i18n";
 
 type AdminMedia = {
   id: string;
@@ -25,6 +26,7 @@ export default function AdminMediaPage() {
 }
 
 function AdminMediaContent() {
+  const { t } = useI18n();
   const client = useQueryClient();
   const media = useQuery({
     queryKey: ["admin-media"],
@@ -38,10 +40,8 @@ function AdminMediaContent() {
 
   return (
     <section className="app-card p-5">
-      <h1 className="text-xl font-extrabold">Модерация изображений товаров</h1>
-      <p className="mt-1 text-sm text-muted">
-        Отклонённые изображения скрываются из публичных карточек, но остаются видны продавцу.
-      </p>
+      <h1 className="text-xl font-extrabold">{t("admin.mediaTitle")}</h1>
+      <p className="mt-1 text-sm text-muted">{t("admin.mediaSubtitle")}</p>
       <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {media.data?.media.map((item) => (
           <article key={item.id} className="overflow-hidden rounded-lg border border-line bg-surface/50">
@@ -67,7 +67,7 @@ function AdminMediaContent() {
                       className="rounded-md border border-line px-2 py-1 text-xs transition hover:bg-panel"
                       onClick={() => moderate.mutate({ id: item.id, status: "approved" })}
                     >
-                      Разрешить
+                      {t("admin.allow")}
                     </button>
                   ) : null}
                   {item.status !== "rejected" ? (
@@ -75,7 +75,7 @@ function AdminMediaContent() {
                       className="rounded-md border border-line px-2 py-1 text-xs transition hover:bg-panel"
                       onClick={() => moderate.mutate({ id: item.id, status: "rejected" })}
                     >
-                      Отклонить
+                      {t("admin.block")}
                     </button>
                   ) : null}
                 </div>
@@ -83,7 +83,7 @@ function AdminMediaContent() {
             </div>
           </article>
         ))}
-        {!media.data?.media.length ? <p className="text-sm text-muted">Изображений пока нет.</p> : null}
+        {!media.data?.media.length ? <p className="text-sm text-muted">{t("admin.mediaNone")}</p> : null}
       </div>
     </section>
   );

@@ -20,15 +20,25 @@ CI config: `.github/workflows/ci.yml`. Backend CI spins up real PostgreSQL 16 an
 
 ## Test database
 
-Connection string: `TEST_DATABASE_URL` env var (falls back to `DATABASE_URL`). CI uses `postgres://marketplace:marketplace@localhost:5432/marketplace_test`. Migrations are applied before tests run (`npm run migrate`).
+Connection string: `TEST_DATABASE_URL` env var. CI uses `postgres://marketplace:marketplace@localhost:5432/marketplace_test`.
+Migrations are applied before tests run. `node-pg-migrate` reads `DATABASE_URL`, so point `DATABASE_URL`
+at the test database when applying migrations manually.
+
+Docker Compose example:
+
+```bash
+docker compose -f docker-compose.dev.yml exec -T postgres psql -U marketplace -d marketplace -c "CREATE DATABASE marketplace_test"
+docker compose -f docker-compose.dev.yml exec -T -e DATABASE_URL=postgres://marketplace:marketplace@postgres:5432/marketplace_test backend npx node-pg-migrate up --envPath .env
+docker compose -f docker-compose.dev.yml exec -T -e TEST_DATABASE_URL=postgres://marketplace:marketplace@postgres:5432/marketplace_test -e TEST_REDIS_URL=redis://redis:6379/15 backend npm test
+```
 
 ## Writing tests
 
-Test files live next to the source they test, named `*.test.ts`.
+Backend test files live in `backend/test`, named `*.test.ts`.
 
 ```
-src/modules/orders/orders.test.ts
-src/modules/auth/totp.service.test.ts
+test/ledger.test.ts
+test/auth.test.ts
 ```
 
 Use `supertest` for HTTP integration tests against the Express app:
@@ -114,4 +124,7 @@ For these, use the dev Docker environment (`docker-compose.dev.yml`) and the see
 | admin@example.com | Password123! | admin |
 | moderator@example.com | Password123! | moderator |
 | buyer@example.com | Password123! | user |
-| seller@example.com | Password123! | user |
+| nova.accounts@example.com | Password123! | user |
+| pixel.boost@example.com | Password123! | user |
+| keyforge.market@example.com | Password123! | user |
+| raid.supply@example.com | Password123! | user |

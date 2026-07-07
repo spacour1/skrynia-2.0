@@ -23,6 +23,7 @@ import { confirmTwoFactor, disableTwoFactor, setupTwoFactor } from "../auth/twof
 import { deleteStoredFile } from "../storage/storage.routes.js";
 import { locales } from "../../i18n/config.js";
 import { getRequestLocale } from "../../i18n/t.js";
+import { attachCardMetadata } from "../marketplace/marketplace.helpers.js";
 
 const router = Router();
 
@@ -417,6 +418,8 @@ router.get(
               p.status, p.delivery_type as "deliveryType", p.product_type as "productType",
               p.old_price_cents as "oldPriceCents", p.sales_count as "salesCount",
               p.is_hot as "isHot", p.is_recommended as "isRecommended",
+              p.server, p.platform, p.metadata,
+              p.section_id as "sectionId", p.schema_version as "schemaVersion",
               p.created_at as "createdAt",
               c.slug as "categorySlug", c.name as "categoryName",
               g.slug as "gameSlug", g.name as "gameName",
@@ -472,10 +475,11 @@ router.get(
     );
 
     const seller = user.rows[0];
+    const productsWithCardMetadata = await attachCardMetadata(products.rows);
     res.json({
       user: { ...seller, online: isUserOnline(seller.id) },
       stats: stats.rows[0],
-      products: products.rows.map((product) => ({ ...product, sellerOnline: isUserOnline(seller.id) })),
+      products: productsWithCardMetadata.map((product) => ({ ...product, sellerOnline: isUserOnline(seller.id) })),
       reviews: reviews.rows
     });
   })

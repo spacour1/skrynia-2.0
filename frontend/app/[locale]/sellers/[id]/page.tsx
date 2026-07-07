@@ -1,14 +1,17 @@
 "use client";
 
-import Link from "@/lib/navigation";
-import { useRouter } from "@/lib/navigation";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Heart, MessageCircle, Star, Store } from "lucide-react";
-import { EmailNotVerifiedNotice } from "@/components/EmailNotVerifiedNotice";
-import { apiFetch, isEmailNotVerifiedError, type Product } from "@/lib/api";
-import { ProductCard } from "@/components/ProductCard";
+import { useRouter } from "@/lib/navigation";
+import { apiFetch, type Product, type User } from "@/lib/api";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
+import { showAppToast } from "@/lib/toast-events";
+import { EditSellerBannerModal } from "./EditSellerBannerModal";
+import { EditSellerProfileModal } from "./EditSellerProfileModal";
+import { SellerHero } from "./SellerHero";
+import { SellerListingRow } from "./SellerListingRow";
+import { buildSellerTabs, SellerTabs } from "./SellerTabs";
 
 type SellerResponse = {
   user: {
@@ -27,155 +30,269 @@ type SellerResponse = {
     totalSales: number;
     completedOrders: number;
     successRate: number;
+    favoriteCount: number;
+    activeOrders?: number;
+    disputedOrders?: number;
+    completedRevenueCents?: string | number;
   };
   products: Product[];
+  reviews?: Array<{
+    id: string;
+    rating: number;
+    comment?: string | null;
+    buyerDisplayName: string;
+    productTitle?: string;
+    createdAt: string;
+  }>;
 };
+
+function readSetting(settings: Record<string, unknown> | undefined, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = settings?.[key];
+    if (typeof value === "string" && value) return value;
+  }
+  return "";
+}
 
 export default function SellerPage({ params }: { params: { id: string } }) {
   const { t } = useI18n();
   const router = useRouter();
+  const client = useQueryClient();
   const userSession = useAuth((state) => state.user);
   const hydrated = useAuth((state) => state.hydrated);
-  const client = useQueryClient();
+  const setAuthUser = useAuth((state) => state.setUser);
+
+  const [activeTab, setActiveTab] = useState("all");
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [showEditBanner, setShowEditBanner] = useState(false);
+
   const seller = useQuery({
     queryKey: ["seller", params.id],
     queryFn: () => apiFetch<SellerResponse>(`/users/${params.id}`)
   });
-  const favorites = useQuery({
+
+  const sellerFavorites = useQuery({
     queryKey: ["seller-favorites"],
     queryFn: () => apiFetch<{ sellerIds: string[] }>("/users/me/seller-favorites"),
     enabled: Boolean(userSession)
   });
-  const favoriteMutation = useMutation({
-    mutationFn: (liked: boolean) => apiFetch(`/users/${params.id}/favorite`, { method: liked ? "DELETE" : "PUT" }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["seller-favorites"] })
+
+  const productFavoriteIds = useQuery({
+    queryKey: ["favorite-ids"],
+    queryFn: () => apiFetch<{ productIds: string[] }>("/marketplace/favorites/ids"),
+    enabled: Boolean(userSession)
   });
+
+  const sellerFavoriteMutation = useMutation({
+    mutationFn: (liked: boolean) => apiFetch(`/users/${params.id}/favorite`, { method: liked ? "DELETE" : "PUT" }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ["seller-favorites"] });
+      client.invalidateQueries({ queryKey: ["seller", params.id] });
+    },
+    onError: () => showAppToast({ title: t("common.somethingWentWrong") })
+  });
+
+  const productFavoriteMutation = useMutation({
+    mutationFn: ({ productId, liked }: { productId: string; liked: boolean }) =>
+      apiFetch(`/marketplace/favorites/${productId}`, { method: liked ? "DELETE" : "PUT" }),
+    onMutate: async ({ productId, liked }) => {
+      await client.cancelQueries({ queryKey: ["favorite-ids"] });
+      const previous = client.getQueryData<{ productIds: string[] }>(["favorite-ids"]);
+      client.setQueryData<{ productIds: string[] }>(["favorite-ids"], (current) => {
+        const ids = current?.productIds ?? [];
+        return { productIds: liked ? ids.filter((id) => id !== productId) : Array.from(new Set([productId, ...ids])) };
+      });
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) client.setQueryData(["favorite-ids"], context.previous);
+    },
+    onSuccess: (_data, variables) => {
+      client.invalidateQueries({ queryKey: ["favorite-ids"] });
+      client.invalidateQueries({ queryKey: ["favorites"] });
+      client.invalidateQueries({ queryKey: ["seller", params.id] });
+      showAppToast({
+        type: "favorite",
+        title: variables.liked ? t("seller.listingFavoriteRemoved") : t("seller.listingFavoriteAdded"),
+        productId: variables.productId
+      });
+    }
+  });
+
   const startChat = useMutation({
     mutationFn: () => apiFetch<{ conversationId: string }>(`/chat/users/${params.id}/start`, { method: "POST" }),
     onSuccess: ({ conversationId }) => router.push(`/messages?conversationId=${conversationId}`)
   });
 
-  if (seller.isLoading) return <p className="text-muted">{t("common.loading")}</p>;
-  if (!seller.data) return <p className="text-rose-600">{t("orders.notFound")}</p>;
+  const avatarUpload = useMutation({
+    mutationFn: async (file: File) => {
+      const body = new FormData();
+      body.append("file", file);
+      const uploaded = await apiFetch<{ url: string }>("/storage/upload", { method: "POST", body });
+      const updated = await apiFetch<{ user: User }>("/users/me", {
+        method: "PATCH",
+        body: JSON.stringify({ avatarUrl: uploaded.url, settings: seller.data?.user.settings ?? {} })
+      });
+      return updated.user;
+    },
+    onSuccess: (updated) => {
+      client.invalidateQueries({ queryKey: ["seller", params.id] });
+      if (userSession?.id === updated.id) setAuthUser({ ...userSession, ...updated });
+    },
+    onError: () => showAppToast({ title: t("seller.profileSaveFailed") })
+  });
 
-  const { user, stats, products } = seller.data;
+  const products = seller.data?.products ?? [];
+  const tabs = useMemo(() => buildSellerTabs(products, t), [products, t]);
+  const visibleProducts = useMemo(() => {
+    if (activeTab === "all") return products;
+    return products.filter((product) => {
+      const label = product.gameName || product.categoryName || (product.productType ? t(`product.type.${product.productType}`) : null);
+      return label === activeTab;
+    });
+  }, [products, activeTab, t]);
+
+  if (seller.isLoading) {
+    return (
+      <div className="w-full max-w-none space-y-3">
+        <div className="app-card h-[290px] animate-pulse bg-panel/40" />
+        <div className="app-card h-32 animate-pulse bg-panel/40" />
+      </div>
+    );
+  }
+
+  if (seller.isError || !seller.data) {
+    return <p className="w-full max-w-none text-rose-600">{t("orders.notFound")}</p>;
+  }
+
+  const { user, stats } = seller.data;
+  const reviews = seller.data.reviews ?? [];
   const rating = Number(user.ratingAverage ?? 0);
-  const isFavorite = favorites.data?.sellerIds.includes(user.id) ?? false;
   const isOwn = userSession?.id === user.id;
-  const headline = typeof user.settings?.headline === "string" ? user.settings.headline : "SKRYNIA seller";
-  const specialty = typeof user.settings?.specialty === "string" ? user.settings.specialty : "Digital goods";
-  const responseTime = typeof user.settings?.responseTime === "string" ? user.settings.responseTime : "Usually fast";
-  const startChatError = startChat.error;
+  const isFavorite = sellerFavorites.data?.sellerIds.includes(user.id) ?? false;
+  const favoriteProductIds = new Set(productFavoriteIds.data?.productIds ?? []);
+  const tagline = readSetting(user.settings, "sellerTagline", "headline") || t("seller.trustedSeller");
+  const bannerUrl = readSetting(user.settings, "sellerBannerUrl", "bannerUrl") || undefined;
 
-  function writeSeller() {
+  function requireAuth(next: () => void) {
     if (!hydrated) return;
     if (!userSession) {
-      router.push(`/login?next=${encodeURIComponent(`/users/${params.id}`)}`);
+      router.push(`/login?next=${encodeURIComponent(`/sellers/${params.id}`)}`);
       return;
     }
-    startChat.reset();
-    startChat.mutate();
+    next();
+  }
+
+  function handleMessage() {
+    requireAuth(() => {
+      startChat.reset();
+      startChat.mutate();
+    });
+  }
+
+  function handleToggleSellerFavorite() {
+    requireAuth(() => sellerFavoriteMutation.mutate(isFavorite));
+  }
+
+  function handleToggleProductFavorite(product: Product) {
+    requireAuth(() => productFavoriteMutation.mutate({ productId: product.id, liked: favoriteProductIds.has(product.id) }));
+  }
+
+  function handleAvatarPick(file: File) {
+    avatarUpload.mutate(file);
+  }
+
+  function handleProfileSaved(updated: User) {
+    client.invalidateQueries({ queryKey: ["seller", params.id] });
+    if (userSession?.id === updated.id) setAuthUser({ ...userSession, ...updated });
+    showAppToast({ title: t("seller.profileSaved") });
+    setShowEditProfile(false);
+  }
+
+  function handleBannerSaved(updated: User) {
+    client.invalidateQueries({ queryKey: ["seller", params.id] });
+    if (userSession?.id === updated.id) setAuthUser({ ...userSession, ...updated });
+    showAppToast({ title: t("seller.bannerSaved") });
+    setShowEditBanner(false);
   }
 
   return (
-    <div className="mx-auto grid max-w-[1180px] gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
-      <aside className="space-y-4 xl:sticky xl:top-28 xl:self-start">
-        <section className="app-card p-5">
-          <div className="flex flex-col items-center text-center">
-            <span className="grid h-24 w-24 place-items-center overflow-hidden rounded-2xl border border-line bg-panel text-3xl font-black text-brand">
-              {user.avatarUrl ? <img className="h-full w-full object-cover" src={user.avatarUrl} alt={user.displayName} /> : user.displayName.slice(0, 1).toUpperCase()}
-            </span>
-            <h1 className="mt-4 max-w-full truncate text-xl font-black text-ink">{user.displayName}</h1>
-            <p className="mt-1 text-sm font-bold text-muted">{headline}</p>
-            <span className="mt-3 inline-flex items-center gap-2 rounded-full bg-panel px-3 py-1 text-xs font-bold text-muted">
-              <span className={`h-2.5 w-2.5 rounded-full ${user.online ? "bg-emerald-400" : "bg-muted"}`} />
-              {user.online ? "Online" : "Offline"}
-            </span>
-          </div>
+    <div className="w-full max-w-none space-y-3">
+      <SellerHero
+        displayName={user.displayName}
+        avatarUrl={user.avatarUrl}
+        online={user.online}
+        createdAt={user.createdAt}
+        bannerUrl={bannerUrl}
+        rating={rating}
+        reviewCount={user.reviewCount}
+        completedOrders={stats.completedOrders || stats.totalSales}
+        tagline={tagline}
+        isOwn={isOwn}
+        isFavorite={isFavorite}
+        favoritePending={sellerFavoriteMutation.isPending}
+        onToggleFavorite={handleToggleSellerFavorite}
+        messagePending={startChat.isPending}
+        messageError={startChat.error}
+        onMessage={handleMessage}
+        onEditProfile={() => setShowEditProfile(true)}
+        onEditBanner={() => setShowEditBanner(true)}
+        onAvatarPick={handleAvatarPick}
+        avatarUploadPending={avatarUpload.isPending}
+        stats={{
+          activeListings: stats.activeListings,
+          completedSales: stats.completedOrders || stats.totalSales,
+          successRate: stats.successRate,
+          favoriteCount: stats.favoriteCount
+        }}
+      />
 
-          <div className="mt-5 grid gap-2 text-sm">
-            <InfoRow label="Rating" value={rating ? rating.toFixed(1) : "New"} />
-            <InfoRow label="Reviews" value={user.reviewCount} />
-            <InfoRow label="Deals" value={stats.completedOrders} />
-            <InfoRow label="Response" value={responseTime} />
-            <InfoRow label="Focus" value={specialty} />
-          </div>
+      <SellerTabs tabs={tabs} activeTab={activeTab} onSelect={setActiveTab} />
 
-          {!isOwn ? (
-            <div className="mt-5 grid gap-2">
-              <button className="app-button h-11 w-full" type="button" disabled={!hydrated || startChat.isPending} onClick={writeSeller}>
-                <MessageCircle className="h-4 w-4" />
-                {startChat.isPending ? t("seller.openingChat") : t("seller.messageUser")}
-              </button>
-              <button className={isFavorite ? "app-button h-11 w-full" : "app-button-secondary h-11 w-full"} disabled={!userSession || favoriteMutation.isPending} onClick={() => favoriteMutation.mutate(isFavorite)}>
-                <Heart className={`h-4 w-4 ${isFavorite ? "fill-current" : ""}`} />
-                {isFavorite ? t("seller.saved") : t("seller.saveUser")}
-              </button>
-              {startChatError ? (
-                isEmailNotVerifiedError(startChatError) ? (
-                  <EmailNotVerifiedNotice />
-                ) : (
-                  <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm font-bold text-rose-300">
-                    {startChatError instanceof Error ? startChatError.message : t("common.somethingWentWrong")}
-                  </p>
-                )
-              ) : null}
-            </div>
-          ) : null}
-        </section>
-
-        <Link className="app-card flex items-center justify-between px-4 py-3 text-sm font-bold text-muted transition hover:text-brand" href="/">
-          <span className="inline-flex items-center gap-2">
-            <Store className="h-4 w-4" />
-            {t("nav.home")}
-          </span>
-          <ChevronRight className="h-4 w-4" />
-        </Link>
-      </aside>
-
-      <main className="space-y-4">
-        <section className="app-card flex flex-wrap items-center justify-between gap-3 p-5">
-          <div>
-            <p className="text-xs font-black uppercase text-brand">{t("seller.activeListings")}</p>
-            <h2 className="mt-1 text-xl font-black text-ink">{t("seller.activeOffersCount", { count: products.length })}</h2>
-          </div>
-          <div className="inline-flex items-center gap-2 rounded-full bg-panel px-3 py-1 text-sm font-bold text-muted">
-            <Star className="h-4 w-4 fill-action text-action" />
-            {rating ? rating.toFixed(1) : "New seller"}
-          </div>
-        </section>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          {products.map((product) => (
-            <ProductCard
-              key={product.id}
-              product={{
-                ...product,
-                sellerId: user.id,
-                sellerDisplayName: user.displayName,
-                sellerRating: rating,
-                sellerReviewCount: user.reviewCount,
-                sellerOnline: user.online
-              }}
-            />
-          ))}
-        </div>
-
-        {!products.length ? (
-          <div className="app-card grid min-h-[220px] place-items-center p-8 text-center text-sm text-muted">
-            {t("seller.noActiveOffers")}
-          </div>
+      <div className="space-y-2">
+        {visibleProducts.map((product) => (
+          <SellerListingRow
+            key={product.id}
+            product={product}
+            sellerDisplayName={user.displayName}
+            sellerAvatarUrl={user.avatarUrl}
+            sellerRating={rating}
+            sellerMemberSince={new Date(user.createdAt).getFullYear().toString()}
+            isFavorite={favoriteProductIds.has(product.id)}
+            favoritePending={productFavoriteMutation.isPending && productFavoriteMutation.variables?.productId === product.id}
+            onToggleFavorite={handleToggleProductFavorite}
+          />
+        ))}
+        {!visibleProducts.length ? (
+          <div className="app-card grid min-h-[140px] place-items-center p-6 text-center text-sm text-muted">{t("seller.noActiveOffers")}</div>
         ) : null}
-      </main>
-    </div>
-  );
-}
+      </div>
 
-function InfoRow({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="flex items-center justify-between gap-3 border-b border-line/70 py-2 last:border-b-0">
-      <span className="text-muted">{label}</span>
-      <span className="min-w-0 truncate text-right font-black text-ink">{value}</span>
+      <section className="app-card p-4">
+        <h2 className="text-base font-black text-ink">{t("seller.reviews")}</h2>
+        {reviews.length ? (
+          <div className="mt-3 space-y-2">
+            {reviews.slice(0, 5).map((review) => (
+              <div key={review.id} className="rounded-lg border border-line/70 p-3">
+                <div className="flex items-center justify-between gap-3 text-sm font-bold text-ink">
+                  <span>{review.buyerDisplayName}</span>
+                  <span className="text-action">{"★".repeat(Math.round(review.rating))}</span>
+                </div>
+                {review.comment ? <p className="mt-1 text-sm text-muted">{review.comment}</p> : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-muted">{t("seller.noReviews")}</p>
+        )}
+      </section>
+
+      {showEditProfile ? (
+        <EditSellerProfileModal user={user} onClose={() => setShowEditProfile(false)} onSaved={handleProfileSaved} />
+      ) : null}
+      {showEditBanner ? (
+        <EditSellerBannerModal currentBannerUrl={bannerUrl} settings={user.settings} onClose={() => setShowEditBanner(false)} onSaved={handleBannerSaved} />
+      ) : null}
     </div>
   );
 }

@@ -8,18 +8,24 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Bell,
   ChevronDown,
-  ChevronRight,
+  Coins,
+  FileText,
   Gauge,
   Headphones,
   Heart,
+  Home,
+  KeyRound,
   MessageCircle,
   PackagePlus,
+  Plus,
   Search,
   Settings,
   ShoppingBag,
   Store,
-  Trophy,
-  WalletCards
+  Swords,
+  Users,
+  WalletCards,
+  Wrench
 } from "lucide-react";
 import { apiFetch, money, type Game } from "@/lib/api";
 import { useAuth } from "@/lib/auth-store";
@@ -46,7 +52,7 @@ export function Nav() {
   // briefly flashes on every refresh before hydration corrects it. A neutral skeleton has
   // no false state to flash.
   const authResolved = hydrated || Boolean(user);
-  const { locale, switchLocale, t } = useI18n();
+  const { t } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
   const [search, setSearch] = useState("");
@@ -55,7 +61,6 @@ export function Nav() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (pathname !== "/" || typeof window === "undefined") return;
@@ -91,12 +96,17 @@ export function Nav() {
   });
 
   const navItems = [
-    { label: t("nav.catalog"), href: "/", icon: Trophy },
+    { label: t("nav.home"), href: "/", icon: Home },
+    { label: t("nav.catAccounts"), href: "/#game-catalog", icon: Users },
+    { label: t("nav.catItems"), href: "/#game-catalog", icon: Swords },
+    { label: t("nav.catKeys"), href: "/#game-catalog", icon: KeyRound },
+    { label: t("nav.catCurrency"), href: "/#game-catalog", icon: Coins },
+    { label: t("nav.catServices"), href: "/#game-catalog", icon: Wrench },
+    { label: t("nav.catDigital"), href: "/#game-catalog", icon: FileText },
     { label: t("nav.favorites"), href: "/favorites", icon: Heart, auth: true },
     { label: t("nav.chats"), href: "/messages", icon: MessageCircle, auth: true },
     { label: t("nav.myPurchases"), href: "/orders?role=buyer", icon: ShoppingBag, auth: true, match: "/orders" },
     { label: t("nav.mySales"), href: "/seller/sales", icon: Store, auth: true, match: "/seller/sales" },
-    { label: t("nav.wallet"), href: "/wallet", icon: WalletCards, auth: true },
     { label: t("nav.support"), href: "/support", icon: Headphones },
     { label: t("nav.settings"), href: "/settings", icon: Settings, auth: true },
     ...(user?.role === "admin" || user?.role === "moderator" ? [{ label: t("nav.admin"), href: "/admin", icon: Gauge, auth: true }] : [])
@@ -157,10 +167,11 @@ export function Nav() {
       <header className="sticky top-0 z-40 border-b border-line/70 bg-surface/85 backdrop-blur-xl">
         <div className="mx-auto grid min-h-[86px] max-w-[1720px] gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[220px_minmax(280px,1fr)_auto] lg:items-center lg:px-8">
           <Link href="/" className="inline-flex items-center gap-3 text-xl font-extrabold tracking-normal text-ink">
-            <span className="grid h-11 w-11 place-items-center rounded-xl border border-brand/20 bg-brand/10 text-brand shadow-soft">
-              <Trophy className="h-5 w-5" />
+            <img src="/brand/keepgame-logo.svg" alt="Keep Game" className="h-11 w-11 rounded-xl shadow-soft" />
+            <span className="leading-[1.05]">
+              <span className="block">Keep</span>
+              <span className="block text-brand">Game</span>
             </span>
-            <span>SKRYNIA</span>
           </Link>
 
           <form className="relative" onSubmit={submitSearch} onBlur={() => window.setTimeout(() => setSuggestOpen(false), 140)}>
@@ -193,12 +204,30 @@ export function Nav() {
 
           <div className="flex items-center justify-start gap-2 lg:justify-end">
             <button
-              className="hidden h-11 shrink-0 items-center gap-2 rounded-xl border border-line bg-card px-3 text-sm font-black text-ink shadow-soft transition hover:border-brand/60 hover:bg-panel sm:inline-flex"
-              onClick={() => router.push(user ? "/wallet" : "/login")}
+              className="hidden h-11 shrink-0 items-center gap-2 rounded-xl border border-brand/60 bg-brand/10 px-4 text-sm font-black text-brand shadow-soft transition hover:bg-brand hover:text-stone-950 sm:inline-flex"
+              onClick={() => openRoute("/seller/create", true)}
             >
-              <WalletCards className="h-4 w-4 text-brand" />
-              {user ? money(wallet.data?.wallet?.availableCents ?? 0, wallet.data?.wallet?.currency ?? "UAH", { preserveCurrency: true }) : t("nav.balance")}
+              <PackagePlus className="h-4 w-4" />
+              {t("nav.sell")}
             </button>
+
+            <div className="hidden h-11 shrink-0 items-center gap-1 rounded-xl border border-line bg-card pl-3 pr-1.5 shadow-soft sm:flex">
+              <button
+                className="inline-flex items-center gap-2 text-sm font-black text-ink transition hover:text-brand"
+                onClick={() => router.push(user ? "/wallet" : "/login")}
+              >
+                <WalletCards className="h-4 w-4 text-brand" />
+                {money(wallet.data?.wallet?.availableCents ?? 0, wallet.data?.wallet?.currency ?? "UAH", { preserveCurrency: true })}
+              </button>
+              <button
+                className="grid h-8 w-8 place-items-center rounded-lg bg-brand text-stone-950 transition hover:brightness-110"
+                onClick={() => router.push(user ? "/wallet" : "/login")}
+                aria-label={t("nav.wallet")}
+                title={t("nav.wallet")}
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
 
             <div className="relative shrink-0">
               <button
@@ -240,7 +269,7 @@ export function Nav() {
                   {authResolved ? (
                     <>
                       <span className="block text-sm font-bold text-ink">{user?.displayName ?? t("nav.login")}</span>
-                      <span className="block text-xs text-muted">{user ? user.role : "SKRYNIA"}</span>
+                      <span className="block text-xs text-muted">{user ? user.role : "Keep Game"}</span>
                     </>
                   ) : (
                     <>
@@ -268,26 +297,12 @@ export function Nav() {
         </div>
       </header>
 
-      <aside
-        className={`fixed bottom-0 left-0 top-[86px] z-30 hidden transform-gpu border-r border-line/70 bg-surface/85 px-3 py-5 shadow-[18px_0_70px_rgba(0,0,0,0.16)] backdrop-blur-xl transition-[width] duration-300 ease-out will-change-[width] lg:block ${
-          sidebarOpen ? "w-[252px]" : "w-[84px]"
-        }`}
-      >
-        <button
-          className={`mb-5 flex h-14 items-center rounded-[15px] border border-action/70 bg-action text-stone-950 shadow-[0_14px_34px_rgba(251,191,36,0.22),inset_0_1px_0_rgba(255,255,255,0.42)] ring-1 ring-black/10 transition hover:brightness-105 ${
-            sidebarOpen ? "w-full justify-start gap-3 px-4" : "mx-auto w-14 justify-center"
-          }`}
-          onClick={() => openRoute("/seller/create", true)}
-          title={t("nav.createListing")}
-        >
-          <PackagePlus className="h-5 w-5" />
-          <span className={`overflow-hidden whitespace-nowrap text-sm font-black transition-[max-width,opacity] duration-200 ${sidebarOpen ? "max-w-[170px] opacity-100" : "max-w-0 opacity-0"}`}>{t("nav.createListing")}</span>
-        </button>
-        <nav className={`grid gap-3 ${sidebarOpen ? "justify-items-stretch" : "justify-items-center"}`}>
-          {navItems.map((item) => (
+      <aside className="fixed bottom-0 left-0 top-[86px] z-30 hidden w-[188px] flex-col border-r border-line/70 bg-surface/85 px-3 py-4 shadow-[18px_0_70px_rgba(0,0,0,0.16)] backdrop-blur-xl lg:flex">
+        <nav className="flex-1 space-y-1.5 overflow-y-auto pr-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {navItems.map((item, index) => (
             <div
-              key={item.href}
-              className="relative w-full"
+              key={item.label}
+              className={`relative w-full ${index === 1 || index === 7 ? "!mt-4 border-t border-line/60 pt-4" : ""}`}
               onMouseEnter={item.href === "/" ? () => setCatalogOpen(true) : undefined}
               onMouseLeave={item.href === "/" ? () => setCatalogOpen(false) : undefined}
             >
@@ -295,7 +310,6 @@ export function Nav() {
                 icon={item.icon}
                 label={item.label}
                 active={(item.href === "/" ? pathname === "/" || catalogOpen : pathname === item.href) || Boolean(item.match && pathname.startsWith(item.match))}
-                expanded={sidebarOpen}
                 onClick={item.href === "/" ? () => {
                   router.push("/");
                   setCatalogOpen(true);
@@ -305,26 +319,25 @@ export function Nav() {
             </div>
           ))}
         </nav>
-        <button
-          type="button"
-          className="absolute left-full top-1/2 grid h-11 w-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-line bg-card/95 text-muted shadow-lift ring-4 ring-surface/80 backdrop-blur transition hover:border-brand/60 hover:bg-panel hover:text-brand"
-          onClick={() => {
-            setSidebarOpen((current) => {
-              if (current) setCatalogOpen(false);
-              return !current;
-            });
-          }}
-          title={sidebarOpen ? t("nav.collapseSidebar") : t("nav.expandSidebar")}
-          aria-label={sidebarOpen ? t("nav.collapseSidebar") : t("nav.expandSidebar")}
-        >
-          <ChevronRight className={`h-5 w-5 transition-transform ${sidebarOpen ? "rotate-180" : ""}`} />
-        </button>
+        <div className="mt-3 shrink-0 rounded-xl border border-brand/40 bg-panel/80 p-3 shadow-soft">
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-sm font-black leading-tight text-ink">{t("nav.becomeSeller")}</p>
+            <img src="/brand/keepgame-mascot.svg" alt="" className="h-10 w-10 shrink-0" />
+          </div>
+          <p className="mt-1.5 text-[11px] leading-4 text-muted">{t("nav.becomeSellerText")}</p>
+          <button
+            className="mt-2.5 w-full rounded-lg bg-brand py-2 text-xs font-black text-stone-950 transition hover:brightness-110"
+            onClick={() => openRoute(user ? "/seller/create" : "/register", false)}
+          >
+            {t("nav.register")}
+          </button>
+        </div>
       </aside>
 
       <nav className="sticky top-[86px] z-30 flex gap-2 overflow-x-auto border-b border-line/70 bg-surface/90 px-4 py-3 backdrop-blur-xl lg:hidden">
         {navItems.map((item) => (
           <button
-            key={item.href}
+            key={item.label}
             className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border px-3 text-sm font-bold ${
               pathname === item.href || Boolean(item.match && pathname.startsWith(item.match)) ? "border-brand/50 bg-brand/10 text-brand" : "border-line bg-card text-muted"
             }`}

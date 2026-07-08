@@ -3,7 +3,8 @@
     "hero": {
       "titleLine1": "Buy and sell",
       "titleLine2": "game accounts, items,",
-      "titleLine3": "keys, and services"
+      "titleLine3": "keys, and services",
+      "subtitle": "A trusted marketplace for every gamer."
     },
     "benefits": {
       "safeTitle": "Safe",
@@ -17,8 +18,32 @@
     },
     "sections": {
       "mobile": "Mobile games",
-      "platform": "PC & console games",
-      "popular": "Popular titles"
+      "platform": "Platforms",
+      "popular": "Popular games",
+      "categories": "Popular categories",
+      "fresh": "Fresh listings"
+    },
+    "viewAll": "View all",
+    "itemsLabel": "items",
+    "badges": {
+      "new": "NEW",
+      "top": "TOP"
+    },
+    "categories": {
+      "accounts": "Accounts",
+      "items": "Items",
+      "keys": "Keys",
+      "currency": "Currency",
+      "services": "Services",
+      "digital": "Digital goods"
+    },
+    "mockOffers": {
+      "o1": "PUBG account | 500+ skins, rare sets",
+      "o2": "2,800 UC | PUBG Mobile, instant",
+      "o3": "Steam key | AAA release, UA region",
+      "o4": "Genshin Impact | AR 58, 5★ collection",
+      "o5": "CS2 rank boost | Premier 15k+",
+      "o6": "Brawl Stars | 40,000 trophies, all brawlers"
     },
     "carousel": {
       "back": "Back",
@@ -37,7 +62,7 @@
     },
     "recentChats": {
       "title": "Recent chats",
-      "support": "SKRYNIA support",
+      "support": "Keep Game support",
       "online": "Online",
       "orderPayment": "Order #128734 payment",
       "minutesAgo": "5 min ago",
@@ -45,8 +70,8 @@
       "minutesAgo18": "18 min ago"
     },
     "support": {
-      "title": "We're always in touch",
-      "text": "Our support team can help with any question",
+      "title": "Need help?",
+      "text": "Our support team is online 24/7",
       "button": "Contact support"
     }
   }

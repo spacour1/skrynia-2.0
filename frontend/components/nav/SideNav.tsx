@@ -10,25 +10,23 @@ export function SideNavButton({
   icon: Icon,
   label,
   active,
-  expanded,
   onClick
 }: {
   icon: LucideIcon;
   label: string;
   active: boolean;
-  expanded: boolean;
   onClick: () => void;
 }) {
   return (
     <button
-      className={`flex h-12 items-center rounded-xl text-sm font-bold transition ${
-        active ? "bg-brand/15 text-brand shadow-[inset_0_0_0_1px_rgb(var(--color-brand)/0.18)]" : "text-muted hover:bg-panel hover:text-ink"
-      } ${expanded ? "w-full justify-start gap-3 px-3 text-left" : "mx-auto w-12 justify-center"}`}
+      className={`flex h-10 w-full items-center justify-start gap-2.5 rounded-xl px-3 text-left text-[13px] font-bold transition ${
+        active ? "bg-brand text-stone-950 shadow-[0_10px_26px_rgba(183,255,26,0.28)]" : "text-muted hover:bg-panel hover:text-ink"
+      }`}
       onClick={onClick}
       title={label}
     >
-      <Icon className="h-6 w-6 shrink-0" />
-      <span className={`overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-200 ${expanded ? "max-w-[170px] opacity-100" : "max-w-0 opacity-0"}`}>{label}</span>
+      <Icon className="h-[18px] w-[18px] shrink-0" />
+      <span className="truncate">{label}</span>
     </button>
   );
 }

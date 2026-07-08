@@ -4,6 +4,14 @@
 
 P2P digital marketplace with escrow. Buyers pay, funds are held in escrow, sellers fulfill, funds release on buyer confirmation or after a 72-hour timeout. Disputes go to admin/moderator review. Stack: Node.js/Express + TypeScript (ESM) backend, Next.js 14 App Router frontend, PostgreSQL, Redis/BullMQ.
 
+## Fast context rules
+
+- Start with `docs/agent-map.md` for the repository map and domain entrypoints.
+- Do not scan generated/dependency folders unless explicitly needed: `node_modules`, `.next`, `dist`, `uploads`, coverage output.
+- Do not read `package-lock.json` files unless dependency resolution is the task.
+- Read migrations only when touching DB schema, data shape, or ledger/order invariants.
+- Prefer targeted `rg` searches and the domain key files below over broad file-by-file reading.
+
 ## Hard constraints — never violate
 
 - **No floating-point money.** All amounts are integer cents. `amountCents: number` — always integers.

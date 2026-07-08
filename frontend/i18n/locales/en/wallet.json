@@ -43,6 +43,9 @@
     "txWalletCredit": "Balance top up",
     "txWalletDebit": "Funds withdrawal",
     "statusCompleted": "Completed",
-    "securePayments": "Secure payments and payouts"
+    "securePayments": "Secure payments and payouts",
+    "phoneNotVerifiedTitle": "Verify your phone number",
+    "phoneNotVerifiedText": "You need to verify your phone number in profile settings to withdraw funds.",
+    "phoneNotVerifiedOpenSettings": "Open settings"
   }
 }

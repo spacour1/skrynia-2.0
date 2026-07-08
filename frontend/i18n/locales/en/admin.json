@@ -20,6 +20,12 @@
     "resolveDispute": "Resolve dispute",
     "orderChatHistory": "Order chat history",
     "noChat": "No chat messages for this order.",
-    "resolved": "Resolved"
+    "resolved": "Resolved",
+    "supportTickets": "Support tickets",
+    "supportGuest": "Guest",
+    "supportNoTickets": "No tickets yet.",
+    "mediaTitle": "Product image moderation",
+    "mediaSubtitle": "Rejected images are hidden from public listings but stay visible to the seller.",
+    "mediaNone": "No images yet."
   }
 }

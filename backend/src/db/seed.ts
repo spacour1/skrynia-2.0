@@ -54,12 +54,13 @@ const sellers = [
 
 for (const [email, displayName, role, avatarUrl] of baseUsers) {
   const result = await pool.query<{ id: string }>(
-    `insert into users(email, password_hash, display_name, role, avatar_url)
-     values ($1, $2, $3, $4, $5)
+    `insert into users(email, password_hash, display_name, role, avatar_url, email_verified_at)
+     values ($1, $2, $3, $4, $5, now())
      on conflict (email) do update set
        display_name = excluded.display_name,
        role = excluded.role,
        avatar_url = excluded.avatar_url,
+       email_verified_at = coalesce(users.email_verified_at, excluded.email_verified_at),
        updated_at = now()
      returning id`,
     [email, passwordHash, displayName, role, avatarUrl]
@@ -92,12 +93,13 @@ async function getSection(gameId: string | null, slug: string) {
 
 for (const seller of sellers) {
   const user = await pool.query<{ id: string }>(
-    `insert into users(email, password_hash, display_name, role, avatar_url, settings)
-     values ($1, $2, $3, 'user', $4, $5::jsonb)
+    `insert into users(email, password_hash, display_name, role, avatar_url, settings, email_verified_at)
+     values ($1, $2, $3, 'user', $4, $5::jsonb, now())
      on conflict (email) do update set
        display_name = excluded.display_name,
        avatar_url = excluded.avatar_url,
        settings = excluded.settings,
+       email_verified_at = coalesce(users.email_verified_at, excluded.email_verified_at),
        updated_at = now()
      returning id`,
     [seller.email, passwordHash, seller.displayName, seller.avatarUrl, JSON.stringify(seller.settings)]

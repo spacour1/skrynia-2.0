@@ -2,13 +2,12 @@
 
 import Link from "@/lib/navigation";
 import { usePathname, useRouter } from "@/lib/navigation";
-import type { FormEvent, ReactNode } from "react";
+import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Bell,
   ChevronDown,
-  ChevronRight,
   Coins,
   FileText,
   Gauge,
@@ -16,8 +15,6 @@ import {
   Heart,
   Home,
   KeyRound,
-  Languages,
-  LogOut,
   MessageCircle,
   PackagePlus,
   Plus,
@@ -26,54 +23,18 @@ import {
   ShoppingBag,
   Store,
   Swords,
-  UserCircle,
   Users,
   WalletCards,
-  Wrench,
-  type LucideIcon
+  Wrench
 } from "lucide-react";
-import { CurrencySwitcher } from "./CurrencySwitcher";
-import { GameIcon } from "./GameIcon";
-import { localeLabels, locales } from "@/i18n/config";
 import { apiFetch, money, type Game } from "@/lib/api";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
-import { firstProductMedia } from "@/lib/product-media";
 import { captureEvent } from "@/lib/posthog";
-import { SECTION_PATTERNS } from "@/lib/game-catalog";
-
-type SuggestProduct = {
-  id: string;
-  title: string;
-  description: string;
-  priceCents: number;
-  currency: string;
-  productType?: string;
-  deliveryType?: string;
-  metadata?: Record<string, unknown>;
-  media?: { id: string; url: string; type: string }[];
-  isHot?: boolean;
-  oldPriceCents?: number | null;
-  gameSlug?: string;
-  gameName?: string;
-  categoryName?: string;
-  sellerDisplayName?: string;
-};
-
-type NotificationItem = {
-  id: string;
-  type: string;
-  title: string;
-  body?: string | null;
-  titleKey?: string | null;
-  bodyKey?: string | null;
-  params?: Record<string, string | number> | null;
-  orderId?: string | null;
-  productId?: string | null;
-  conversationId?: string | null;
-  readAt?: string | null;
-  createdAt: string;
-};
+import { NotificationDropdown, ProfileDropdown } from "./nav/NavDropdowns";
+import { SearchSuggest } from "./nav/SearchSuggest";
+import { CatalogMegaMenu, SideNavButton } from "./nav/SideNav";
+import type { NotificationItem, SuggestProduct } from "./nav/types";
 
 type WalletResponse = {
   wallet?: {
@@ -91,7 +52,7 @@ export function Nav() {
   // briefly flashes on every refresh before hydration corrects it. A neutral skeleton has
   // no false state to flash.
   const authResolved = hydrated || Boolean(user);
-  const { locale, switchLocale, t } = useI18n();
+  const { t } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
   const [search, setSearch] = useState("");
@@ -389,315 +350,4 @@ export function Nav() {
       </nav>
     </>
   );
-}
-
-function SideNavButton({
-  icon: Icon,
-  label,
-  active,
-  onClick
-}: {
-  icon: LucideIcon;
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      className={`flex h-10 w-full items-center justify-start gap-2.5 rounded-xl px-3 text-left text-[13px] font-bold transition ${
-        active ? "bg-brand text-stone-950 shadow-[0_10px_26px_rgba(183,255,26,0.28)]" : "text-muted hover:bg-panel hover:text-ink"
-      }`}
-      onClick={onClick}
-      title={label}
-    >
-      <Icon className="h-[18px] w-[18px] shrink-0" />
-      <span className="truncate">{label}</span>
-    </button>
-  );
-}
-
-function CatalogMegaMenu({ games, onGame }: { games: Game[]; onGame: (slug: string) => void }) {
-  const { t } = useI18n();
-  const groups = [
-    { title: t("catalogMenu.games"), text: t("catalogMenu.gamesText"), items: games.slice(0, 10), live: true },
-    { title: t("catalogMenu.mobile"), text: t("catalogMenu.mobileText"), items: games.filter((game) => SECTION_PATTERNS.mobile.test(`${game.slug} ${game.name} ${game.publisher ?? ""}`)).slice(0, 6), live: true },
-    { title: t("catalogMenu.services"), text: t("catalogMenu.servicesText"), items: [] as Game[], live: false },
-    { title: t("catalogMenu.software"), text: t("catalogMenu.softwareText"), items: [] as Game[], live: false }
-  ];
-  const [active, setActive] = useState(groups[0].title);
-  const activeGroup = groups.find((group) => group.title === active) ?? groups[0];
-
-  return (
-    <div className="absolute left-full top-0 z-[120] hidden pl-3 xl:block">
-      <div className="grid w-[620px] overflow-hidden rounded-xl border border-brand/35 bg-card/95 shadow-[0_24px_90px_rgba(15,23,42,0.22)] ring-1 ring-black/5 backdrop-blur-xl dark:border-brand/25 dark:bg-slate-950/95 dark:shadow-[0_24px_90px_rgba(0,0,0,0.58)] dark:ring-white/10 xl:grid-cols-[210px_minmax(0,1fr)]">
-        <div className="border-r border-line bg-panel/70 p-3 dark:bg-white/[0.03]">
-        {groups.map((group) => (
-          <button
-            key={group.title}
-            className={`mb-2 flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left text-sm font-black transition ${
-              active === group.title ? "border border-brand/35 bg-brand/15 text-brand shadow-soft" : "border border-transparent text-muted hover:border-line hover:bg-card hover:text-ink"
-            }`}
-            onMouseEnter={() => setActive(group.title)}
-            onClick={() => setActive(group.title)}
-          >
-            <span>{group.title}</span>
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        ))}
-        </div>
-        <section className="bg-card p-5">
-          <p className="text-lg font-black text-ink">{activeGroup.title}</p>
-          <p className="mt-1 text-sm text-muted">{activeGroup.text}</p>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            {activeGroup.items.length ? (
-              activeGroup.items.map((game) => (
-                <button
-                  key={game.id}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-line bg-panel/55 px-3 py-3 text-left text-sm font-bold text-muted shadow-[0_1px_0_rgba(15,23,42,0.04)] transition hover:border-brand/60 hover:bg-brand/10 hover:text-brand"
-                  onClick={() => onGame(game.slug)}
-                >
-                  <span className="truncate">{game.name}</span>
-                  <span>{game.lotCount ?? 0}</span>
-                </button>
-              ))
-            ) : (
-              <button className="rounded-lg border border-line bg-panel px-3 py-3 text-left text-sm font-bold text-muted" onClick={() => document.getElementById("game-catalog")?.scrollIntoView({ behavior: "smooth" })}>
-                {t("nav.comingSoon")}
-              </button>
-            )}
-          </div>
-        </section>
-      </div>
-    </div>
-  );
-}
-
-function ProfileDropdown({
-  onDashboard,
-  onSettings,
-  onLogout
-}: {
-  onDashboard: () => void;
-  onSettings: () => void;
-  onLogout: () => void;
-}) {
-  const { t } = useI18n();
-  return (
-    <div className="absolute right-0 top-[calc(100%+10px)] z-50 w-[300px] overflow-hidden rounded-2xl border border-line bg-card shadow-lift">
-      <div className="grid gap-2 p-3">
-        <MenuButton icon={UserCircle} label={t("nav.dashboard")} onClick={onDashboard} />
-        <MenuButton icon={Settings} label={t("nav.settings")} onClick={onSettings} />
-        <LanguageSwitcher />
-        <CurrencySwitcher />
-      </div>
-      <div className="border-t border-line p-3">
-        <MenuButton icon={LogOut} label={t("nav.logout")} onClick={onLogout} danger />
-      </div>
-    </div>
-  );
-}
-
-/**
- * Language selector: switching swaps the /ua|/ru|/en URL prefix (same page, same query),
- * stores the skrynia_locale cookie, and persists preferred_locale for signed-in users.
- */
-function LanguageSwitcher() {
-  const { locale, switchLocale, t } = useI18n();
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div>
-      <button
-        className="flex h-11 w-full items-center justify-between rounded-xl px-3 text-sm font-bold text-muted transition hover:bg-panel hover:text-ink"
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-      >
-        <span className="inline-flex items-center gap-3">
-          <Languages className="h-5 w-5" />
-          {t("nav.language")}
-        </span>
-        <span className="text-xs text-brand">{locale.toUpperCase()}</span>
-      </button>
-      {open ? (
-        <div className="mt-1 grid gap-1 rounded-xl border border-line bg-panel/40 p-2">
-          {locales.map((option) => (
-            <button
-              key={option}
-              className={`flex h-10 items-center justify-between rounded-lg px-3 text-sm font-bold transition ${
-                option === locale ? "bg-brand/10 text-brand" : "text-muted hover:bg-panel hover:text-ink"
-              }`}
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                switchLocale(option);
-              }}
-            >
-              <span>{localeLabels[option]}</span>
-              <span className="text-xs">{option.toUpperCase()}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function MenuButton({ icon: Icon, label, onClick, danger }: { icon: LucideIcon; label: string; onClick: () => void; danger?: boolean }) {
-  return (
-    <button className={`flex h-11 items-center gap-3 rounded-xl px-3 text-sm font-bold transition hover:bg-panel ${danger ? "text-rose-500" : "text-muted hover:text-ink"}`} type="button" onClick={onClick}>
-      <Icon className="h-5 w-5" />
-      {label}
-    </button>
-  );
-}
-
-function SearchSuggest({
-  loading,
-  games,
-  products,
-  query,
-  onGame,
-  onProduct,
-  onSearch
-}: {
-  loading: boolean;
-  games: Game[];
-  products: SuggestProduct[];
-  query: string;
-  onGame: (game: Game) => void;
-  onProduct: (product: SuggestProduct) => void;
-  onSearch: (query: string) => void;
-}) {
-  const { t } = useI18n();
-  const hasResults = games.length || products.length;
-
-  return (
-    <div className="absolute left-0 right-0 top-[calc(100%+10px)] z-50 overflow-hidden rounded-2xl border border-line bg-card shadow-lift">
-      <div className="border-b border-line bg-panel/50 px-4 py-3">
-        <p className="text-xs font-bold uppercase text-muted">{t("nav.quickSearch")}</p>
-        <button className="mt-1 text-left text-sm font-bold text-ink hover:text-brand" type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onSearch(query)}>
-          {t("nav.searchFor")} "{query}"
-        </button>
-      </div>
-
-      <div className="max-h-[520px] overflow-y-auto p-2">
-        {loading ? <p className="px-3 py-4 text-sm text-muted">{t("nav.searching")}</p> : null}
-        {!loading && !hasResults ? <p className="px-3 py-4 text-sm text-muted">{t("nav.noMatches")}</p> : null}
-
-        {games.length ? (
-          <SuggestSection title={t("nav.gamesAndServices")}>
-            {games.map((game) => (
-              <button key={game.id} className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition hover:bg-panel" type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onGame(game)}>
-                <GameIcon name={game.name} slug={game.slug} className="h-10 w-10 rounded-xl" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-black text-ink">{game.name}</span>
-                  <span className="block truncate text-xs text-muted">{game.publisher ?? t("nav.game")} · {game.lotCount ?? 0} {t("nav.lots")}</span>
-                </span>
-                <ChevronRight className="h-4 w-4 text-muted" />
-              </button>
-            ))}
-          </SuggestSection>
-        ) : null}
-
-        {products.length ? (
-          <SuggestSection title={t("nav.listings")}>
-            {products.map((product) => {
-              const image = firstProductMedia(product);
-              return (
-                <button key={product.id} className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition hover:bg-panel" type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onProduct(product)}>
-                  {image ? (
-                    <img className="h-11 w-11 shrink-0 rounded-xl object-cover" src={image} alt="" />
-                  ) : (
-                    <GameIcon name={product.gameName ?? product.categoryName ?? "Product"} slug={product.gameSlug} className="h-11 w-11 rounded-xl" />
-                  )}
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-black text-ink">{product.title}</span>
-                    <span className="block truncate text-xs text-muted">{[product.gameName, product.categoryName, product.productType].filter(Boolean).join(" · ")}</span>
-                  </span>
-                  <span className="shrink-0 text-right">
-                    <span className="block text-sm font-black text-brand">{money(product.priceCents, product.currency)}</span>
-                    {product.isHot ? <span className="text-xs font-bold text-action">{t("nav.hot")}</span> : null}
-                  </span>
-                </button>
-              );
-            })}
-          </SuggestSection>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function SuggestSection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="p-2">
-      <p className="mb-2 px-1 text-xs font-black uppercase text-brand">{title}</p>
-      <div className="grid gap-1">{children}</div>
-    </div>
-  );
-}
-
-function NotificationDropdown({
-  items,
-  unreadCount,
-  loading,
-  onOpen,
-  onReadAll
-}: {
-  items: NotificationItem[];
-  unreadCount: number;
-  loading: boolean;
-  onOpen: (item: NotificationItem) => void;
-  onReadAll: () => void;
-}) {
-  const { language, t } = useI18n();
-  return (
-    <div className="absolute right-0 top-[calc(100%+10px)] z-50 w-[360px] overflow-hidden rounded-2xl border border-line bg-card shadow-lift">
-      <div className="flex items-center justify-between gap-3 border-b border-line bg-panel/55 px-4 py-3">
-        <div>
-          <p className="font-black text-ink">{t("nav.notifications")}</p>
-          <p className="text-xs text-muted">{unreadCount ? `${unreadCount} ${t("nav.unread")}` : t("nav.allRead")}</p>
-        </div>
-        {unreadCount ? (
-          <button className="text-xs font-bold text-brand hover:underline" type="button" onClick={onReadAll}>
-            {t("nav.readAll")}
-          </button>
-        ) : null}
-      </div>
-      <div className="max-h-[460px] overflow-y-auto p-2">
-        {loading ? <p className="px-3 py-4 text-sm text-muted">{t("nav.loadingNotifications")}</p> : null}
-        {!loading && !items.length ? (
-          <div className="grid min-h-[180px] place-items-center text-center">
-            <p className="max-w-[240px] text-sm leading-6 text-muted">{t("nav.noNotifications")}</p>
-          </div>
-        ) : null}
-        {items.map((item) => {
-          // Key-based notifications re-localize instantly on language switch; older rows
-          // without keys fall back to the title/body stored at creation time.
-          const title = item.titleKey ? t(item.titleKey, item.params ?? undefined) : item.title;
-          const body = item.bodyKey ? t(item.bodyKey, item.params ?? undefined) : item.body;
-          return (
-            <button key={item.id} className={`flex w-full gap-3 rounded-xl p-3 text-left transition hover:bg-panel ${item.readAt ? "opacity-75" : "bg-brand/5"}`} type="button" onClick={() => onOpen(item)}>
-              <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${item.readAt ? "bg-muted/40" : "bg-action"}`} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-black text-ink">{title}</span>
-                {body ? <span className="mt-1 line-clamp-2 block text-xs leading-5 text-muted">{body}</span> : null}
-                <span className="mt-2 block text-xs text-muted">{formatNotificationTime(item.createdAt, language)}</span>
-              </span>
-              <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted" />
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function formatNotificationTime(value: string, language: string) {
-  return new Date(value).toLocaleString(language, {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
 }

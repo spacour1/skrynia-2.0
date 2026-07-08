@@ -46,7 +46,7 @@ export default function RootLayout({ children, params }: { children: React.React
         <LocaleProvider locale={locale}>
           <Providers>
             <Nav />
-            <main className="mx-auto w-full max-w-[1720px] px-4 py-5 sm:px-6 lg:pl-[104px] lg:pr-5">
+            <main className="mx-auto w-full max-w-[1720px] px-4 py-5 sm:px-6 lg:pl-[208px] lg:pr-5">
               <EmailVerificationBanner />
               {children}
             </main>

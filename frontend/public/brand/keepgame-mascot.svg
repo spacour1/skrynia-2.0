@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 260" fill="none">
+  <!-- Keep Game mascot placeholder: hooded lime scout with coin -->
+  <defs>
+    <linearGradient id="hood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b2a4a"/>
+      <stop offset="1" stop-color="#0d1728"/>
+    </linearGradient>
+    <linearGradient id="skin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d7ff2f"/>
+      <stop offset="1" stop-color="#9fdc14"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.4" r="0.7">
+      <stop offset="0" stop-color="#b7ff1a" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#b7ff1a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="120" cy="140" rx="115" ry="115" fill="url(#glow)"/>
+  <!-- body cloak -->
+  <path d="M55 250c-6-52 8-96 65-96s71 44 65 96H55z" fill="url(#hood)"/>
+  <path d="M55 250c-6-52 8-96 65-96s71 44 65 96H55z" stroke="#2a3f63" stroke-width="3"/>
+  <!-- satchel strap -->
+  <path d="M78 170l84 46" stroke="#7a5a2e" stroke-width="10" stroke-linecap="round"/>
+  <rect x="150" y="204" width="42" height="34" rx="8" fill="#8a6a3a"/>
+  <rect x="150" y="204" width="42" height="12" rx="6" fill="#6d5027"/>
+  <!-- ears -->
+  <path d="M38 74C30 46 44 26 60 20c4 18-2 34-8 44l-14 10z" fill="url(#skin)" stroke="#7fb50e" stroke-width="3"/>
+  <path d="M202 74c8-28-6-48-22-54-4 18 2 34 8 44l14 10z" fill="url(#skin)" stroke="#7fb50e" stroke-width="3"/>
+  <!-- head -->
+  <circle cx="120" cy="104" r="66" fill="url(#skin)" stroke="#7fb50e" stroke-width="3"/>
+  <!-- hood over head -->
+  <path d="M120 30c-52 0-76 34-74 74 12-10 20-14 30-16-6 26 10 34 44 34s50-8 44-34c10 2 18 6 30 16 2-40-22-74-74-74z" fill="url(#hood)" stroke="#2a3f63" stroke-width="3"/>
+  <!-- KG badge on hood -->
+  <g transform="translate(104 44)">
+    <rect width="32" height="32" rx="8" fill="#0d1728" stroke="#b7ff1a" stroke-width="2"/>
+    <path d="M9 7h5v8l7-8h6l-7 8 7 10h-6l-7-9v9H9V7z" fill="#b7ff1a"/>
+  </g>
+  <!-- eyes -->
+  <ellipse cx="96" cy="112" rx="13" ry="16" fill="#0d1728"/>
+  <ellipse cx="144" cy="112" rx="13" ry="16" fill="#0d1728"/>
+  <circle cx="100" cy="106" r="4.5" fill="#f8fafc"/>
+  <circle cx="148" cy="106" r="4.5" fill="#f8fafc"/>
+  <!-- snout + smile -->
+  <path d="M112 132q8 8 16 0" stroke="#476b08" stroke-width="4" stroke-linecap="round" fill="none"/>
+  <path d="M108 140q12 12 24 0" stroke="#476b08" stroke-width="4" stroke-linecap="round" fill="none"/>
+  <!-- tooth -->
+  <path d="M116 143l4 7 4-7" fill="#f8fafc"/>
+  <!-- arm holding coin -->
+  <path d="M178 176c18-4 30-16 34-30" stroke="#9fdc14" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="216" cy="138" r="22" fill="#f6be4e" stroke="#c9932b" stroke-width="4"/>
+  <path d="M216 126l3.4 8 8.6 1-6.4 6 1.9 9-7.5-4.6-7.5 4.6 1.9-9-6.4-6 8.6-1 3.4-8z" fill="#8a6410"/>
+  <!-- left arm -->
+  <path d="M62 180c-14 8-20 20-20 32" stroke="#9fdc14" stroke-width="14" stroke-linecap="round"/>
+  <!-- feet -->
+  <ellipse cx="92" cy="250" rx="20" ry="9" fill="#9fdc14"/>
+  <ellipse cx="148" cy="250" rx="20" ry="9" fill="#9fdc14"/>
+</svg>

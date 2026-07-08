@@ -8,18 +8,26 @@ import {
   BadgeCheck,
   ChevronLeft,
   ChevronRight,
-  Headphones,
+  Coins,
+  FileText,
+  Heart,
+  KeyRound,
   MessageCircle,
   PackageCheck,
   Send,
   ShieldCheck,
   ShoppingBag,
+  Star,
+  Swords,
   Trophy,
+  Users,
+  Wrench,
   Zap,
   type LucideIcon
 } from "lucide-react";
 import { GameIcon } from "../../components/GameIcon";
-import { apiFetch, type Game } from "../../lib/api";
+import { apiFetch, money, type Game, type Product } from "../../lib/api";
+import { firstProductMedia } from "../../lib/product-media";
 import { useAuth } from "../../lib/auth-store";
 import { buildSectionTiles, getGameTileTheme, type CategoryTile, type GameTileThemeConfig } from "../../lib/game-catalog";
 import { useI18n } from "../../lib/i18n";
@@ -43,9 +51,8 @@ export default function HomePage() {
   });
 
   const gamesList = games.data?.games ?? [];
-  const mobileGames = buildSectionTiles("mobile", gamesList);
   const platformGames = buildSectionTiles("platform", gamesList);
-  const popularGames = buildSectionTiles("popular", gamesList);
+  const popularGames = buildSectionTiles("mobile", gamesList);
 
   function selectGame(slug: string) {
     router.push(`/games/${slug}`);
@@ -53,35 +60,22 @@ export default function HomePage() {
 
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
-      <main className="relative min-w-0 overflow-hidden">
-        <div className="pointer-events-none absolute inset-x-[-24px] top-0 h-[620px] overflow-hidden">
-          <img
-            className="absolute inset-x-0 top-0 h-[360px] w-full object-cover object-[62%_center] opacity-95"
-            src="/assets/home/header/main-header.webp"
-            alt=""
-            fetchPriority="high"
-            draggable={false}
-          />
-          <div className="absolute inset-x-0 top-0 h-[360px] bg-[linear-gradient(90deg,rgba(3,6,10,0.98)_0%,rgba(3,6,10,0.84)_32%,rgba(3,6,10,0.44)_60%,rgba(3,6,10,0.16)_100%)]" />
-          <div className="absolute inset-x-0 top-0 h-[460px] bg-[linear-gradient(180deg,rgba(3,6,10,0)_0%,rgba(3,6,10,0.18)_44%,rgba(3,6,10,0.78)_74%,rgb(var(--color-bg))_100%)]" />
-          <div className="absolute inset-x-0 top-[300px] h-[320px] bg-[radial-gradient(ellipse_at_center,rgba(246,190,78,0.08),transparent_52%),linear-gradient(180deg,rgba(3,6,10,0.2),rgb(var(--color-bg))_82%)]" />
-        </div>
+      <main className="min-w-0 space-y-6 pb-4">
+        <Hero />
 
-        <div className="relative z-10 space-y-5 pb-4">
-          <Hero />
-
-          <section id="game-catalog" className="space-y-5 scroll-mt-28">
-            <CategoryCarousel title={t("home.sections.mobile")} items={mobileGames} onSelect={selectGame} />
-            <CategoryCarousel title={t("home.sections.platform")} items={platformGames} onSelect={selectGame} compact />
-            <CategoryCarousel title={t("home.sections.popular")} items={popularGames} onSelect={selectGame} />
-          </section>
-        </div>
+        <section id="game-catalog" className="space-y-6 scroll-mt-28">
+          <CategoryCarousel title={t("home.sections.popular")} items={popularGames} onSelect={selectGame} />
+          <PlatformsRow items={platformGames} onSelect={selectGame} />
+          <CategoriesRow />
+          <FreshOffers onOpen={(id) => router.push(`/products/${id}`)} />
+        </section>
       </main>
 
       <aside className="space-y-4 xl:sticky xl:top-[106px] xl:self-start">
         <GeneralChatWidget />
-        <RecentChatsWidget onOpen={(href) => router.push(user ? href : "/login")} />
         <SupportWidget onOpen={() => router.push("/support")} />
+        <RecentChatsWidget onOpen={(href) => router.push(user ? href : "/login")} />
+        <TrustWidget />
       </aside>
     </div>
   );
@@ -97,27 +91,60 @@ function Hero() {
   ];
 
   return (
-    <section className="relative min-h-[274px]">
-      <div className="relative z-10 flex min-h-[274px] flex-col justify-center px-6 pb-8 pt-9 sm:px-8 lg:px-10 xl:px-12">
-        <h1 className="max-w-[540px] text-[30px] font-black leading-[1.08] tracking-normal text-white md:text-[38px] xl:text-[42px]">
-          {t("home.hero.titleLine1")}
-          <span className="block text-brand">{t("home.hero.titleLine2")}</span>
-          <span className="block text-brand">{t("home.hero.titleLine3")}</span>
-        </h1>
-        <div className="mt-8 grid max-w-[820px] gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <section className="relative min-h-[300px] overflow-hidden rounded-2xl border border-line shadow-soft">
+      <img
+        className="absolute inset-0 h-full w-full object-cover object-[68%_center]"
+        src="/assets/home/header/main-header.webp"
+        alt=""
+        fetchPriority="high"
+        draggable={false}
+      />
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(5,11,24,0.97)_0%,rgba(5,11,24,0.86)_36%,rgba(7,17,31,0.42)_66%,rgba(5,11,24,0.6)_100%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_74%_38%,rgba(183,255,26,0.16),transparent_52%)]" />
+      <img
+        className="pointer-events-none absolute right-[4%] top-6 hidden h-[58%] drop-shadow-[0_18px_44px_rgba(183,255,26,0.22)] md:block"
+        src="/brand/keepgame-mascot.svg"
+        alt=""
+        draggable={false}
+      />
+
+      <div className="relative z-10 flex min-h-[300px] flex-col justify-between px-6 pb-5 pt-8 sm:px-10 lg:px-12">
+        <div>
+          <h1 className="max-w-[560px] text-[28px] font-black leading-[1.1] tracking-normal text-white md:text-[36px] xl:text-[40px]">
+            {t("home.hero.titleLine1")}
+            <span className="block text-brand">{t("home.hero.titleLine2")}</span>
+            <span className="block">{t("home.hero.titleLine3")}</span>
+          </h1>
+          <p className="mt-3 max-w-[420px] text-sm text-slate-300/85 md:text-base">{t("home.hero.subtitle")}</p>
+        </div>
+
+        <div className="mt-6 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
           {benefits.map((item) => (
             <Benefit key={item.title} {...item} />
           ))}
         </div>
+
+        <div className="mt-4 flex items-center justify-center gap-1.5">
+          {[0, 1, 2, 3].map((dot) => (
+            <span key={dot} className={`h-1.5 rounded-full transition ${dot === 0 ? "w-5 bg-brand" : "w-1.5 bg-white/25"}`} />
+          ))}
+        </div>
       </div>
+
+      <button className="absolute left-3 top-1/2 z-20 hidden h-9 w-9 -translate-y-1/2 place-items-center rounded-full border border-white/10 bg-black/35 text-white/70 backdrop-blur transition hover:text-brand sm:grid" aria-label={t("home.carousel.back")}>
+        <ChevronLeft className="h-5 w-5" />
+      </button>
+      <button className="absolute right-3 top-1/2 z-20 hidden h-9 w-9 -translate-y-1/2 place-items-center rounded-full border border-white/10 bg-black/35 text-white/70 backdrop-blur transition hover:text-brand sm:grid" aria-label={t("home.carousel.forward")}>
+        <ChevronRight className="h-5 w-5" />
+      </button>
     </section>
   );
 }
 
 function Benefit({ title, text, icon: Icon }: { title: string; text: string; icon: LucideIcon }) {
   return (
-    <article className="flex min-w-0 items-center gap-3">
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-black/26 text-brand ring-1 ring-brand/30">
+    <article className="flex min-w-0 items-center gap-2.5 rounded-xl border border-white/10 bg-black/35 px-3 py-2 backdrop-blur-sm">
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand/15 text-brand ring-1 ring-brand/30">
         <Icon className="h-4 w-4" />
       </span>
       <span className="min-w-0">
@@ -257,6 +284,192 @@ function GameTileScene({ slug, tile, compact }: { slug: string; tile: GameTileTh
   );
 }
 
+function SectionHeader({ title }: { title: string }) {
+  const { t } = useI18n();
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <h2 className="inline-flex items-center gap-2 text-base font-black text-white md:text-lg">
+        {title}
+        <ChevronRight className="h-4 w-4 text-brand" />
+      </h2>
+      <a href="#game-catalog" className="text-xs font-bold text-muted transition hover:text-brand">
+        {t("home.viewAll")}
+      </a>
+    </div>
+  );
+}
+
+function PlatformsRow({ items, onSelect }: { items: CategoryTile[]; onSelect: (slug: string) => void }) {
+  const { t } = useI18n();
+  return (
+    <section className="space-y-2.5">
+      <SectionHeader title={t("home.sections.platform")} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        {items.slice(0, 5).map((item) => (
+          <button
+            key={item.id}
+            className="flex items-center gap-3 rounded-xl border border-line bg-card p-3 text-left shadow-soft transition hover:-translate-y-0.5 hover:border-brand/60"
+            onClick={() => onSelect(item.slug)}
+          >
+            <GameIcon name={item.name} slug={item.slug} className="h-10 w-10 shrink-0 rounded-lg" />
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-black text-ink">{item.name}</span>
+              <span className="block truncate text-xs text-muted">
+                {(item.lotCount ?? 0).toLocaleString("uk-UA")} {t("home.itemsLabel")}
+              </span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CategoriesRow() {
+  const { t } = useI18n();
+  const categories: { key: string; count: string; icon: LucideIcon }[] = [
+    { key: "accounts", count: "42 180", icon: Users },
+    { key: "items", count: "152 340", icon: Swords },
+    { key: "keys", count: "18 673", icon: KeyRound },
+    { key: "currency", count: "24 981", icon: Coins },
+    { key: "services", count: "8 231", icon: Wrench },
+    { key: "digital", count: "5 432", icon: FileText }
+  ];
+
+  return (
+    <section className="space-y-2.5">
+      <SectionHeader title={t("home.sections.categories")} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {categories.map(({ key, count, icon: Icon }) => (
+          <a
+            key={key}
+            href="#game-catalog"
+            className="flex items-center gap-3 rounded-xl border border-line bg-card p-3 shadow-soft transition hover:-translate-y-0.5 hover:border-brand/60"
+          >
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-brand/40 bg-brand/10 text-brand">
+              <Icon className="h-5 w-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-black text-ink">{t(`home.categories.${key}`)}</span>
+              <span className="block truncate text-xs text-muted">
+                {count} {t("home.itemsLabel")}
+              </span>
+            </span>
+          </a>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+type OfferItem = {
+  id: string | null;
+  title: string;
+  priceCents: number;
+  currency: string;
+  top: boolean;
+  image: string | null;
+  gradient: string;
+  seller: string;
+  rating: number;
+};
+
+function FreshOffers({ onOpen }: { onOpen: (id: string) => void }) {
+  const { t } = useI18n();
+  const products = useQuery({
+    queryKey: ["home-fresh-products"],
+    queryFn: () => apiFetch<{ products: Product[]; total: number }>("/marketplace/products?limit=6")
+  });
+
+  const mockOffers: OfferItem[] = [
+    { id: null, title: t("home.mockOffers.o1"), priceCents: 129900, currency: "UAH", top: true, image: "/assets/home/category-cards/pubg-mobile.webp", gradient: "", seller: "GameStore", rating: 4.9 },
+    { id: null, title: t("home.mockOffers.o2"), priceCents: 89900, currency: "UAH", top: false, image: null, gradient: "from-amber-500/40 via-orange-900/60 to-black", seller: "FastTopUp", rating: 5.0 },
+    { id: null, title: t("home.mockOffers.o3"), priceCents: 149900, currency: "UAH", top: false, image: "/assets/home/category-cards/steam.webp", gradient: "", seller: "KeyMaster", rating: 4.8 },
+    { id: null, title: t("home.mockOffers.o4"), priceCents: 249900, currency: "UAH", top: true, image: "/assets/home/category-cards/genshin-impact.webp", gradient: "", seller: "AnimeShop", rating: 4.9 },
+    { id: null, title: t("home.mockOffers.o5"), priceCents: 64900, currency: "UAH", top: false, image: null, gradient: "from-sky-500/40 via-slate-900/70 to-black", seller: "ProBoost", rating: 4.7 },
+    { id: null, title: t("home.mockOffers.o6"), priceCents: 99900, currency: "UAH", top: false, image: "/assets/home/category-cards/brawl-stars.webp", gradient: "", seller: "MobileHub", rating: 4.8 }
+  ];
+
+  const live: OfferItem[] = (products.data?.products ?? []).slice(0, 6).map((product) => ({
+    id: product.id,
+    title: product.title,
+    priceCents: Number(product.priceCents),
+    currency: product.currency,
+    top: Boolean(product.isHot),
+    image: firstProductMedia(product),
+    gradient: "from-slate-700/50 via-slate-900/70 to-black",
+    seller: product.sellerDisplayName ?? "",
+    rating: Number(product.sellerRating ?? 0)
+  }));
+  const offers = live.length ? live : mockOffers;
+
+  return (
+    <section className="space-y-2.5">
+      <SectionHeader title={t("home.sections.fresh")} />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+        {offers.map((offer, index) => (
+          <article
+            key={offer.id ?? index}
+            className={`group overflow-hidden rounded-xl border border-line bg-card shadow-soft transition hover:-translate-y-0.5 hover:border-brand/60 ${offer.id ? "cursor-pointer" : ""}`}
+            onClick={offer.id ? () => onOpen(offer.id as string) : undefined}
+          >
+            <div className="relative aspect-[16/10] overflow-hidden">
+              {offer.image ? (
+                <img className="h-full w-full object-cover transition duration-300 group-hover:scale-105" src={offer.image} alt="" loading="lazy" draggable={false} />
+              ) : (
+                <div className={`h-full w-full bg-gradient-to-br ${offer.gradient}`} />
+              )}
+              <span className={`absolute left-2 top-2 rounded-md px-2 py-0.5 text-[10px] font-black uppercase ${offer.top ? "bg-action text-stone-950" : "bg-brand text-stone-950"}`}>
+                {offer.top ? t("home.badges.top") : t("home.badges.new")}
+              </span>
+              <span className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-black/45 text-white/80 backdrop-blur transition hover:text-brand">
+                <Heart className="h-3.5 w-3.5" />
+              </span>
+            </div>
+            <div className="p-3">
+              <h3 className="line-clamp-1 text-sm font-bold text-ink transition group-hover:text-brand">{offer.title}</h3>
+              <div className="mt-1.5 flex items-center justify-between gap-2">
+                <p className="text-sm font-black text-brand">{money(offer.priceCents, offer.currency)}</p>
+                {offer.seller ? (
+                  <p className="flex min-w-0 items-center gap-1 text-xs text-muted">
+                    <Star className="h-3 w-3 shrink-0 fill-action text-action" />
+                    {offer.rating.toFixed(1)}
+                    <span className="truncate">· {offer.seller}</span>
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function TrustWidget() {
+  const { t } = useI18n();
+  const items = [
+    { title: t("home.benefits.safeTitle"), text: t("home.benefits.safeText"), icon: PackageCheck },
+    { title: t("home.benefits.fastTitle"), text: t("home.benefits.fastText"), icon: Zap },
+    { title: t("home.benefits.reliableTitle"), text: t("home.benefits.reliableText"), icon: ShieldCheck }
+  ];
+  return (
+    <section className="rounded-lg border border-brand/30 bg-card p-4 shadow-soft">
+      <div className="grid grid-cols-3 gap-2 text-center">
+        {items.map(({ title, text, icon: Icon }) => (
+          <div key={title} className="min-w-0">
+            <span className="mx-auto grid h-9 w-9 place-items-center rounded-lg border border-brand/40 bg-brand/10 text-brand">
+              <Icon className="h-4 w-4" />
+            </span>
+            <p className="mt-2 truncate text-xs font-black text-ink">{title}</p>
+            <p className="mt-0.5 text-[10px] leading-4 text-muted">{text}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function GeneralChatWidget() {
   const { t } = useI18n();
   const [messages, setMessages] = useState<ChatMessage[]>(() => [
@@ -362,15 +575,13 @@ function RecentChatsWidget({ onOpen }: { onOpen: (href: string) => void }) {
 function SupportWidget({ onOpen }: { onOpen: () => void }) {
   const { t } = useI18n();
   return (
-    <section className="relative min-h-[180px] overflow-hidden rounded-lg border border-brand/20 bg-card p-5 shadow-soft">
-      <div className="pointer-events-none absolute -right-5 top-7 h-24 w-24 rounded-full border-[8px] border-brand/50" />
-      <div className="pointer-events-none absolute right-6 top-12 grid h-14 w-14 place-items-center rounded-full bg-brand/10 text-brand">
-        <Headphones className="h-8 w-8" />
-      </div>
-      <div className="relative z-10 max-w-[220px] pr-4">
+    <section className="relative min-h-[150px] overflow-hidden rounded-lg border border-brand/50 bg-card p-5 shadow-soft">
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(115deg,rgba(183,255,26,0.16),rgba(13,23,40,0.2)_55%,rgba(183,255,26,0.08))]" />
+      <img className="pointer-events-none absolute -right-3 bottom-0 h-[120px]" src="/brand/keepgame-mascot.svg" alt="" draggable={false} />
+      <div className="relative z-10 max-w-[200px]">
         <h2 className="text-lg font-black text-ink">{t("home.support.title")}</h2>
-        <p className="mt-2 text-sm leading-6 text-muted">{t("home.support.text")}</p>
-        <button className="mt-4 rounded-lg border border-brand/70 px-4 py-2 text-sm font-black text-brand transition hover:bg-brand hover:text-stone-950" onClick={onOpen}>
+        <p className="mt-1.5 text-sm leading-5 text-muted">{t("home.support.text")}</p>
+        <button className="mt-3.5 rounded-lg bg-brand px-4 py-2 text-sm font-black text-stone-950 transition hover:brightness-110" onClick={onOpen}>
           {t("home.support.button")}
         </button>
       </div>

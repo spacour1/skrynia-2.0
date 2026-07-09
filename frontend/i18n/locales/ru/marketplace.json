@@ -33,11 +33,7 @@
     "noOffersText": "Попробуйте сбросить фильтры или выбрать другой раздел.",
     "showMore": "Показать еще предложения",
     "autoDeliveryBadge": "Автовыдача",
-    "tenureOneYear": "На сайте 1 год",
-    "tenureTwoYears": "На сайте 2 года",
-    "tenureMonths": "На сайте 8 мес.",
-    "metricIntegrity": "{value} порядочности",
-    "metricPoliteness": "{value} вежливости"
+    "relatedTitle": "Другие игры и платформы"
   },
   "favorites": {
     "title": "Избранные",

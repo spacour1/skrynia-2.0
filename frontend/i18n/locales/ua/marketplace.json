@@ -33,11 +33,7 @@
     "noOffersText": "Спробуйте скинути фільтри або вибрати інший розділ.",
     "showMore": "Показати ще пропозиції",
     "autoDeliveryBadge": "Автовидача",
-    "tenureOneYear": "На сайті 1 рік",
-    "tenureTwoYears": "На сайті 2 роки",
-    "tenureMonths": "На сайті 8 міс.",
-    "metricIntegrity": "{value} порядності",
-    "metricPoliteness": "{value} ввічливості"
+    "relatedTitle": "Інші ігри та платформи"
   },
   "favorites": {
     "title": "Обрані",

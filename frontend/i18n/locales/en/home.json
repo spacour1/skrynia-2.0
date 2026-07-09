@@ -25,6 +25,8 @@
     },
     "viewAll": "View all",
     "itemsLabel": "items",
+    "emptyOffers": "No active listings yet",
+    "favorite": "Add to favorites",
     "badges": {
       "new": "NEW",
       "top": "TOP"
@@ -37,37 +39,16 @@
       "services": "Services",
       "digital": "Digital goods"
     },
-    "mockOffers": {
-      "o1": "PUBG account | 500+ skins, rare sets",
-      "o2": "2,800 UC | PUBG Mobile, instant",
-      "o3": "Steam key | AAA release, UA region",
-      "o4": "Genshin Impact | AR 58, 5★ collection",
-      "o5": "CS2 rank boost | Premier 15k+",
-      "o6": "Brawl Stars | 40,000 trophies, all brawlers"
-    },
     "carousel": {
       "back": "Back",
       "forward": "Forward"
     },
-    "chat": {
-      "title": "Community chat online",
-      "you": "You",
-      "placeholder": "Write a message...",
-      "send": "Send",
-      "m1": "Anyone selling a PSN account?",
-      "m2": "Looking for rare CS2 skins",
-      "m3": "Can you explain how the escrow works?",
-      "m4": "Bought a key, all good, thanks!",
-      "m5": "I'll trade my account for something interesting"
-    },
     "recentChats": {
       "title": "Recent chats",
-      "support": "Keep Game support",
-      "online": "Online",
-      "orderPayment": "Order #128734 payment",
-      "minutesAgo": "5 min ago",
-      "lotCheck": "Listing #125671 review",
-      "minutesAgo18": "18 min ago"
+      "loading": "Loading...",
+      "empty": "You have no chats yet",
+      "noMessages": "No messages",
+      "viewAll": "All messages"
     },
     "support": {
       "title": "Need help?",

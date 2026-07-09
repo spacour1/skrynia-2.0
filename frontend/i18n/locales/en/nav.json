@@ -19,6 +19,11 @@
     "sell": "Sell",
     "becomeSeller": "Become a seller",
     "becomeSellerText": "Sign up and start selling today!",
+    "sellerHub": "Seller hub",
+    "sellerHubText": "Manage your listings and sales",
+    "adminHub": "Admin panel",
+    "adminHubText": "Moderation, finance, users",
+    "openAdmin": "Open panel",
     "catAccounts": "Accounts",
     "catItems": "Items",
     "catKeys": "Keys",
@@ -56,5 +61,17 @@
     "servicesText": "Boosting, coaching, support",
     "software": "Software",
     "softwareText": "Keys, licenses, accounts"
+  },
+  "catalogPanel": {
+    "popular": "Popular games",
+    "platform": "Platforms",
+    "mobile": "Mobile games",
+    "services": "Services & subscriptions",
+    "all": "All games",
+    "searchResults": "Search results",
+    "searchPlaceholder": "Search the catalog...",
+    "viewAll": "Browse full catalog",
+    "empty": "Nothing found",
+    "close": "Close catalog"
   }
 }

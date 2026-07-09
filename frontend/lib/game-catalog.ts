@@ -593,7 +593,10 @@ export function buildSectionTiles(section: GameCatalogSection, liveGames: Game[]
       slug: entry.slug,
       name: live?.name ?? entry.name,
       publisher: live?.publisher ?? entry.publisher,
-      lotCount: live?.lotCount ?? entry.lotCount
+      // Only surface a lot count when it comes from a real live game (the backend's
+      // per-game count). The static entry.lotCount values are seed/design placeholders,
+      // not real inventory, so they must never be shown as if they were real counts.
+      lotCount: live?.lotCount
     };
   });
 
@@ -606,6 +609,53 @@ export function buildSectionTiles(section: GameCatalogSection, liveGames: Game[]
   }
 
   return tiles;
+}
+
+export type CatalogGroupKey = "popular" | "platform" | "mobile" | "services" | "all";
+
+export type CatalogGroup = {
+  key: CatalogGroupKey;
+  games: Game[];
+};
+
+// Store platforms and digital-service storefronts are seeded as "games" too (they have their
+// own /games/:slug browse page), so the catalog groups them explicitly by slug rather than by
+// the fuzzy name patterns used for actual game titles.
+const CATALOG_PLATFORM_SLUGS = new Set([
+  "steam", "epic-games", "playstation", "xbox", "battle-net", "nintendo", "riot-games", "ubisoft-connect", "ea-app", "rockstar", "gog"
+]);
+const CATALOG_SERVICE_SLUGS = new Set([
+  "telegram", "discord", "spotify", "netflix", "youtube", "apple", "google-play", "amazon"
+]);
+
+/**
+ * Classifies the live games list (from /marketplace/games) into the catalog panel's
+ * top-level groups. Every entry is a real game/platform/service with a working
+ * /games/:slug browse page, so the whole catalog stays clickable and data-driven.
+ * Games are ordered by real inventory (lotCount), then popularity, then name; empty
+ * groups are dropped so the panel never shows a section with nothing behind it.
+ */
+export function buildCatalogGroups(games: Game[]): CatalogGroup[] {
+  const sorted = [...games].sort(
+    (a, b) =>
+      (b.lotCount ?? 0) - (a.lotCount ?? 0) ||
+      (b.popularity ?? 0) - (a.popularity ?? 0) ||
+      a.name.localeCompare(b.name)
+  );
+  const matches = (game: Game, pattern: RegExp) => pattern.test(`${game.slug} ${game.name} ${game.publisher ?? ""}`);
+  const isPlatform = (game: Game) => CATALOG_PLATFORM_SLUGS.has(game.slug);
+  const isService = (game: Game) => CATALOG_SERVICE_SLUGS.has(game.slug);
+  const isTitle = (game: Game) => !isPlatform(game) && !isService(game);
+
+  const groups: CatalogGroup[] = [
+    { key: "popular", games: sorted.filter((game) => isTitle(game) && matches(game, SECTION_PATTERNS.popular)) },
+    { key: "platform", games: sorted.filter(isPlatform) },
+    { key: "mobile", games: sorted.filter((game) => isTitle(game) && matches(game, SECTION_PATTERNS.mobile)) },
+    { key: "services", games: sorted.filter(isService) },
+    { key: "all", games: sorted }
+  ];
+
+  return groups.filter((group) => group.games.length > 0);
 }
 
 export function getGameTileTheme(slug: string, name: string): GameTileThemeConfig {

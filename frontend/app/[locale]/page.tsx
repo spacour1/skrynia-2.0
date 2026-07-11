@@ -1,11 +1,8 @@
 "use client";
 
 import { useRouter } from "@/lib/navigation";
-import type { FormEvent } from "react";
-import { useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  BadgeCheck,
   ChevronLeft,
   ChevronRight,
   Coins,
@@ -14,9 +11,7 @@ import {
   KeyRound,
   MessageCircle,
   PackageCheck,
-  Send,
   ShieldCheck,
-  ShoppingBag,
   Star,
   Swords,
   Trophy,
@@ -25,24 +20,16 @@ import {
   Zap,
   type LucideIcon
 } from "lucide-react";
+import { useRef } from "react";
 import { GameIcon } from "../../components/GameIcon";
-import { apiFetch, money, type Game, type Product } from "../../lib/api";
+import { apiFetch, money, type ConversationGroup, type Game, type Product } from "../../lib/api";
 import { firstProductMedia } from "../../lib/product-media";
 import { useAuth } from "../../lib/auth-store";
 import { SECTION_PATTERNS, getGameTileTheme, type CategoryTile, type GameTileThemeConfig } from "../../lib/game-catalog";
 import { useI18n } from "../../lib/i18n";
 
-type ChatMessage = {
-  id: string;
-  name: string;
-  text: string;
-  time: string;
-  avatar: string;
-};
-
 export default function HomePage() {
   const router = useRouter();
-  const user = useAuth((s) => s.user);
   const { t } = useI18n();
 
   const games = useQuery({
@@ -78,14 +65,13 @@ export default function HomePage() {
             </>
           )}
           <CategoriesRow />
-          <FreshOffers onOpen={(id) => router.push(`/products/${id}`)} />
+          <FreshOffers />
         </section>
       </main>
 
       <aside className="space-y-4 xl:sticky xl:top-[106px] xl:self-start">
-        <GeneralChatWidget />
-        <SupportWidget onOpen={() => router.push("/support")} />
-        <RecentChatsWidget onOpen={(href) => router.push(user ? href : "/login")} />
+        <RecentChatsWidget />
+        <SupportWidget />
         <TrustWidget />
       </aside>
     </div>
@@ -143,7 +129,7 @@ function Hero() {
         draggable={false}
       />
 
-      <div className="relative z-10 flex min-h-[300px] flex-col justify-between px-6 pb-5 pt-8 sm:px-10 lg:px-12">
+      <div className="relative z-10 flex min-h-[300px] flex-col justify-between px-6 pb-6 pt-8 sm:px-10 lg:px-12">
         <div>
           <h1 className="max-w-[560px] text-[28px] font-black leading-[1.1] tracking-normal text-white md:text-[36px] xl:text-[40px]">
             {t("home.hero.titleLine1")}
@@ -158,20 +144,7 @@ function Hero() {
             <Benefit key={item.title} {...item} />
           ))}
         </div>
-
-        <div className="mt-4 flex items-center justify-center gap-1.5">
-          {[0, 1, 2, 3].map((dot) => (
-            <span key={dot} className={`h-1.5 rounded-full transition ${dot === 0 ? "w-5 bg-brand" : "w-1.5 bg-white/25"}`} />
-          ))}
-        </div>
       </div>
-
-      <button className="absolute left-3 top-1/2 z-20 hidden h-9 w-9 -translate-y-1/2 place-items-center rounded-full border border-white/10 bg-black/35 text-white/70 backdrop-blur transition hover:text-brand sm:grid" aria-label={t("home.carousel.back")}>
-        <ChevronLeft className="h-5 w-5" />
-      </button>
-      <button className="absolute right-3 top-1/2 z-20 hidden h-9 w-9 -translate-y-1/2 place-items-center rounded-full border border-white/10 bg-black/35 text-white/70 backdrop-blur transition hover:text-brand sm:grid" aria-label={t("home.carousel.forward")}>
-        <ChevronRight className="h-5 w-5" />
-      </button>
     </section>
   );
 }
@@ -350,9 +323,12 @@ function PlatformsRow({ items, onSelect }: { items: CategoryTile[]; onSelect: (s
             <GameIcon name={item.name} slug={item.slug} className="h-10 w-10 shrink-0 rounded-lg" />
             <span className="min-w-0">
               <span className="block truncate text-sm font-black text-ink">{item.name}</span>
-              <span className="block truncate text-xs text-muted">
-                {(item.lotCount ?? 0).toLocaleString("uk-UA")} {t("home.itemsLabel")}
-              </span>
+              {/* Only rendered for real, backend-provided counts (see buildSectionTiles). */}
+              {typeof item.lotCount === "number" && item.lotCount > 0 ? (
+                <span className="block truncate text-xs text-muted">
+                  {item.lotCount.toLocaleString("uk-UA")} {t("home.itemsLabel")}
+                </span>
+              ) : null}
             </span>
           </button>
         ))}
@@ -428,87 +404,120 @@ function CategoriesRow() {
   );
 }
 
-type OfferItem = {
-  id: string;
-  title: string;
-  priceCents: number;
-  currency: string;
-  top: boolean;
-  image: string | null;
-  seller: string;
-  rating: number;
-};
-
-function FreshOffers({ onOpen }: { onOpen: (id: string) => void }) {
+function FreshOffers() {
   const { t } = useI18n();
+  const router = useRouter();
+  const user = useAuth((s) => s.user);
+  const queryClient = useQueryClient();
+
   const products = useQuery({
     queryKey: ["home-fresh-products"],
     queryFn: () => apiFetch<{ products: Product[]; total: number }>("/marketplace/products?limit=6")
   });
 
-  const offers: OfferItem[] = (products.data?.products ?? []).slice(0, 6).map((product) => ({
-    id: product.id,
-    title: product.title,
-    priceCents: Number(product.priceCents),
-    currency: product.currency,
-    top: Boolean(product.isHot),
-    image: firstProductMedia(product),
-    seller: product.sellerDisplayName ?? "",
-    rating: Number(product.sellerRating ?? 0)
-  }));
+  const favoriteIds = useQuery({
+    queryKey: ["favorite-ids"],
+    queryFn: () => apiFetch<{ productIds: string[] }>("/marketplace/favorites/ids"),
+    enabled: Boolean(user)
+  });
+  const favorites = new Set(favoriteIds.data?.productIds ?? []);
 
-  if (products.isLoading) return <RowSkeleton />;
-
-  if (!offers.length) {
-    return (
-      <section className="space-y-2.5">
-        <SectionHeader title={t("home.sections.fresh")} />
-        <div className="grid min-h-[120px] place-items-center rounded-xl border border-line bg-card p-6 text-center shadow-soft">
-          <p className="max-w-[360px] text-sm leading-6 text-muted">{products.isError ? t("home.freshError") : t("home.freshEmpty")}</p>
-        </div>
-      </section>
-    );
+  async function toggleFavorite(productId: string) {
+    if (!user) {
+      router.push("/login");
+      return;
+    }
+    const liked = favorites.has(productId);
+    queryClient.setQueryData<{ productIds: string[] }>(["favorite-ids"], (prev) => {
+      const ids = new Set(prev?.productIds ?? []);
+      if (liked) ids.delete(productId);
+      else ids.add(productId);
+      return { productIds: Array.from(ids) };
+    });
+    try {
+      await apiFetch(`/marketplace/favorites/${productId}`, { method: liked ? "DELETE" : "PUT" });
+    } catch {
+      // Roll back the optimistic toggle if the request failed.
+      queryClient.invalidateQueries({ queryKey: ["favorite-ids"] });
+    }
   }
+
+  const offers = (products.data?.products ?? []).slice(0, 6);
 
   return (
     <section className="space-y-2.5">
       <SectionHeader title={t("home.sections.fresh")} />
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-        {offers.map((offer) => (
-          <article
-            key={offer.id}
-            className="group cursor-pointer overflow-hidden rounded-xl border border-line bg-card shadow-soft transition hover:-translate-y-0.5 hover:border-brand/60"
-            onClick={() => onOpen(offer.id)}
-          >
-            <div className="relative aspect-[16/10] overflow-hidden">
-              {offer.image ? (
-                <img className="h-full w-full object-cover transition duration-300 group-hover:scale-105" src={offer.image} alt="" loading="lazy" draggable={false} />
-              ) : (
-                <div className="h-full w-full bg-gradient-to-br from-slate-700/50 via-slate-900/70 to-black" />
-              )}
-              <span className={`absolute left-2 top-2 rounded-md px-2 py-0.5 text-[10px] font-black uppercase ${offer.top ? "bg-action text-stone-950" : "bg-brand text-stone-950"}`}>
-                {offer.top ? t("home.badges.top") : t("home.badges.new")}
-              </span>
-              <span className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-black/45 text-white/80 backdrop-blur transition hover:text-brand">
-                <Heart className="h-3.5 w-3.5" />
-              </span>
-            </div>
-            <div className="p-3">
-              <h3 className="line-clamp-1 text-sm font-bold text-ink transition group-hover:text-brand">{offer.title}</h3>
-              <div className="mt-1.5 flex items-center justify-between gap-2">
-                <p className="text-sm font-black text-brand">{money(offer.priceCents, offer.currency)}</p>
-                {offer.seller ? (
-                  <p className="flex min-w-0 items-center gap-1 text-xs text-muted">
-                    <Star className="h-3 w-3 shrink-0 fill-action text-action" />
-                    {offer.rating.toFixed(1)}
-                    <span className="truncate">· {offer.seller}</span>
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          </article>
-        ))}
-      </div>
+      {products.isLoading ? (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div key={index} className="h-[176px] animate-pulse rounded-xl border border-line bg-card shadow-soft" />
+          ))}
+        </div>
+      ) : offers.length ? (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+          {offers.map((product) => {
+            const image = firstProductMedia(product);
+            const liked = favorites.has(product.id);
+            const rating = Number(product.sellerRating ?? 0);
+            return (
+              <article
+                key={product.id}
+                className="group cursor-pointer overflow-hidden rounded-xl border border-line bg-card shadow-soft transition hover:-translate-y-0.5 hover:border-brand/60"
+                onClick={() => router.push(`/products/${product.id}`)}
+              >
+                <div className="relative aspect-[16/10] overflow-hidden">
+                  {image ? (
+                    <img className="h-full w-full object-cover transition duration-300 group-hover:scale-105" src={image} alt="" loading="lazy" draggable={false} />
+                  ) : (
+                    <div className="h-full w-full bg-gradient-to-br from-slate-700/50 via-slate-900/70 to-black" />
+                  )}
+                  <span className={`absolute left-2 top-2 rounded-md px-2 py-0.5 text-[10px] font-black uppercase ${product.isHot ? "bg-action text-stone-950" : "bg-brand text-stone-950"}`}>
+                    {product.isHot ? t("home.badges.top") : t("home.badges.new")}
+                  </span>
+                  <button
+                    type="button"
+                    className={`absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-black/45 backdrop-blur transition hover:text-brand ${liked ? "text-brand" : "text-white/80"}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleFavorite(product.id);
+                    }}
+                    aria-label={t("home.favorite")}
+                    title={t("home.favorite")}
+                  >
+                    <Heart className={`h-3.5 w-3.5 ${liked ? "fill-brand" : ""}`} />
+                  </button>
+                </div>
+                <div className="p-3">
+                  <h3 className="line-clamp-1 text-sm font-bold text-ink transition group-hover:text-brand">{product.title}</h3>
+                  <div className="mt-1.5 flex items-center justify-between gap-2">
+                    <p className="text-sm font-black text-brand">{money(Number(product.priceCents), product.currency)}</p>
+                    {product.sellerDisplayName ? (
+                      <p className="flex min-w-0 items-center gap-1 text-xs text-muted">
+                        {rating > 0 ? (
+                          <>
+                            <Star className="h-3 w-3 shrink-0 fill-action text-action" />
+                            {rating.toFixed(1)}
+                            <span className="truncate">· {product.sellerDisplayName}</span>
+                          </>
+                        ) : (
+                          <span className="truncate">{product.sellerDisplayName}</span>
+                        )}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="grid place-items-center rounded-xl border border-line bg-card px-6 py-12 text-center shadow-soft">
+          <div>
+            <PackageCheck className="mx-auto h-9 w-9 text-muted" />
+            <p className="mt-3 text-sm font-bold text-muted">{t("home.emptyOffers")}</p>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -537,110 +546,96 @@ function TrustWidget() {
   );
 }
 
-function GeneralChatWidget() {
+function RecentChatsWidget() {
   const { t } = useI18n();
-  const [messages, setMessages] = useState<ChatMessage[]>(() => [
-    { id: "m1", name: "ShadowHunter", text: t("home.chat.m1"), time: "16:52", avatar: "/avatars/keyforge-market.svg" },
-    { id: "m2", name: "Kira", text: t("home.chat.m2"), time: "16:53", avatar: "/avatars/nova-accounts.svg" },
-    { id: "m3", name: "NecX", text: t("home.chat.m3"), time: "16:54", avatar: "/avatars/pixel-boost.svg" },
-    { id: "m4", name: "GameLord", text: t("home.chat.m4"), time: "16:55", avatar: "/avatars/raid-supply.svg" },
-    { id: "m5", name: "Viper", text: t("home.chat.m5"), time: "16:55", avatar: "/avatars/nova-accounts.svg" }
-  ]);
-  const [text, setText] = useState("");
+  const router = useRouter();
+  const user = useAuth((s) => s.user);
 
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const value = text.trim();
-    if (!value) return;
-    setMessages((current) => [
-      ...current.slice(-5),
-      {
-        id: `local-${Date.now()}`,
-        name: t("home.chat.you"),
-        text: value,
-        time: new Date().toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" }),
-        avatar: "/avatars/raid-supply.svg"
-      }
-    ]);
-    setText("");
-  }
+  const conversations = useQuery({
+    queryKey: ["chat-conversations-grouped"],
+    queryFn: () => apiFetch<{ groups: ConversationGroup[] }>("/chat/conversations/grouped"),
+    enabled: Boolean(user)
+  });
 
-  return (
-    <section className="overflow-hidden rounded-lg border border-line bg-card shadow-soft">
-      <div className="flex items-center justify-between gap-3 px-5 py-4">
-        <div className="flex items-center gap-2">
-          <h2 className="text-base font-black text-ink">{t("home.chat.title")}</h2>
-          <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(52,211,153,0.7)]" />
-        </div>
-        <span className="rounded-full bg-panel px-2 py-1 text-xs font-bold text-ink">1284</span>
-      </div>
-      <div className="space-y-3 px-5 pb-4">
-        {messages.slice(-6).map((message) => (
-          <article key={message.id} className="flex items-start gap-3">
-            <img className="h-8 w-8 rounded-full border border-line bg-panel object-cover" src={message.avatar} alt="" />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-3">
-                <span className="truncate text-sm font-black text-ink">{message.name}</span>
-                <span className="shrink-0 text-xs text-muted">{message.time}</span>
-              </div>
-              <p className="mt-0.5 line-clamp-1 text-xs text-muted">{message.text}</p>
-            </div>
-            <span className="mt-2 h-2 w-2 rounded-full bg-emerald-400" />
-          </article>
-        ))}
-      </div>
-      <form className="flex border-t border-line" onSubmit={submit}>
-        <input
-          className="min-w-0 flex-1 border-0 bg-panel/45 px-4 py-3 text-sm outline-none placeholder:text-muted"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          placeholder={t("home.chat.placeholder")}
-        />
-        <button className="grid w-12 place-items-center bg-panel/45 text-brand transition hover:bg-brand hover:text-stone-950 disabled:text-muted" disabled={!text.trim()} aria-label={t("home.chat.send")}>
-          <Send className="h-5 w-5" />
-        </button>
-      </form>
-    </section>
-  );
-}
+  // Recent chats are inherently personal — nothing honest to show a signed-out visitor.
+  if (!user) return null;
 
-function RecentChatsWidget({ onOpen }: { onOpen: (href: string) => void }) {
-  const { t } = useI18n();
-  const items = [
-    { title: t("home.recentChats.support"), text: t("home.recentChats.online"), badge: "2", icon: BadgeCheck, accent: true, href: "/support" },
-    { title: t("home.recentChats.orderPayment"), text: t("home.recentChats.minutesAgo"), icon: ShoppingBag, href: "/messages" },
-    { title: t("home.recentChats.lotCheck"), text: t("home.recentChats.minutesAgo18"), icon: MessageCircle, href: "/messages" }
-  ];
+  const groups = conversations.data?.groups ?? [];
+  const visible = groups.slice(0, 4);
+  const totalUnread = groups.reduce((sum, group) => sum + (group.totalUnreadCount ?? 0), 0);
 
   return (
     <section className="rounded-lg border border-line bg-card p-5 shadow-soft">
       <div className="mb-4 flex items-center gap-2">
         <h2 className="text-base font-black text-ink">{t("home.recentChats.title")}</h2>
-        <span className="rounded-full bg-panel px-2 py-0.5 text-xs font-bold text-ink">3</span>
+        {totalUnread > 0 ? (
+          <span className="grid h-6 min-w-6 place-items-center rounded-full bg-action px-1 text-xs font-black text-stone-950">{totalUnread}</span>
+        ) : null}
       </div>
-      <div className="space-y-2">
-        {items.map((item) => {
-          const Icon = item.icon;
-          return (
-            <button key={item.title} type="button" className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition hover:bg-panel" onClick={() => onOpen(item.href)}>
-              <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${item.accent ? "bg-brand/15 text-brand" : "bg-panel text-muted"}`}>
-                <Icon className="h-5 w-5" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-bold text-ink">{item.title}</span>
-                <span className={`block truncate text-xs ${item.accent ? "text-emerald-400" : "text-muted"}`}>{item.text}</span>
-              </span>
-              {item.badge ? <span className="grid h-6 min-w-6 place-items-center rounded-full bg-action px-1 text-xs font-black text-stone-950">{item.badge}</span> : null}
+
+      {conversations.isLoading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div key={index} className="h-14 animate-pulse rounded-lg bg-panel" />
+          ))}
+        </div>
+      ) : visible.length ? (
+        <div className="space-y-2">
+          {visible.map((group, index) => {
+            const conversationId = group.contexts[0]?.conversationId;
+            return (
+              <button
+                key={group.peerUserId}
+                type="button"
+                className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition hover:bg-panel"
+                onClick={() => router.push(conversationId ? `/messages?conversationId=${conversationId}` : "/messages")}
+              >
+                <span className={`relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full bg-gradient-to-br ${avatarGradient(index)} text-sm font-black text-white`}>
+                  {group.peerAvatarUrl ? <img className="h-full w-full object-cover" src={group.peerAvatarUrl} alt="" /> : group.peerDisplayName.slice(0, 1).toUpperCase()}
+                  {group.isOnline ? <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-card bg-emerald-400" /> : null}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-bold text-ink">{group.peerDisplayName}</span>
+                  <span className="block truncate text-xs text-muted">{group.lastMessageBody || t("home.recentChats.noMessages")}</span>
+                </span>
+                {group.totalUnreadCount ? (
+                  <span className="grid h-6 min-w-6 place-items-center rounded-full bg-action px-1 text-xs font-black text-stone-950">{group.totalUnreadCount}</span>
+                ) : (
+                  <span className="shrink-0 text-[11px] text-muted">{formatTime(group.lastMessageAt)}</span>
+                )}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            className="mt-1 w-full rounded-lg border border-line py-2 text-xs font-black text-muted transition hover:border-brand/60 hover:text-brand"
+            onClick={() => router.push("/messages")}
+          >
+            {t("home.recentChats.viewAll")}
+          </button>
+        </div>
+      ) : (
+        <div className="grid place-items-center py-6 text-center">
+          <div>
+            <MessageCircle className="mx-auto h-9 w-9 text-muted" />
+            <p className="mt-3 text-sm text-muted">{t("home.recentChats.empty")}</p>
+            <button
+              type="button"
+              className="mt-3 rounded-lg bg-brand px-4 py-2 text-xs font-black text-stone-950 transition hover:brightness-110"
+              onClick={() => router.push("/messages")}
+            >
+              {t("home.recentChats.viewAll")}
             </button>
-          );
-        })}
-      </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
 
-function SupportWidget({ onOpen }: { onOpen: () => void }) {
+function SupportWidget() {
   const { t } = useI18n();
+  const router = useRouter();
   return (
     <section className="relative min-h-[150px] overflow-hidden rounded-lg border border-brand/50 bg-card p-5 shadow-soft">
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(115deg,rgba(183,255,26,0.16),rgba(13,23,40,0.2)_55%,rgba(183,255,26,0.08))]" />
@@ -648,7 +643,7 @@ function SupportWidget({ onOpen }: { onOpen: () => void }) {
       <div className="relative z-10 max-w-[200px]">
         <h2 className="text-lg font-black text-ink">{t("home.support.title")}</h2>
         <p className="mt-1.5 text-sm leading-5 text-muted">{t("home.support.text")}</p>
-        <button className="mt-3.5 rounded-lg bg-brand px-4 py-2 text-sm font-black text-stone-950 transition hover:brightness-110" onClick={onOpen}>
+        <button className="mt-3.5 rounded-lg bg-brand px-4 py-2 text-sm font-black text-stone-950 transition hover:brightness-110" onClick={() => router.push("/support")}>
           {t("home.support.button")}
         </button>
       </div>
@@ -656,3 +651,16 @@ function SupportWidget({ onOpen }: { onOpen: () => void }) {
   );
 }
 
+function avatarGradient(index: number) {
+  return [
+    "from-violet-500 via-fuchsia-700 to-slate-950",
+    "from-emerald-400 via-teal-700 to-slate-950",
+    "from-amber-300 via-orange-700 to-slate-950",
+    "from-sky-400 via-blue-700 to-slate-950"
+  ][index % 4];
+}
+
+function formatTime(value?: string | null) {
+  if (!value) return "";
+  return new Date(value).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
+}

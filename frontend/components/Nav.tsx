@@ -15,6 +15,7 @@ import {
   Heart,
   Home,
   KeyRound,
+  LayoutGrid,
   MessageCircle,
   PackagePlus,
   Plus,
@@ -25,12 +26,14 @@ import {
   Swords,
   Users,
   WalletCards,
-  Wrench
+  Wrench,
+  X
 } from "lucide-react";
 import { apiFetch, money, type Game } from "@/lib/api";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
 import { captureEvent } from "@/lib/posthog";
+import { CatalogPanel } from "./nav/CatalogPanel";
 import { NotificationDropdown, ProfileDropdown } from "./nav/NavDropdowns";
 import { SearchSuggest } from "./nav/SearchSuggest";
 import { CatalogMegaMenu, SideNavButton } from "./nav/SideNav";
@@ -61,10 +64,18 @@ export function Nav() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [catalogPanelOpen, setCatalogPanelOpen] = useState(false);
 
   useEffect(() => {
     if (pathname !== "/" || typeof window === "undefined") return;
     setSearch(new URLSearchParams(window.location.search).get("q") ?? "");
+  }, [pathname]);
+
+  // Any route change closes the overlay menus so they never linger over a new page.
+  useEffect(() => {
+    setCatalogPanelOpen(false);
+    setNotificationsOpen(false);
+    setProfileOpen(false);
   }, [pathname]);
 
   useEffect(() => {
@@ -94,6 +105,23 @@ export function Nav() {
     queryFn: () => apiFetch<{ games: Game[] }>("/marketplace/games"),
     staleTime: 5 * 60 * 1000
   });
+
+  // Staff (admin/moderator) never see a "become a seller" pitch; regular users see it only
+  // until they actually have a listing, after which the card becomes a seller-hub shortcut.
+  const isStaff = user?.role === "admin" || user?.role === "moderator";
+  const sellerProducts = useQuery({
+    queryKey: ["nav-seller-products"],
+    queryFn: () => apiFetch<{ products: unknown[] }>("/marketplace/seller/products"),
+    enabled: Boolean(user) && !isStaff,
+    staleTime: 5 * 60 * 1000
+  });
+  const sellerCtaVariant: SellerCtaVariant = !user
+    ? "guest"
+    : isStaff
+      ? "admin"
+      : (sellerProducts.data?.products?.length ?? 0) > 0
+        ? "seller"
+        : "user";
 
   const navItems = [
     { label: t("nav.home"), href: "/", icon: Home },
@@ -162,10 +190,15 @@ export function Nav() {
     router.push(auth && !user ? "/login" : href);
   }
 
+  function openCatalogRoute(href: string) {
+    setCatalogPanelOpen(false);
+    router.push(href);
+  }
+
   return (
     <>
       <header className="sticky top-0 z-40 border-b border-line/70 bg-surface/85 backdrop-blur-xl">
-        <div className="mx-auto grid min-h-[86px] max-w-[1720px] gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[220px_minmax(280px,1fr)_auto] lg:items-center lg:px-8">
+        <div className="relative z-50 mx-auto grid min-h-[86px] max-w-[1720px] gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[220px_minmax(280px,1fr)_auto] lg:items-center lg:px-8">
           <Link href="/" className="inline-flex items-center gap-3 text-xl font-extrabold tracking-normal text-ink">
             <img src="/brand/keepgame-logo.svg" alt="Keep Game" className="h-11 w-11 rounded-xl shadow-soft" />
             <span className="leading-[1.05]">
@@ -174,7 +207,24 @@ export function Nav() {
             </span>
           </Link>
 
-          <form className="relative" onSubmit={submitSearch} onBlur={() => window.setTimeout(() => setSuggestOpen(false), 140)}>
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <button
+              type="button"
+              className={`inline-flex h-12 shrink-0 items-center gap-2 rounded-2xl border px-3.5 text-sm font-black shadow-soft transition sm:px-4 ${
+                catalogPanelOpen ? "border-brand bg-brand text-stone-950" : "border-line bg-card text-ink hover:border-brand/60 hover:bg-panel"
+              }`}
+              onClick={() => {
+                setCatalogPanelOpen((current) => !current);
+                setNotificationsOpen(false);
+                setProfileOpen(false);
+              }}
+              aria-expanded={catalogPanelOpen}
+              aria-label={t("nav.catalog")}
+            >
+              {catalogPanelOpen ? <X className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />}
+              <span className="hidden sm:inline">{t("nav.catalog")}</span>
+            </button>
+            <form className="relative min-w-0 flex-1" onSubmit={submitSearch} onBlur={() => window.setTimeout(() => setSuggestOpen(false), 140)}>
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
             <input
               className="focus-ring h-12 w-full rounded-2xl border border-line bg-card px-11 text-sm shadow-soft placeholder:text-muted"
@@ -200,7 +250,8 @@ export function Nav() {
                 onSearch={goSearch}
               />
             ) : null}
-          </form>
+            </form>
+          </div>
 
           <div className="flex items-center justify-start gap-2 lg:justify-end">
             <button
@@ -295,6 +346,20 @@ export function Nav() {
             </div>
           </div>
         </div>
+
+        {catalogPanelOpen ? (
+          <>
+            <button
+              type="button"
+              className="fixed inset-0 z-40 cursor-default bg-black/50 backdrop-blur-sm"
+              aria-label={t("catalogPanel.close")}
+              onClick={() => setCatalogPanelOpen(false)}
+            />
+            <div className="absolute left-0 right-0 top-full z-50 border-b border-line/70 bg-surface shadow-[0_40px_80px_rgba(0,0,0,0.45)]">
+              <CatalogPanel games={games.data?.games ?? []} loading={games.isLoading} onNavigate={openCatalogRoute} />
+            </div>
+          </>
+        ) : null}
       </header>
 
       <aside className="fixed bottom-0 left-0 top-[86px] z-30 hidden w-[188px] flex-col border-r border-line/70 bg-surface/85 px-3 py-4 shadow-[18px_0_70px_rgba(0,0,0,0.16)] backdrop-blur-xl lg:flex">
@@ -319,19 +384,7 @@ export function Nav() {
             </div>
           ))}
         </nav>
-        <div className="mt-3 shrink-0 rounded-xl border border-brand/40 bg-panel/80 p-3 shadow-soft">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-sm font-black leading-tight text-ink">{t("nav.becomeSeller")}</p>
-            <img src="/brand/keepgame-mascot.svg" alt="" className="h-10 w-10 shrink-0" />
-          </div>
-          <p className="mt-1.5 text-[11px] leading-4 text-muted">{t("nav.becomeSellerText")}</p>
-          <button
-            className="mt-2.5 w-full rounded-lg bg-brand py-2 text-xs font-black text-stone-950 transition hover:brightness-110"
-            onClick={() => openRoute(user ? "/seller/create" : "/register", false)}
-          >
-            {t("nav.register")}
-          </button>
-        </div>
+        <SellerCta variant={sellerCtaVariant} onGo={(href) => openRoute(href, false)} />
       </aside>
 
       <nav className="sticky top-[86px] z-30 flex gap-2 overflow-x-auto border-b border-line/70 bg-surface/90 px-4 py-3 backdrop-blur-xl lg:hidden">
@@ -349,5 +402,40 @@ export function Nav() {
         ))}
       </nav>
     </>
+  );
+}
+
+type SellerCtaVariant = "guest" | "user" | "seller" | "admin";
+
+/**
+ * Bottom-of-sidebar call to action, tailored to who is looking at it:
+ * - guest  -> register and start selling
+ * - user   -> create their first listing (real seller onboarding)
+ * - seller -> jump to their sales dashboard (no more "become a seller" pitch)
+ * - admin  -> jump to the admin panel instead of any seller pitch
+ */
+function SellerCta({ variant, onGo }: { variant: SellerCtaVariant; onGo: (href: string) => void }) {
+  const { t } = useI18n();
+  const card = {
+    guest: { title: t("nav.becomeSeller"), text: t("nav.becomeSellerText"), button: t("nav.register"), href: "/register" },
+    user: { title: t("nav.becomeSeller"), text: t("nav.becomeSellerText"), button: t("nav.createListing"), href: "/seller/create" },
+    seller: { title: t("nav.sellerHub"), text: t("nav.sellerHubText"), button: t("nav.mySales"), href: "/seller/sales" },
+    admin: { title: t("nav.adminHub"), text: t("nav.adminHubText"), button: t("nav.openAdmin"), href: "/admin" }
+  }[variant];
+
+  return (
+    <div className="mt-3 shrink-0 rounded-xl border border-brand/40 bg-panel/80 p-3 shadow-soft">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-black leading-tight text-ink">{card.title}</p>
+        <img src="/brand/keepgame-mascot.svg" alt="" className="h-10 w-10 shrink-0" />
+      </div>
+      <p className="mt-1.5 text-[11px] leading-4 text-muted">{card.text}</p>
+      <button
+        className="mt-2.5 w-full rounded-lg bg-brand py-2 text-xs font-black text-stone-950 transition hover:brightness-110"
+        onClick={() => onGo(card.href)}
+      >
+        {card.button}
+      </button>
+    </div>
   );
 }

@@ -33,11 +33,7 @@
     "noOffersText": "Try resetting the filters or picking another section.",
     "showMore": "Show more offers",
     "autoDeliveryBadge": "Auto delivery",
-    "tenureOneYear": "On the site for 1 year",
-    "tenureTwoYears": "On the site for 2 years",
-    "tenureMonths": "On the site for 8 mo.",
-    "metricIntegrity": "{value} integrity",
-    "metricPoliteness": "{value} politeness"
+    "relatedTitle": "More games & platforms"
   },
   "favorites": {
     "title": "Favorites",

@@ -38,12 +38,13 @@ export default function HomePage() {
   });
 
   // Homepage rows are built only from catalog-builder data: games the admin left visible
-  // (showOnHomepage), curated "popular" flags first, real lot counts, no seeded lists.
+  // (showOnHomepage), curated "popular" flags pinned first (already ordered by
+  // homepage_order from the API), then the row is filled up with the games that have the
+  // most active lots - flagging one game must never collapse the row to a single tile.
   const gamesList = (games.data?.games ?? []).filter((game) => game.showOnHomepage !== false);
   const curatedPopular = gamesList.filter((game) => game.isPopular);
-  const popularGames = tilesFromGames(
-    curatedPopular.length ? curatedPopular : [...gamesList].sort((a, b) => (b.lotCount ?? 0) - (a.lotCount ?? 0)).slice(0, 10)
-  );
+  const popularRest = gamesList.filter((game) => !game.isPopular).sort((a, b) => (b.lotCount ?? 0) - (a.lotCount ?? 0));
+  const popularGames = tilesFromGames([...curatedPopular, ...popularRest].slice(0, 10));
   const platformGames = tilesFromGames(gamesList.filter((game) => SECTION_PATTERNS.platform.test(`${game.slug} ${game.name} ${game.publisher ?? ""}`)));
 
   function selectGame(slug: string) {

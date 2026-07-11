@@ -649,8 +649,14 @@ export function buildCatalogGroups(games: Game[]): CatalogGroup[] {
   const isService = (game: Game) => CATALOG_SERVICE_SLUGS.has(game.slug);
   const isTitle = (game: Game) => !isPlatform(game) && !isService(game);
 
+  // Admin-curated isPopular games (catalog builder flag) are pinned first; the name-pattern
+  // match only fills in behind them, so a freshly created game flagged as popular shows up
+  // here without having to match any hardcoded title pattern.
+  const curatedPopular = sorted.filter((game) => game.isPopular);
+  const patternPopular = sorted.filter((game) => !game.isPopular && isTitle(game) && matches(game, SECTION_PATTERNS.popular));
+
   const groups: CatalogGroup[] = [
-    { key: "popular", games: sorted.filter((game) => isTitle(game) && matches(game, SECTION_PATTERNS.popular)) },
+    { key: "popular", games: [...curatedPopular, ...patternPopular] },
     { key: "platform", games: sorted.filter(isPlatform) },
     { key: "mobile", games: sorted.filter((game) => isTitle(game) && matches(game, SECTION_PATTERNS.mobile)) },
     { key: "services", games: sorted.filter(isService) },

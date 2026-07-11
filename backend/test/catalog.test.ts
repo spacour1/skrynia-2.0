@@ -715,15 +715,36 @@ describe("catalog display & discovery fields", () => {
     expect(visibleRow.lotCount).toBe(0);
   });
 
-  it("suggest finds a game by Cyrillic alias", async () => {
+  it("persists the admin-picked catalog type and exposes it publicly", async () => {
     const admin = await createUser("admin");
     const group = await createCatalogGroup({ slug: uniqueSlug("group"), name: "G", status: "active" }, admin);
     const item = await createCatalogItem(
-      { groupId: group.id, slug: uniqueSlug("roblox"), name: "Roblox", status: "active", aliases: ["роблокс"] },
+      { groupId: group.id, slug: uniqueSlug("mob"), name: "Mobile Thing", status: "active", catalogType: "mobile" },
+      admin
+    );
+    expect(item.catalogType).toBe("mobile");
+
+    const updated = await updateCatalogItem(item.id, { catalogType: "service" }, admin);
+    expect(updated.catalogType).toBe("service");
+
+    await cacheDel("marketplace:games");
+    const response = await request(app).get("/marketplace/games");
+    const row = response.body.games.find((game: { slug: string }) => game.slug === item.slug);
+    expect(row.catalogType).toBe("service");
+  });
+
+  it("suggest finds a game by Cyrillic alias", async () => {
+    const admin = await createUser("admin");
+    const group = await createCatalogGroup({ slug: uniqueSlug("group"), name: "G", status: "active" }, admin);
+    // The test DB accumulates games across runs (resetDb only truncates users), so the
+    // alias must be unique per run - otherwise older copies win the suggest LIMIT.
+    const alias = uniqueSlug("роблокс");
+    const item = await createCatalogItem(
+      { groupId: group.id, slug: uniqueSlug("roblox"), name: "Roblox", status: "active", aliases: [alias] },
       admin
     );
 
-    const response = await request(app).get("/marketplace/suggest").query({ q: "роблок" });
+    const response = await request(app).get("/marketplace/suggest").query({ q: alias.slice(0, alias.length - 2) });
     expect(response.status).toBe(200);
     const slugs = response.body.games.map((game: { slug: string }) => game.slug);
     expect(slugs).toContain(item.slug);

@@ -64,7 +64,7 @@ export async function getAdminCatalogTree() {
       i.sort_order as "itemSortOrder", i.seo_title as "itemSeoTitle", i.seo_description as "itemSeoDescription",
       i.description as "itemDescription", i.short_description as "itemShortDescription",
       i.logo_image as "itemLogoImage", i.background_image as "itemBackgroundImage",
-      i.aliases as "itemAliases", i.show_on_homepage as "itemShowOnHomepage",
+      i.aliases as "itemAliases", i.catalog_type as "itemCatalogType", i.show_on_homepage as "itemShowOnHomepage",
       i.is_popular as "itemIsPopular", i.is_recommended as "itemIsRecommended", i.homepage_order as "itemHomepageOrder",
       (select count(*)::int from products p2 where p2.game_id = i.id and p2.status = 'active') as "itemActiveProductCount",
       s.id as "sectionId", s.slug as "sectionSlug", s.name as "sectionName", s.product_type as "listingType",
@@ -105,6 +105,7 @@ type TreeRow = {
   itemLogoImage?: string | null;
   itemBackgroundImage?: string | null;
   itemAliases?: string[];
+  itemCatalogType?: string;
   itemShowOnHomepage?: boolean;
   itemIsPopular?: boolean;
   itemIsRecommended?: boolean;
@@ -166,6 +167,7 @@ function buildTree(rows: TreeRow[], opts: { includeStatus?: boolean } = {}) {
               logoImage: row.itemLogoImage ?? null,
               backgroundImage: row.itemBackgroundImage ?? null,
               aliases: row.itemAliases ?? [],
+              catalogType: row.itemCatalogType ?? "game",
               showOnHomepage: row.itemShowOnHomepage ?? true,
               isPopular: row.itemIsPopular ?? false,
               isRecommended: row.itemIsRecommended ?? false,

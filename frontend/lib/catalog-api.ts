@@ -2,6 +2,9 @@ import { apiFetch } from "./api";
 
 export type CatalogStatus = "draft" | "active" | "hidden" | "archived" | "deleted";
 
+export const CATALOG_ITEM_TYPES = ["game", "mobile", "platform", "service"] as const;
+export type CatalogItemType = (typeof CATALOG_ITEM_TYPES)[number];
+
 export type CatalogFieldType = "text" | "textarea" | "number" | "select" | "multiselect" | "boolean" | "checkbox";
 
 export type CatalogField = {
@@ -58,6 +61,7 @@ export type AdminCatalogItem = {
   description: string | null;
   shortDescription: string | null;
   aliases: string[];
+  catalogType: CatalogItemType;
   showOnHomepage: boolean;
   isPopular: boolean;
   isRecommended: boolean;
@@ -145,6 +149,7 @@ export const catalogApi = {
     description?: string;
     shortDescription?: string;
     aliases?: string[];
+    catalogType?: CatalogItemType;
     showOnHomepage?: boolean;
     isPopular?: boolean;
     isRecommended?: boolean;

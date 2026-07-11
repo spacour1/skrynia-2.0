@@ -5,7 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Loader2, Trash2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { showAppToast } from "@/lib/toast-events";
-import { catalogApi, type AdminCatalogItem, type CatalogStatus } from "@/lib/catalog-api";
+import { CATALOG_ITEM_TYPES, catalogApi, type AdminCatalogItem, type CatalogItemType, type CatalogStatus } from "@/lib/catalog-api";
 import { Field, FormError, ImageSlot, StatusActions, StatusPill, Toggle } from "./catalog-ui";
 import type { Selection } from "./types";
 import { useAutoSlug } from "./useAutoSlug";
@@ -22,6 +22,7 @@ type ItemDraft = {
   description: string;
   shortDescription: string;
   aliases: string[];
+  catalogType: CatalogItemType;
   showOnHomepage: boolean;
   isPopular: boolean;
   isRecommended: boolean;
@@ -41,6 +42,7 @@ function draftFromItem(item?: AdminCatalogItem): ItemDraft {
     description: item?.description ?? "",
     shortDescription: item?.shortDescription ?? "",
     aliases: item?.aliases ?? [],
+    catalogType: item?.catalogType ?? "game",
     showOnHomepage: item?.showOnHomepage ?? true,
     isPopular: item?.isPopular ?? false,
     isRecommended: item?.isRecommended ?? false,
@@ -82,6 +84,7 @@ export function ItemForm({ item, groupId, onSelect }: { item?: AdminCatalogItem;
         description: draft.description || null,
         shortDescription: draft.shortDescription || null,
         aliases: draft.aliases,
+        catalogType: draft.catalogType,
         showOnHomepage: draft.showOnHomepage,
         isPopular: draft.isPopular,
         isRecommended: draft.isRecommended,
@@ -188,6 +191,16 @@ export function ItemForm({ item, groupId, onSelect }: { item?: AdminCatalogItem;
             </Field>
           </div>
           {!isDraft ? <p className="text-[11px] text-muted">{t("adminCatalog.item.slugLocked")}</p> : null}
+          <Field label={t("adminCatalog.item.catalogTypeLabel")}>
+            <select className="app-input h-10 w-full" value={draft.catalogType} onChange={(e) => set("catalogType", e.target.value as CatalogItemType)}>
+              {CATALOG_ITEM_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {t(`adminCatalog.itemType.${type}`)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <p className="text-[11px] leading-4 text-muted">{t("adminCatalog.item.catalogTypeHint")}</p>
           <Field label={t("adminCatalog.item.shortDescriptionLabel")}>
             <input className="app-input h-10 w-full" maxLength={300} value={draft.shortDescription} onChange={(e) => set("shortDescription", e.target.value)} />
           </Field>

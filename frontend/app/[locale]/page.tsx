@@ -45,7 +45,9 @@ export default function HomePage() {
   const curatedPopular = gamesList.filter((game) => game.isPopular);
   const popularRest = gamesList.filter((game) => !game.isPopular).sort((a, b) => (b.lotCount ?? 0) - (a.lotCount ?? 0));
   const popularGames = tilesFromGames([...curatedPopular, ...popularRest].slice(0, 10));
-  const platformGames = tilesFromGames(gamesList.filter((game) => SECTION_PATTERNS.platform.test(`${game.slug} ${game.name} ${game.publisher ?? ""}`)));
+  const platformGames = tilesFromGames(
+    gamesList.filter((game) => (game.catalogType ? game.catalogType === "platform" : SECTION_PATTERNS.platform.test(`${game.slug} ${game.name} ${game.publisher ?? ""}`)))
+  );
 
   function selectGame(slug: string) {
     router.push(`/games/${slug}`);

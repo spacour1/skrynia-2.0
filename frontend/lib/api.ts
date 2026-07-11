@@ -48,6 +48,7 @@ export type Game = {
   shortDescription?: string | null;
   seoTitle?: string | null;
   seoDescription?: string | null;
+  catalogType?: "game" | "mobile" | "platform" | "service";
   showOnHomepage?: boolean;
   isPopular?: boolean;
   isRecommended?: boolean;

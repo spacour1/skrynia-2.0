@@ -13,6 +13,7 @@ export type CatalogItemInput = {
   logoImage?: string | null;
   backgroundImage?: string | null;
   aliases?: string[];
+  catalogType?: "game" | "mobile" | "platform" | "service";
   showOnHomepage?: boolean;
   isPopular?: boolean;
   isRecommended?: boolean;
@@ -25,7 +26,7 @@ export type CatalogItemInput = {
 
 const ITEM_RETURNING = `id, group_id as "groupId", slug, name, description, short_description as "shortDescription",
                icon_url as "icon", banner, logo_image as "logoImage", background_image as "backgroundImage",
-               aliases, show_on_homepage as "showOnHomepage", is_popular as "isPopular",
+               aliases, catalog_type as "catalogType", show_on_homepage as "showOnHomepage", is_popular as "isPopular",
                is_recommended as "isRecommended", homepage_order as "homepageOrder",
                sort_order as "sortOrder", seo_title as "seoTitle", seo_description as "seoDescription", status`;
 
@@ -36,10 +37,10 @@ export async function createCatalogItem(input: CatalogItemInput, adminId: string
 
   const result = await pool.query(
     `insert into games(group_id, slug, name, publisher, icon_url, banner, description, short_description, logo_image, background_image,
-                       aliases, show_on_homepage, is_popular, is_recommended, homepage_order,
+                       aliases, catalog_type, show_on_homepage, is_popular, is_recommended, homepage_order,
                        sort_order, seo_title, seo_description, status, is_active)
-     values ($1, $2, $3, null, $4, $5, $6, $7, $8, $9, coalesce($10::text[], '{}'::text[]), coalesce($11::boolean, true), coalesce($12::boolean, false), coalesce($13::boolean, false),
-             coalesce($14::integer, 0), coalesce($15::integer, 0), $16, $17, coalesce($18, 'draft'), false)
+     values ($1, $2, $3, null, $4, $5, $6, $7, $8, $9, coalesce($10::text[], '{}'::text[]), coalesce($11, 'game'), coalesce($12::boolean, true), coalesce($13::boolean, false), coalesce($14::boolean, false),
+             coalesce($15::integer, 0), coalesce($16::integer, 0), $17, $18, coalesce($19, 'draft'), false)
      returning ${ITEM_RETURNING}, created_at as "createdAt"`,
     [
       input.groupId,
@@ -52,6 +53,7 @@ export async function createCatalogItem(input: CatalogItemInput, adminId: string
       input.logoImage ?? null,
       input.backgroundImage ?? null,
       input.aliases,
+      input.catalogType,
       input.showOnHomepage,
       input.isPopular,
       input.isRecommended,
@@ -88,6 +90,7 @@ export async function updateCatalogItem(id: string, input: Partial<CatalogItemIn
     logo_image: input.logoImage,
     background_image: input.backgroundImage,
     aliases: input.aliases,
+    catalog_type: input.catalogType,
     show_on_homepage: input.showOnHomepage,
     is_popular: input.isPopular,
     is_recommended: input.isRecommended,

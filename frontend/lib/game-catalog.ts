@@ -645,21 +645,28 @@ export function buildCatalogGroups(games: Game[]): CatalogGroup[] {
       a.name.localeCompare(b.name)
   );
   const matches = (game: Game, pattern: RegExp) => pattern.test(`${game.slug} ${game.name} ${game.publisher ?? ""}`);
-  const isPlatform = (game: Game) => CATALOG_PLATFORM_SLUGS.has(game.slug);
-  const isService = (game: Game) => CATALOG_SERVICE_SLUGS.has(game.slug);
-  const isTitle = (game: Game) => !isPlatform(game) && !isService(game);
+  // The admin-picked catalogType (catalog builder) is the source of truth; the slug sets /
+  // name patterns only classify rows the API hasn't typed yet (older cached responses).
+  const typeOf = (game: Game): "game" | "mobile" | "platform" | "service" => {
+    if (game.catalogType) return game.catalogType;
+    if (CATALOG_PLATFORM_SLUGS.has(game.slug)) return "platform";
+    if (CATALOG_SERVICE_SLUGS.has(game.slug)) return "service";
+    if (matches(game, SECTION_PATTERNS.mobile)) return "mobile";
+    return "game";
+  };
 
-  // Admin-curated isPopular games (catalog builder flag) are pinned first; the name-pattern
-  // match only fills in behind them, so a freshly created game flagged as popular shows up
-  // here without having to match any hardcoded title pattern.
+  // Admin-curated isPopular games are pinned first; the name-pattern match only fills in
+  // behind them, so a freshly created game flagged as popular shows up here without having
+  // to match any hardcoded title pattern.
+  const isTitle = (game: Game) => typeOf(game) === "game" || typeOf(game) === "mobile";
   const curatedPopular = sorted.filter((game) => game.isPopular);
   const patternPopular = sorted.filter((game) => !game.isPopular && isTitle(game) && matches(game, SECTION_PATTERNS.popular));
 
   const groups: CatalogGroup[] = [
     { key: "popular", games: [...curatedPopular, ...patternPopular] },
-    { key: "platform", games: sorted.filter(isPlatform) },
-    { key: "mobile", games: sorted.filter((game) => isTitle(game) && matches(game, SECTION_PATTERNS.mobile)) },
-    { key: "services", games: sorted.filter(isService) },
+    { key: "platform", games: sorted.filter((game) => typeOf(game) === "platform") },
+    { key: "mobile", games: sorted.filter((game) => typeOf(game) === "mobile") },
+    { key: "services", games: sorted.filter((game) => typeOf(game) === "service") },
     { key: "all", games: sorted }
   ];
 

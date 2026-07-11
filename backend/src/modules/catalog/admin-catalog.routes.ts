@@ -54,6 +54,7 @@ const itemSchema = z.object({
   logoImage: z.string().max(500).optional().nullable(),
   backgroundImage: z.string().max(500).optional().nullable(),
   aliases: z.array(z.string().min(1).max(80)).max(30).optional(),
+  catalogType: z.enum(["game", "mobile", "platform", "service"]).optional(),
   showOnHomepage: z.boolean().optional(),
   isPopular: z.boolean().optional(),
   isRecommended: z.boolean().optional(),

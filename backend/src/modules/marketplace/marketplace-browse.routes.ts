@@ -63,6 +63,7 @@ router.get(
     const result = await pool.query(
       `select g.id, g.slug, g.name, g.publisher, g.icon_url as "iconUrl", g.popularity,
               g.banner, g.logo_image as "logoImage", g.short_description as "shortDescription",
+              g.catalog_type as "catalogType",
               g.show_on_homepage as "showOnHomepage", g.is_popular as "isPopular",
               g.is_recommended as "isRecommended", g.homepage_order as "homepageOrder",
               g.created_at as "createdAt",

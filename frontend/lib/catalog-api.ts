@@ -53,6 +53,16 @@ export type AdminCatalogItem = {
   name: string;
   icon: string | null;
   banner: string | null;
+  logoImage: string | null;
+  backgroundImage: string | null;
+  description: string | null;
+  shortDescription: string | null;
+  aliases: string[];
+  showOnHomepage: boolean;
+  isPopular: boolean;
+  isRecommended: boolean;
+  homepageOrder: number;
+  activeProductCount: number;
   sortOrder: number;
   seoTitle: string | null;
   seoDescription: string | null;
@@ -130,10 +140,25 @@ export const catalogApi = {
     slug: string;
     icon?: string;
     banner?: string;
+    logoImage?: string;
+    backgroundImage?: string;
+    description?: string;
+    shortDescription?: string;
+    aliases?: string[];
+    showOnHomepage?: boolean;
+    isPopular?: boolean;
+    isRecommended?: boolean;
+    homepageOrder?: number;
     sortOrder?: number;
     seoTitle?: string;
     seoDescription?: string;
   }) => apiFetch<{ item: AdminCatalogItem }>("/admin/catalog/items", { method: "POST", body: JSON.stringify(input) }),
+
+  uploadImage: (file: File) => {
+    const body = new FormData();
+    body.append("file", file);
+    return apiFetch<{ url: string }>("/storage/upload", { method: "POST", body });
+  },
   updateItem: (id: string, input: Record<string, unknown>) =>
     apiFetch<{ item: AdminCatalogItem }>(`/admin/catalog/items/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
   deleteItem: (id: string) => apiFetch<{ hardDeleted: boolean }>(`/admin/catalog/items/${id}`, { method: "DELETE" }),

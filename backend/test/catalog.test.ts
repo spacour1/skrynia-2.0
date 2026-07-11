@@ -3,7 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
 import { pool } from "../src/db/pool.js";
-import { getRedis } from "../src/common/redis.js";
+import { cacheDel, getRedis } from "../src/common/redis.js";
 import { issueSession } from "../src/modules/auth/session.service.js";
 import { parseCatalogSchema, validateMetadataAgainstSchema } from "../src/modules/catalog/catalog.validation.js";
 import {
@@ -640,5 +640,92 @@ describe("audit action type precision", () => {
 
     const v1Row = await pool.query<{ status: string }>(`select status from catalog_section_schemas where id = $1`, [v1.id]);
     expect(v1Row.rows[0].status).toBe("archived");
+  });
+});
+
+describe("catalog display & discovery fields", () => {
+  it("persists display flags, aliases, and images on create and returns them from the admin tree", async () => {
+    const admin = await createUser("admin");
+    const group = await createCatalogGroup({ slug: uniqueSlug("group"), name: "Test Group", status: "active" }, admin);
+    const item = await createCatalogItem(
+      {
+        groupId: group.id,
+        slug: uniqueSlug("item"),
+        name: "Roblox",
+        status: "active",
+        shortDescription: "Short blurb",
+        description: "Long description",
+        banner: "https://cdn.test/banner.webp",
+        logoImage: "https://cdn.test/logo.webp",
+        aliases: ["роблокс", "rblx"],
+        showOnHomepage: false,
+        isPopular: true,
+        isRecommended: true,
+        homepageOrder: 7
+      },
+      admin
+    );
+
+    expect(item.aliases).toEqual(["роблокс", "rblx"]);
+    expect(item.showOnHomepage).toBe(false);
+    expect(item.isPopular).toBe(true);
+    expect(item.homepageOrder).toBe(7);
+
+    const tree = await getAdminCatalogTree();
+    const treeItem = tree.flatMap((g: { items: { id: string; aliases?: string[]; isRecommended?: boolean }[] }) => g.items).find((i) => i.id === item.id);
+    expect(treeItem?.aliases).toEqual(["роблокс", "rblx"]);
+    expect(treeItem?.isRecommended).toBe(true);
+  });
+
+  it("updates flags and aliases through the admin API and strips unknown/system fields", async () => {
+    const agent = await authedAgent("admin");
+    const group = await createCatalogGroup({ slug: uniqueSlug("group"), name: "G", status: "active" }, agent.userId);
+    const item = await createCatalogItem({ groupId: group.id, slug: uniqueSlug("item"), name: "Item", status: "active" }, agent.userId);
+
+    const response = await agent
+      .patch(`/admin/catalog/items/${item.id}`)
+      .send({ isPopular: true, aliases: ["алиас"], popularity: 99999, is_active: false });
+    expect(response.status).toBe(200);
+    expect(response.body.item.isPopular).toBe(true);
+    expect(response.body.item.aliases).toEqual(["алиас"]);
+
+    // zod strips unknown keys: legacy popularity / is_active must be untouched by the payload
+    const row = await pool.query<{ popularity: number; is_active: boolean }>(`select popularity, is_active from games where id = $1`, [item.id]);
+    expect(row.rows[0].popularity).toBe(0);
+    expect(row.rows[0].is_active).toBe(true);
+  });
+
+  it("public games list exposes flags for active games and hides hidden games", async () => {
+    const admin = await createUser("admin");
+    const group = await createCatalogGroup({ slug: uniqueSlug("group"), name: "G", status: "active" }, admin);
+    const visible = await createCatalogItem(
+      { groupId: group.id, slug: uniqueSlug("vis"), name: "Visible Game", status: "active", isPopular: true },
+      admin
+    );
+    const hidden = await createCatalogItem({ groupId: group.id, slug: uniqueSlug("hid"), name: "Hidden Game", status: "hidden" }, admin);
+
+    await cacheDel("marketplace:games");
+    const response = await request(app).get("/marketplace/games");
+    expect(response.status).toBe(200);
+    const slugs = response.body.games.map((game: { slug: string }) => game.slug);
+    expect(slugs).toContain(visible.slug);
+    expect(slugs).not.toContain(hidden.slug);
+    const visibleRow = response.body.games.find((game: { slug: string }) => game.slug === visible.slug);
+    expect(visibleRow.isPopular).toBe(true);
+    expect(visibleRow.lotCount).toBe(0);
+  });
+
+  it("suggest finds a game by Cyrillic alias", async () => {
+    const admin = await createUser("admin");
+    const group = await createCatalogGroup({ slug: uniqueSlug("group"), name: "G", status: "active" }, admin);
+    const item = await createCatalogItem(
+      { groupId: group.id, slug: uniqueSlug("roblox"), name: "Roblox", status: "active", aliases: ["роблокс"] },
+      admin
+    );
+
+    const response = await request(app).get("/marketplace/suggest").query({ q: "роблок" });
+    expect(response.status).toBe(200);
+    const slugs = response.body.games.map((game: { slug: string }) => game.slug);
+    expect(slugs).toContain(item.slug);
   });
 });

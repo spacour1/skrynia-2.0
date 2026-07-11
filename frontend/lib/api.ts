@@ -41,6 +41,18 @@ export type Game = {
   iconUrl?: string;
   popularity?: number;
   lotCount?: number;
+  banner?: string | null;
+  logoImage?: string | null;
+  backgroundImage?: string | null;
+  description?: string | null;
+  shortDescription?: string | null;
+  seoTitle?: string | null;
+  seoDescription?: string | null;
+  showOnHomepage?: boolean;
+  isPopular?: boolean;
+  isRecommended?: boolean;
+  homepageOrder?: number;
+  createdAt?: string;
 };
 
 export type GameSection = {

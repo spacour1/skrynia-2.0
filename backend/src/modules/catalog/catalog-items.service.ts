@@ -7,13 +7,27 @@ export type CatalogItemInput = {
   slug: string;
   name: string;
   description?: string | null;
+  shortDescription?: string | null;
   icon?: string | null;
   banner?: string | null;
+  logoImage?: string | null;
+  backgroundImage?: string | null;
+  aliases?: string[];
+  showOnHomepage?: boolean;
+  isPopular?: boolean;
+  isRecommended?: boolean;
+  homepageOrder?: number;
   sortOrder?: number;
   seoTitle?: string | null;
   seoDescription?: string | null;
   status?: CatalogStatus;
 };
+
+const ITEM_RETURNING = `id, group_id as "groupId", slug, name, description, short_description as "shortDescription",
+               icon_url as "icon", banner, logo_image as "logoImage", background_image as "backgroundImage",
+               aliases, show_on_homepage as "showOnHomepage", is_popular as "isPopular",
+               is_recommended as "isRecommended", homepage_order as "homepageOrder",
+               sort_order as "sortOrder", seo_title as "seoTitle", seo_description as "seoDescription", status`;
 
 export async function createCatalogItem(input: CatalogItemInput, adminId: string) {
   assertValidSlug(input.slug);
@@ -21,11 +35,32 @@ export async function createCatalogItem(input: CatalogItemInput, adminId: string
   if (!group.rows[0]) throw notFound("Group not found");
 
   const result = await pool.query(
-    `insert into games(group_id, slug, name, publisher, icon_url, banner, sort_order, seo_title, seo_description, status, is_active)
-     values ($1, $2, $3, null, $4, $5, coalesce($6, 0), $7, $8, coalesce($9, 'draft'), false)
-     returning id, group_id as "groupId", slug, name, icon_url as "icon", banner, sort_order as "sortOrder",
-               seo_title as "seoTitle", seo_description as "seoDescription", status, created_at as "createdAt"`,
-    [input.groupId, input.slug, input.name, input.icon ?? null, input.banner ?? null, input.sortOrder, input.seoTitle ?? null, input.seoDescription ?? null, input.status]
+    `insert into games(group_id, slug, name, publisher, icon_url, banner, description, short_description, logo_image, background_image,
+                       aliases, show_on_homepage, is_popular, is_recommended, homepage_order,
+                       sort_order, seo_title, seo_description, status, is_active)
+     values ($1, $2, $3, null, $4, $5, $6, $7, $8, $9, coalesce($10::text[], '{}'::text[]), coalesce($11::boolean, true), coalesce($12::boolean, false), coalesce($13::boolean, false),
+             coalesce($14::integer, 0), coalesce($15::integer, 0), $16, $17, coalesce($18, 'draft'), false)
+     returning ${ITEM_RETURNING}, created_at as "createdAt"`,
+    [
+      input.groupId,
+      input.slug,
+      input.name,
+      input.icon ?? null,
+      input.banner ?? null,
+      input.description ?? null,
+      input.shortDescription ?? null,
+      input.logoImage ?? null,
+      input.backgroundImage ?? null,
+      input.aliases,
+      input.showOnHomepage,
+      input.isPopular,
+      input.isRecommended,
+      input.homepageOrder,
+      input.sortOrder,
+      input.seoTitle ?? null,
+      input.seoDescription ?? null,
+      input.status
+    ]
   );
   const item = result.rows[0];
   await recordCatalogAudit({ adminId, actionType: "catalog_item_created", targetType: "catalog_item", targetId: item.id, after: item });
@@ -46,8 +81,17 @@ export async function updateCatalogItem(id: string, input: Partial<CatalogItemIn
     group_id: input.groupId,
     slug: input.slug,
     name: input.name,
+    description: input.description,
+    short_description: input.shortDescription,
     icon_url: input.icon,
     banner: input.banner,
+    logo_image: input.logoImage,
+    background_image: input.backgroundImage,
+    aliases: input.aliases,
+    show_on_homepage: input.showOnHomepage,
+    is_popular: input.isPopular,
+    is_recommended: input.isRecommended,
+    homepage_order: input.homepageOrder,
     sort_order: input.sortOrder,
     seo_title: input.seoTitle,
     seo_description: input.seoDescription,
@@ -57,8 +101,7 @@ export async function updateCatalogItem(id: string, input: Partial<CatalogItemIn
 
   const result = await pool.query(
     `update games set ${sets.join(", ")} where id = $1
-     returning id, group_id as "groupId", slug, name, icon_url as "icon", banner, sort_order as "sortOrder",
-               seo_title as "seoTitle", seo_description as "seoDescription", status`,
+     returning ${ITEM_RETURNING}`,
     values
   );
   const updated = result.rows[0];

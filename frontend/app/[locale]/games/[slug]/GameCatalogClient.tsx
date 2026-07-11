@@ -171,6 +171,14 @@ export function GameCatalogClient({ slug }: { slug: string }) {
 
   return (
     <div className="mx-auto max-w-[1380px] space-y-5 text-slate-100">
+      {game?.banner || game?.backgroundImage ? (
+        <div className="relative h-[150px] overflow-hidden rounded-xl border border-slate-800 md:h-[210px]">
+          <img className="h-full w-full object-cover" src={game.banner ?? game.backgroundImage ?? ""} alt="" draggable={false} />
+          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(2,6,15,0.05)_30%,rgba(2,6,15,0.82))]" />
+          {game?.logoImage ? <img className="absolute bottom-4 left-5 max-h-12 max-w-[220px] object-contain" src={game.logoImage} alt="" draggable={false} /> : null}
+        </div>
+      ) : null}
+
       <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 items-center gap-4">
           <Link
@@ -184,6 +192,7 @@ export function GameCatalogClient({ slug }: { slug: string }) {
           <div className="min-w-0">
             <h1 className="truncate text-2xl font-black text-slate-100 md:text-3xl">{game?.name ?? t("common.loading")}</h1>
             <p className="mt-1 text-sm font-semibold text-slate-400">{t("catalog.totalListings", { count: total.toLocaleString(language) })}</p>
+            {game?.shortDescription ? <p className="mt-1 line-clamp-2 max-w-[560px] text-sm text-slate-400">{game.shortDescription}</p> : null}
           </div>
         </div>
 

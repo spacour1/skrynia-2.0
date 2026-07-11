@@ -14,9 +14,11 @@ export async function generateMetadata({ params }: { params: { slug: string; loc
   const data = await fetchServerSide<GameResponse>(`/marketplace/games/${params.slug}`);
   if (!data) return { title: t("catalog.gameNotFound") };
 
-  const title = t("catalog.gameMetaTitle", { game: data.game.name });
-  const description = t("catalog.gameMetaDescription", { game: data.game.name, site: SITE_NAME });
+  // Admin-entered SEO from the catalog builder wins; the localized template is the fallback.
+  const title = data.game.seoTitle || t("catalog.gameMetaTitle", { game: data.game.name });
+  const description = data.game.seoDescription || data.game.shortDescription || t("catalog.gameMetaDescription", { game: data.game.name, site: SITE_NAME });
   const url = `${SITE_URL}/${locale}/games/${params.slug}`;
+  const ogImage = data.game.banner || data.game.backgroundImage || undefined;
 
   return {
     title,
@@ -25,7 +27,7 @@ export async function generateMetadata({ params }: { params: { slug: string; loc
       canonical: url,
       languages: Object.fromEntries(locales.map((item) => [item === "ua" ? "uk" : item, `${SITE_URL}/${item}/games/${params.slug}`]))
     },
-    openGraph: { title, description, url, siteName: SITE_NAME }
+    openGraph: { title, description, url, siteName: SITE_NAME, ...(ogImage ? { images: [{ url: ogImage }] } : {}) }
   };
 }
 

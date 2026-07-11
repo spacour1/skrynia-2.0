@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../../common/errors.js";
+import { cacheDel } from "../../common/redis.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
@@ -47,8 +48,16 @@ const itemSchema = z.object({
   name: z.string().min(1).max(200),
   slug: z.string().min(1).max(100),
   description: z.string().max(2000).optional().nullable(),
-  icon: z.string().max(200).optional().nullable(),
+  shortDescription: z.string().max(300).optional().nullable(),
+  icon: z.string().max(500).optional().nullable(),
   banner: z.string().max(500).optional().nullable(),
+  logoImage: z.string().max(500).optional().nullable(),
+  backgroundImage: z.string().max(500).optional().nullable(),
+  aliases: z.array(z.string().min(1).max(80)).max(30).optional(),
+  showOnHomepage: z.boolean().optional(),
+  isPopular: z.boolean().optional(),
+  isRecommended: z.boolean().optional(),
+  homepageOrder: z.number().int().optional(),
   sortOrder: z.number().int().optional(),
   seoTitle: z.string().max(200).optional().nullable(),
   seoDescription: z.string().max(500).optional().nullable(),
@@ -115,6 +124,7 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = itemSchema.parse(req.body);
     const item = await createCatalogItem(input, req.user.id);
+    await cacheDel("marketplace:games");
     res.status(201).json({ item });
   })
 );
@@ -125,6 +135,7 @@ router.patch(
     const id = z.string().uuid().parse(req.params.id);
     const input = itemSchema.partial().parse(req.body);
     const item = await updateCatalogItem(id, input, req.user.id);
+    await cacheDel("marketplace:games");
     res.json({ item });
   })
 );
@@ -134,6 +145,7 @@ router.delete(
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const result = await deleteCatalogItem(id, req.user.id);
+    await cacheDel("marketplace:games");
     res.json(result);
   })
 );

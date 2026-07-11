@@ -29,7 +29,7 @@ import { GameIcon } from "../../components/GameIcon";
 import { apiFetch, money, type Game, type Product } from "../../lib/api";
 import { firstProductMedia } from "../../lib/product-media";
 import { useAuth } from "../../lib/auth-store";
-import { buildSectionTiles, getGameTileTheme, type CategoryTile, type GameTileThemeConfig } from "../../lib/game-catalog";
+import { SECTION_PATTERNS, getGameTileTheme, type CategoryTile, type GameTileThemeConfig } from "../../lib/game-catalog";
 import { useI18n } from "../../lib/i18n";
 
 type ChatMessage = {
@@ -50,9 +50,14 @@ export default function HomePage() {
     queryFn: () => apiFetch<{ games: Game[] }>("/marketplace/games")
   });
 
-  const gamesList = games.data?.games ?? [];
-  const platformGames = buildSectionTiles("platform", gamesList);
-  const popularGames = buildSectionTiles("mobile", gamesList);
+  // Homepage rows are built only from catalog-builder data: games the admin left visible
+  // (showOnHomepage), curated "popular" flags first, real lot counts, no seeded lists.
+  const gamesList = (games.data?.games ?? []).filter((game) => game.showOnHomepage !== false);
+  const curatedPopular = gamesList.filter((game) => game.isPopular);
+  const popularGames = tilesFromGames(
+    curatedPopular.length ? curatedPopular : [...gamesList].sort((a, b) => (b.lotCount ?? 0) - (a.lotCount ?? 0)).slice(0, 10)
+  );
+  const platformGames = tilesFromGames(gamesList.filter((game) => SECTION_PATTERNS.platform.test(`${game.slug} ${game.name} ${game.publisher ?? ""}`)));
 
   function selectGame(slug: string) {
     router.push(`/games/${slug}`);
@@ -64,8 +69,14 @@ export default function HomePage() {
         <Hero />
 
         <section id="game-catalog" className="space-y-6 scroll-mt-28">
-          <CategoryCarousel title={t("home.sections.popular")} items={popularGames} onSelect={selectGame} />
-          <PlatformsRow items={platformGames} onSelect={selectGame} />
+          {games.isLoading ? (
+            <RowSkeleton />
+          ) : (
+            <>
+              <CategoryCarousel title={t("home.sections.popular")} items={popularGames} onSelect={selectGame} />
+              {platformGames.length ? <PlatformsRow items={platformGames} onSelect={selectGame} /> : null}
+            </>
+          )}
           <CategoriesRow />
           <FreshOffers onOpen={(id) => router.push(`/products/${id}`)} />
         </section>
@@ -77,6 +88,30 @@ export default function HomePage() {
         <RecentChatsWidget onOpen={(href) => router.push(user ? href : "/login")} />
         <TrustWidget />
       </aside>
+    </div>
+  );
+}
+
+function tilesFromGames(games: Game[]): CategoryTile[] {
+  return games.map((game) => ({
+    id: game.id,
+    slug: game.slug,
+    name: game.name,
+    publisher: game.publisher,
+    lotCount: game.lotCount,
+    image: game.banner ?? game.backgroundImage ?? undefined
+  }));
+}
+
+function RowSkeleton() {
+  return (
+    <div className="space-y-2.5">
+      <div className="h-6 w-40 animate-pulse rounded bg-panel" />
+      <div className="flex gap-3">
+        {Array.from({ length: 5 }).map((_, index) => (
+          <div key={index} className="aspect-[2.42/1] flex-1 animate-pulse rounded-lg bg-panel" />
+        ))}
+      </div>
     </div>
   );
 }
@@ -183,7 +218,8 @@ function CategoryCarousel({ title, items, onSelect, compact }: { title: string; 
       </div>
       <div ref={scrollRef} className="flex max-w-full snap-x snap-mandatory gap-3 overflow-x-auto pb-1.5 sm:overflow-x-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {items.map((item) => {
-          const tile = getGameTileTheme(item.slug, item.name);
+          const theme = getGameTileTheme(item.slug, item.name);
+          const tile = item.image ? { ...theme, image: item.image } : theme;
           return (
             <button
               key={item.id}
@@ -325,51 +361,80 @@ function PlatformsRow({ items, onSelect }: { items: CategoryTile[]; onSelect: (s
   );
 }
 
+type MarketCategory = { id: string; slug: string; name: string; activeProductCount: number };
+
+// Maps DB category slugs to the fixed homepage i18n labels; unknown slugs fall back to
+// the category's own name from the API.
+const CATEGORY_LABEL_KEYS: Record<string, string> = {
+  accounts: "accounts",
+  items: "items",
+  games: "keys",
+  keys: "keys",
+  currency: "currency",
+  boosting: "services",
+  services: "services",
+  "digital-services": "digital"
+};
+
+const CATEGORY_ICONS: Record<string, LucideIcon> = {
+  accounts: Users,
+  items: Swords,
+  games: KeyRound,
+  keys: KeyRound,
+  currency: Coins,
+  boosting: Wrench,
+  services: Wrench,
+  "digital-services": FileText
+};
+
 function CategoriesRow() {
   const { t } = useI18n();
-  const categories: { key: string; count: string; icon: LucideIcon }[] = [
-    { key: "accounts", count: "42 180", icon: Users },
-    { key: "items", count: "152 340", icon: Swords },
-    { key: "keys", count: "18 673", icon: KeyRound },
-    { key: "currency", count: "24 981", icon: Coins },
-    { key: "services", count: "8 231", icon: Wrench },
-    { key: "digital", count: "5 432", icon: FileText }
-  ];
+  const categories = useQuery({
+    queryKey: ["categories"],
+    queryFn: () => apiFetch<{ categories: MarketCategory[] }>("/marketplace/categories")
+  });
+  const list = categories.data?.categories ?? [];
+
+  if (categories.isLoading) return <RowSkeleton />;
+  if (!list.length) return null;
 
   return (
     <section className="space-y-2.5">
       <SectionHeader title={t("home.sections.categories")} />
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {categories.map(({ key, count, icon: Icon }) => (
-          <a
-            key={key}
-            href="#game-catalog"
-            className="flex items-center gap-3 rounded-xl border border-line bg-card p-3 shadow-soft transition hover:-translate-y-0.5 hover:border-brand/60"
-          >
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-brand/40 bg-brand/10 text-brand">
-              <Icon className="h-5 w-5" />
-            </span>
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-black text-ink">{t(`home.categories.${key}`)}</span>
-              <span className="block truncate text-xs text-muted">
-                {count} {t("home.itemsLabel")}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        {list.map((category) => {
+          const Icon = CATEGORY_ICONS[category.slug] ?? Swords;
+          const labelKey = CATEGORY_LABEL_KEYS[category.slug];
+          return (
+            <a
+              key={category.id}
+              href="#game-catalog"
+              className="flex items-center gap-3 rounded-xl border border-line bg-card p-3 shadow-soft transition hover:-translate-y-0.5 hover:border-brand/60"
+            >
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-brand/40 bg-brand/10 text-brand">
+                <Icon className="h-5 w-5" />
               </span>
-            </span>
-          </a>
-        ))}
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-black text-ink">{labelKey ? t(`home.categories.${labelKey}`) : category.name}</span>
+                <span className="block truncate text-xs text-muted">
+                  {category.activeProductCount.toLocaleString("uk-UA")} {t("home.itemsLabel")}
+                </span>
+              </span>
+            </a>
+          );
+        })}
       </div>
     </section>
   );
 }
 
 type OfferItem = {
-  id: string | null;
+  id: string;
   title: string;
   priceCents: number;
   currency: string;
   top: boolean;
   image: string | null;
-  gradient: string;
   seller: string;
   rating: number;
 };
@@ -381,43 +446,45 @@ function FreshOffers({ onOpen }: { onOpen: (id: string) => void }) {
     queryFn: () => apiFetch<{ products: Product[]; total: number }>("/marketplace/products?limit=6")
   });
 
-  const mockOffers: OfferItem[] = [
-    { id: null, title: t("home.mockOffers.o1"), priceCents: 129900, currency: "UAH", top: true, image: "/assets/home/category-cards/pubg-mobile.webp", gradient: "", seller: "GameStore", rating: 4.9 },
-    { id: null, title: t("home.mockOffers.o2"), priceCents: 89900, currency: "UAH", top: false, image: null, gradient: "from-amber-500/40 via-orange-900/60 to-black", seller: "FastTopUp", rating: 5.0 },
-    { id: null, title: t("home.mockOffers.o3"), priceCents: 149900, currency: "UAH", top: false, image: "/assets/home/category-cards/steam.webp", gradient: "", seller: "KeyMaster", rating: 4.8 },
-    { id: null, title: t("home.mockOffers.o4"), priceCents: 249900, currency: "UAH", top: true, image: "/assets/home/category-cards/genshin-impact.webp", gradient: "", seller: "AnimeShop", rating: 4.9 },
-    { id: null, title: t("home.mockOffers.o5"), priceCents: 64900, currency: "UAH", top: false, image: null, gradient: "from-sky-500/40 via-slate-900/70 to-black", seller: "ProBoost", rating: 4.7 },
-    { id: null, title: t("home.mockOffers.o6"), priceCents: 99900, currency: "UAH", top: false, image: "/assets/home/category-cards/brawl-stars.webp", gradient: "", seller: "MobileHub", rating: 4.8 }
-  ];
-
-  const live: OfferItem[] = (products.data?.products ?? []).slice(0, 6).map((product) => ({
+  const offers: OfferItem[] = (products.data?.products ?? []).slice(0, 6).map((product) => ({
     id: product.id,
     title: product.title,
     priceCents: Number(product.priceCents),
     currency: product.currency,
     top: Boolean(product.isHot),
     image: firstProductMedia(product),
-    gradient: "from-slate-700/50 via-slate-900/70 to-black",
     seller: product.sellerDisplayName ?? "",
     rating: Number(product.sellerRating ?? 0)
   }));
-  const offers = live.length ? live : mockOffers;
+
+  if (products.isLoading) return <RowSkeleton />;
+
+  if (!offers.length) {
+    return (
+      <section className="space-y-2.5">
+        <SectionHeader title={t("home.sections.fresh")} />
+        <div className="grid min-h-[120px] place-items-center rounded-xl border border-line bg-card p-6 text-center shadow-soft">
+          <p className="max-w-[360px] text-sm leading-6 text-muted">{products.isError ? t("home.freshError") : t("home.freshEmpty")}</p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-2.5">
       <SectionHeader title={t("home.sections.fresh")} />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-        {offers.map((offer, index) => (
+        {offers.map((offer) => (
           <article
-            key={offer.id ?? index}
-            className={`group overflow-hidden rounded-xl border border-line bg-card shadow-soft transition hover:-translate-y-0.5 hover:border-brand/60 ${offer.id ? "cursor-pointer" : ""}`}
-            onClick={offer.id ? () => onOpen(offer.id as string) : undefined}
+            key={offer.id}
+            className="group cursor-pointer overflow-hidden rounded-xl border border-line bg-card shadow-soft transition hover:-translate-y-0.5 hover:border-brand/60"
+            onClick={() => onOpen(offer.id)}
           >
             <div className="relative aspect-[16/10] overflow-hidden">
               {offer.image ? (
                 <img className="h-full w-full object-cover transition duration-300 group-hover:scale-105" src={offer.image} alt="" loading="lazy" draggable={false} />
               ) : (
-                <div className={`h-full w-full bg-gradient-to-br ${offer.gradient}`} />
+                <div className="h-full w-full bg-gradient-to-br from-slate-700/50 via-slate-900/70 to-black" />
               )}
               <span className={`absolute left-2 top-2 rounded-md px-2 py-0.5 text-[10px] font-black uppercase ${offer.top ? "bg-action text-stone-950" : "bg-brand text-stone-950"}`}>
                 {offer.top ? t("home.badges.top") : t("home.badges.new")}

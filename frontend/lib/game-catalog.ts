@@ -10,6 +10,8 @@ export type CategoryTile = {
   name: string;
   publisher?: string | null;
   lotCount?: number;
+  /** Admin-uploaded artwork from the catalog builder; overrides the static theme image. */
+  image?: string | null;
 };
 
 export type GameTileThemeConfig = {

@@ -18,7 +18,9 @@ export async function getPublicGroupBySlug(slug: string) {
 
 export async function getPublicItemBySlug(slug: string) {
   const item = await pool.query(
-    `select id, group_id as "groupId", slug, name, icon_url as "icon", banner
+    `select id, group_id as "groupId", slug, name, icon_url as "icon", banner,
+            description, short_description as "shortDescription", logo_image as "logoImage",
+            background_image as "backgroundImage", seo_title as "seoTitle", seo_description as "seoDescription"
      from games where slug = $1 and status = 'active'`,
     [slug]
   );
@@ -60,6 +62,11 @@ export async function getAdminCatalogTree() {
       g.sort_order as "sortOrder", g.seo_title as "seoTitle", g.seo_description as "seoDescription",
       i.id as "itemId", i.slug as "itemSlug", i.name as "itemName", i.icon_url as "itemIcon", i.banner as "itemBanner", i.status as "itemStatus",
       i.sort_order as "itemSortOrder", i.seo_title as "itemSeoTitle", i.seo_description as "itemSeoDescription",
+      i.description as "itemDescription", i.short_description as "itemShortDescription",
+      i.logo_image as "itemLogoImage", i.background_image as "itemBackgroundImage",
+      i.aliases as "itemAliases", i.show_on_homepage as "itemShowOnHomepage",
+      i.is_popular as "itemIsPopular", i.is_recommended as "itemIsRecommended", i.homepage_order as "itemHomepageOrder",
+      (select count(*)::int from products p2 where p2.game_id = i.id and p2.status = 'active') as "itemActiveProductCount",
       s.id as "sectionId", s.slug as "sectionSlug", s.name as "sectionName", s.product_type as "listingType",
       s.allowed_delivery_types as "allowedDeliveryTypes", s.status as "sectionStatus", s.category_id as "categoryId",
       s.requires_moderation as "requiresModeration", s.sort_order as "sectionSortOrder",
@@ -93,6 +100,16 @@ type TreeRow = {
   itemSortOrder?: number;
   itemSeoTitle?: string | null;
   itemSeoDescription?: string | null;
+  itemDescription?: string | null;
+  itemShortDescription?: string | null;
+  itemLogoImage?: string | null;
+  itemBackgroundImage?: string | null;
+  itemAliases?: string[];
+  itemShowOnHomepage?: boolean;
+  itemIsPopular?: boolean;
+  itemIsRecommended?: boolean;
+  itemHomepageOrder?: number;
+  itemActiveProductCount?: number;
   sectionId?: string | null;
   sectionSlug?: string;
   sectionName?: string;
@@ -139,7 +156,22 @@ function buildTree(rows: TreeRow[], opts: { includeStatus?: boolean } = {}) {
         icon: row.itemIcon ?? null,
         banner: row.itemBanner ?? null,
         ...(opts.includeStatus
-          ? { status: row.itemStatus, sortOrder: row.itemSortOrder, seoTitle: row.itemSeoTitle ?? null, seoDescription: row.itemSeoDescription ?? null }
+          ? {
+              status: row.itemStatus,
+              sortOrder: row.itemSortOrder,
+              seoTitle: row.itemSeoTitle ?? null,
+              seoDescription: row.itemSeoDescription ?? null,
+              description: row.itemDescription ?? null,
+              shortDescription: row.itemShortDescription ?? null,
+              logoImage: row.itemLogoImage ?? null,
+              backgroundImage: row.itemBackgroundImage ?? null,
+              aliases: row.itemAliases ?? [],
+              showOnHomepage: row.itemShowOnHomepage ?? true,
+              isPopular: row.itemIsPopular ?? false,
+              isRecommended: row.itemIsRecommended ?? false,
+              homepageOrder: row.itemHomepageOrder ?? 0,
+              activeProductCount: row.itemActiveProductCount ?? 0
+            }
           : {}),
         sections: new Map<string, any>()
       };

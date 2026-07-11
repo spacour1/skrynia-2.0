@@ -43,7 +43,12 @@ router.get(
     const rows = await cacheGet("categories");
     if (rows) return res.json({ categories: rows });
     const result = await pool.query(
-      `select id, slug, name, description, risk_level as "riskLevel" from categories order by name`
+      `select c.id, c.slug, c.name, c.description, c.risk_level as "riskLevel",
+              count(p.id)::int as "activeProductCount"
+       from categories c
+       left join products p on p.category_id = c.id and p.status = 'active'
+       group by c.id
+       order by c.name`
     );
     await cacheSet("categories", result.rows, 60 * 10);
     res.json({ categories: result.rows });
@@ -57,12 +62,16 @@ router.get(
     if (cached) return res.json({ games: cached });
     const result = await pool.query(
       `select g.id, g.slug, g.name, g.publisher, g.icon_url as "iconUrl", g.popularity,
+              g.banner, g.logo_image as "logoImage", g.short_description as "shortDescription",
+              g.show_on_homepage as "showOnHomepage", g.is_popular as "isPopular",
+              g.is_recommended as "isRecommended", g.homepage_order as "homepageOrder",
+              g.created_at as "createdAt",
               count(distinct p.id)::int as "lotCount"
        from games g
        left join products p on p.game_id = g.id and p.status = 'active'
        where g.is_active = true
        group by g.id
-       order by g.popularity desc, g.name asc`
+       order by g.homepage_order asc, g.popularity desc, g.name asc`
     );
     await cacheSet("marketplace:games", result.rows, 60 * 5);
     res.json({ games: result.rows });
@@ -74,7 +83,10 @@ router.get(
   asyncHandler(async (req, res) => {
     const slug = z.string().min(1).max(120).parse(req.params.slug);
     const game = await pool.query(
-      `select id, slug, name, publisher, icon_url as "iconUrl", popularity
+      `select id, slug, name, publisher, icon_url as "iconUrl", popularity,
+              banner, logo_image as "logoImage", background_image as "backgroundImage",
+              description, short_description as "shortDescription",
+              seo_title as "seoTitle", seo_description as "seoDescription"
        from games
        where slug = $1 and is_active = true`,
       [slug]
@@ -109,7 +121,8 @@ router.get(
        from games g
        left join products p on p.game_id = g.id and p.status = 'active'
        where g.is_active = true
-         and (g.name ilike $1 or g.slug ilike $1 or coalesce(g.publisher, '') ilike $1)
+         and (g.name ilike $1 or g.slug ilike $1 or coalesce(g.publisher, '') ilike $1
+              or exists (select 1 from unnest(g.aliases) alias where alias ilike $1))
        group by g.id
        order by
          case when lower(g.name) like lower($2) then 0 else 1 end,

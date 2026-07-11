@@ -37,14 +37,6 @@
       "services": "Services",
       "digital": "Digital goods"
     },
-    "mockOffers": {
-      "o1": "PUBG account | 500+ skins, rare sets",
-      "o2": "2,800 UC | PUBG Mobile, instant",
-      "o3": "Steam key | AAA release, UA region",
-      "o4": "Genshin Impact | AR 58, 5★ collection",
-      "o5": "CS2 rank boost | Premier 15k+",
-      "o6": "Brawl Stars | 40,000 trophies, all brawlers"
-    },
     "carousel": {
       "back": "Back",
       "forward": "Forward"
@@ -73,6 +65,8 @@
       "title": "Need help?",
       "text": "Our support team is online 24/7",
       "button": "Contact support"
-    }
+    },
+    "freshEmpty": "No fresh offers yet. Be the first seller - create a listing now!",
+    "freshError": "Failed to load offers. Try refreshing the page."
   }
 }

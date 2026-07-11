@@ -46,7 +46,10 @@
       "updated": "Item updated",
       "created": "Item created",
       "deletedHard": "Item deleted",
-      "deletedSoft": "Item marked as deleted"
+      "deletedSoft": "Item marked as deleted",
+      "slugLocked": "The slug is locked after publishing to keep links stable. It can only be changed while in draft.",
+      "shortDescriptionLabel": "Short description (up to 300 chars)",
+      "descriptionLabel": "Full description"
     },
     "section": {
       "title": "Catalog section",
@@ -94,6 +97,60 @@
       "multiselect": "List (multiple choice)",
       "boolean": "Yes / No",
       "checkbox": "Checkbox"
+    },
+    "unsaved": "Unsaved",
+    "saving": "Saving...",
+    "activeCount": "Active games: {count}",
+    "treeSearchPlaceholder": "Search catalog...",
+    "filterAll": "All statuses",
+    "emptyFiltered": "Nothing matches the filter.",
+    "missingSelection": "This element no longer exists - another admin may have deleted it.",
+    "seoPreview": "Snippet preview",
+    "seoPreviewEmpty": "Add an SEO description to see the snippet.",
+    "tabs": {
+      "main": "General",
+      "images": "Images",
+      "display": "Visibility",
+      "search": "Search",
+      "seo": "SEO"
+    },
+    "images": {
+      "drop": "Drop a file or click",
+      "remove": "Remove",
+      "badType": "Only JPG, PNG, WEBP, or GIF are supported.",
+      "tooLarge": "File is too large - 8 MB max.",
+      "iconHint": "Square, 128x128+. Shown in search and lists.",
+      "logoLabel": "Logo",
+      "logoHint": "Transparent PNG/WEBP. Shown on the game page.",
+      "bannerHint": "Wide, ~1200x400. Game page header.",
+      "backgroundLabel": "Background image",
+      "backgroundHint": "Wide background, ~1600x500. Homepage and banners."
+    },
+    "display": {
+      "homepage": "Show on homepage",
+      "homepageHint": "The game appears in homepage rows.",
+      "popular": "Popular game",
+      "popularHint": "Included in the homepage Popular games block.",
+      "recommended": "Recommended",
+      "recommendedHint": "Included in recommendation blocks.",
+      "homepageOrderLabel": "Homepage order",
+      "whereShown": "Where it appears",
+      "openGamePage": "Game page",
+      "openHomepage": "Homepage",
+      "checkSearch": "Check in search"
+    },
+    "searchTab": {
+      "hint": "Alternative names and keywords: global search matches them (Cyrillic/Latin, abbreviations).",
+      "empty": "No alternative names yet.",
+      "placeholder": "E.g.: roblox, rblx",
+      "add": "Add"
+    },
+    "deleteConfirm": {
+      "title": "Delete {name}?",
+      "stats": "Sections: {sections}. Active listings: {products}.",
+      "consequence": "A draft with no data is deleted permanently. A game with sections or listings is marked deleted: listings are kept, but the game disappears from the site. Use Hide or Archive to take it down temporarily.",
+      "confirm": "Yes, delete",
+      "cancel": "Cancel"
     }
   }
 }

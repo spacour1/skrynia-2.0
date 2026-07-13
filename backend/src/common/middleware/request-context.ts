@@ -5,20 +5,9 @@ import { pool } from "../../db/pool.js";
 import { env } from "../../config/env.js";
 import { logger } from "../logger.js";
 import { httpRequestDuration } from "../metrics.js";
+import { redactSensitive } from "../audit-redact.js";
 
 const AUDITED_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
-const BODY_REDACTIONS = new Set(["password", "currentPassword", "newPassword", "token"]);
-
-function cleanBody(value: unknown): unknown {
-  if (!value || typeof value !== "object") return value;
-  if (Array.isArray(value)) return value.map(cleanBody);
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>).map(([key, item]) => [
-      key,
-      BODY_REDACTIONS.has(key) ? "[redacted]" : cleanBody(item)
-    ])
-  );
-}
 
 export function initErrorTracking() {
   if (!env.SENTRY_DSN) return;
@@ -60,10 +49,15 @@ export const requestContext: RequestHandler = (req, res, next) => {
     }, "http_request");
 
     if (!AUDITED_METHODS.has(req.method)) return;
+    // The generic audit trail deliberately does NOT persist request bodies: mutating
+    // endpoints carry passwords, OTP/TOTP codes, delivery notes, payout destinations and
+    // private message text. Domain events that need before/after detail write their own
+    // explicit, allowlisted metadata (e.g. recordCatalogAudit). params/query are kept but
+    // pass through the defense-in-depth redactor (e.g. token-bearing query strings).
     pool
       .query(
         `insert into audit_logs(trace_id, user_id, method, path, endpoint, status_code, ip_address, user_agent, action, request_body, metadata)
-         values ($1, $2, $3, $4, $5, $6, nullif($7, '')::inet, $8, $9, $10, $11)`,
+         values ($1, $2, $3, $4, $5, $6, nullif($7, '')::inet, $8, $9, null, $10)`,
         [
           req.traceId,
           req.user?.id ?? null,
@@ -74,8 +68,7 @@ export const requestContext: RequestHandler = (req, res, next) => {
           req.ip,
           req.get("user-agent") ?? null,
           `${req.method} ${route}`,
-          cleanBody(req.body) ?? null,
-          { params: req.params, query: req.query }
+          { params: redactSensitive(req.params), query: redactSensitive(req.query) }
         ]
       )
       .catch((error) => logger.warn({ traceId: req.traceId, error }, "audit_log_failed"));

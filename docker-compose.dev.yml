@@ -28,7 +28,11 @@ services:
   backend:
     image: node:20-alpine
     working_dir: /app
-    command: sh -c "npm install && npm run migrate && npm run seed && npm run dev"
+    # No `npm run seed` here on purpose: seed is a demo-data RESET (wipes chats/favorites,
+    # soft-deletes all products) and used to erase local test data on every container start.
+    # Run it manually when you actually want fresh demo data:
+    #   docker compose -f docker-compose.dev.yml exec backend npm run seed
+    command: sh -c "npm install && npm run migrate && npm run dev"
     env_file:
       - ./backend/.env
     environment:

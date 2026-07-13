@@ -12,3 +12,9 @@ process.env.METRICS_PASSWORD = "test-metrics-password-aaaa";
 // default (90) - a local .env tuned to a shorter session length (e.g. 30) would fail
 // this test for reasons that have nothing to do with the code under test.
 process.env.REFRESH_TOKEN_TTL_DAYS = "90";
+// The whole suite shares one IP (supertest/localhost) and the auth limiter's 15-minute
+// window survives in Redis (db 15) across runs - production-sized limits made full runs
+// and quick re-runs fail with 429s unrelated to the code under test. No test asserts
+// rate-limit behaviour, so raise the ceilings far above what the suite can generate.
+process.env.AUTH_RATE_LIMIT_PER_15MIN = "100000";
+process.env.API_RATE_LIMIT_PER_MIN = "100000";

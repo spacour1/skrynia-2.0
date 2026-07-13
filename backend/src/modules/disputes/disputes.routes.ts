@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { pool } from "../../db/pool.js";
+import { inTx, pool } from "../../db/pool.js";
 import { asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
@@ -30,22 +30,35 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const orderId = z.string().uuid().parse(req.params.orderId);
     const input = openSchema.parse(req.body);
-    const order = await pool.query(`select * from orders where id = $1`, [orderId]);
-    const row = order.rows[0];
-    if (!row) throw notFound("Order not found");
-    if (row.buyer_id !== req.user.id && row.seller_id !== req.user.id) throw forbidden();
-    if (!["paid", "in_progress", "delivered"].includes(row.status)) {
-      throw badRequest("Only active escrowed orders can be disputed");
-    }
 
-    await pool.query(`update orders set status = 'disputed', updated_at = now() where id = $1`, [orderId]);
-    const dispute = await pool.query(
-      `insert into disputes(order_id, opened_by, reason)
-       values ($1, $2, $3)
-       on conflict (order_id) do update set reason = excluded.reason, updated_at = now()
-       returning *`,
-      [orderId, req.user.id, input.reason]
-    );
+    // Order lock + status flip + dispute upsert are one transaction: there is no window
+    // where the order says 'disputed' but no dispute row exists, and two concurrent opens
+    // (or an open racing a confirm/deliver transition) serialize on the row lock.
+    const { row, dispute, repeated } = await inTx(async (client) => {
+      const order = await client.query(`select * from orders where id = $1 for update`, [orderId]);
+      const orderRow = order.rows[0];
+      if (!orderRow) throw notFound("Order not found");
+      if (orderRow.buyer_id !== req.user.id && orderRow.seller_id !== req.user.id) throw forbidden();
+
+      // A retry of an already-opened dispute is idempotent, not an error - it refreshes
+      // the reason and returns the existing dispute.
+      const isRepeat = orderRow.status === "disputed";
+      if (!isRepeat && !["paid", "in_progress", "delivered"].includes(orderRow.status)) {
+        throw badRequest("Only active escrowed orders can be disputed");
+      }
+
+      await client.query(`update orders set status = 'disputed', updated_at = now() where id = $1`, [orderId]);
+      const upserted = await client.query(
+        `insert into disputes(order_id, opened_by, reason)
+         values ($1, $2, $3)
+         on conflict (order_id) do update set reason = excluded.reason, updated_at = now()
+         returning *`,
+        [orderId, req.user.id, input.reason]
+      );
+      return { row: orderRow, dispute: upserted.rows[0], repeated: isRepeat };
+    });
+
+    if (repeated) return res.status(200).json({ dispute });
 
     notifyOrderEvent(row.buyer_id, { type: "order_disputed", orderId });
     notifyOrderEvent(row.seller_id, { type: "order_disputed", orderId });
@@ -69,7 +82,7 @@ router.post(
       body: input.reason
     });
     await postOrderSystemMessage(orderId, "dispute_opened", "system.disputeOpened", { reason: input.reason });
-    res.status(201).json({ dispute: dispute.rows[0] });
+    res.status(201).json({ dispute });
   })
 );
 
@@ -131,21 +144,60 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const input = resolveSchema.parse(req.body);
-    const dispute = await pool.query(
-      `select d.*, o.buyer_id, o.seller_id
-       from disputes d
-       join orders o on o.id = d.order_id
-       where d.id = $1`,
-      [id]
-    );
-    const row = dispute.rows[0];
-    if (!row) throw notFound("Dispute not found");
-    if (row.status !== "open") throw badRequest("Dispute already resolved");
 
-    const order =
-      input.decision === "refund"
-        ? await refundEscrow(row.order_id, req.user.id)
-        : await releaseEscrow(row.order_id, req.user.id);
+    // Resolution state machine (open -> resolving -> resolved). The escrow operation is
+    // the existing financial service and manages its own transaction, so it cannot join a
+    // dispute UPDATE transaction - instead the dispute is atomically CLAIMED first:
+    //  - two admins can never both pass the claim, so refund/release runs at most once;
+    //  - if the escrow op throws, the claim reverts to 'open' and the resolve is retryable;
+    //  - if the process dies after the escrow op but before the final update, the dispute
+    //    stays 'resolving' with the order already terminal - a retry with the same
+    //    decision finishes the bookkeeping WITHOUT running the escrow op again.
+    const claim = await pool.query(
+      `update disputes set status = 'resolving', admin_id = $2, updated_at = now()
+       where id = $1 and status = 'open'
+       returning *`,
+      [id, req.user.id]
+    );
+    let row = claim.rows[0];
+    let escrowAlreadyApplied = false;
+
+    if (!row) {
+      const existing = await pool.query(
+        `select d.*, o.status as order_status
+         from disputes d join orders o on o.id = d.order_id
+         where d.id = $1`,
+        [id]
+      );
+      const current = existing.rows[0];
+      if (!current) throw notFound("Dispute not found");
+      const terminalForDecision = input.decision === "refund" ? "refunded" : "completed";
+      if (current.status === "resolving" && current.order_status === terminalForDecision) {
+        row = current;
+        escrowAlreadyApplied = true;
+      } else if (current.status === "resolving") {
+        throw badRequest("Dispute resolution is already in progress");
+      } else {
+        throw badRequest("Dispute already resolved");
+      }
+    }
+
+    const orderParties = await pool.query(`select buyer_id, seller_id, status from orders where id = $1`, [row.order_id]);
+    row = { ...row, ...orderParties.rows[0] };
+
+    let order;
+    if (!escrowAlreadyApplied) {
+      try {
+        order =
+          input.decision === "refund"
+            ? await refundEscrow(row.order_id, req.user.id)
+            : await releaseEscrow(row.order_id, req.user.id);
+      } catch (escrowError) {
+        // Money did not move - release the claim so the resolution can be retried.
+        await pool.query(`update disputes set status = 'open', updated_at = now() where id = $1 and status = 'resolving'`, [id]);
+        throw escrowError;
+      }
+    }
 
     const updated = await pool.query(
       `update disputes
@@ -155,10 +207,11 @@ router.post(
            admin_note = $4,
            resolved_at = now(),
            updated_at = now()
-       where id = $1
+       where id = $1 and status = 'resolving'
        returning *`,
       [id, input.decision, req.user.id, input.adminNote]
     );
+    if (!updated.rows[0]) throw badRequest("Dispute already resolved");
 
     notifyOrderEvent(row.buyer_id, { type: "dispute_resolved", orderId: row.order_id, decision: input.decision });
     notifyOrderEvent(row.seller_id, { type: "dispute_resolved", orderId: row.order_id, decision: input.decision });

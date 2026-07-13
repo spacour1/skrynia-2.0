@@ -21,6 +21,7 @@ import {
   verifyTwoFactorPendingToken
 } from "./session.service.js";
 import { verifyTwoFactorCode } from "./twofa.service.js";
+import { issueWsTicket } from "./ws-ticket.service.js";
 import {
   consumeEmailVerificationToken,
   createPasswordResetToken,
@@ -346,6 +347,23 @@ router.post(
     await revokeAllUserSessions(userId);
     disconnectUser(userId);
     res.json({ status: "reset" });
+  })
+);
+
+// One-time WebSocket connection ticket (see ws-ticket.service.ts). Authenticated +
+// CSRF-protected (global middleware) + rate limited; the ticket carries the caller's
+// user/session identity to the WS handshake on a possibly different domain.
+router.post(
+  "/ws-ticket",
+  authRateLimit,
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { ticket, expiresInSeconds } = await issueWsTicket({
+      userId: req.user.id,
+      jti: req.sessionId ?? "",
+      emailVerified: req.user.emailVerified
+    });
+    res.status(201).json({ ticket, expiresInSeconds });
   })
 );
 

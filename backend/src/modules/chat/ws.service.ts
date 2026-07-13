@@ -8,6 +8,7 @@ import { logger } from "../../common/logger.js";
 import { ACCESS_COOKIE } from "../../common/cookies.js";
 import { ApiError } from "../../common/errors.js";
 import { wsConnectionsActive, wsConnectionFailuresTotal, wsMessagesTotal } from "../../common/metrics.js";
+import { consumeWsTicket } from "../auth/ws-ticket.service.js";
 import { sendMessage } from "./chat.service.js";
 
 function readCookie(header: string | undefined, name: string): string | undefined {
@@ -40,6 +41,19 @@ const clientsByConversation = new Map<string, Set<Client>>();
 // so this must track a set, not a single client - see disconnectSession/leaveAll below.
 const clientsByJti = new Map<string, Set<Client>>();
 
+async function verifyUserAlive(userId: string) {
+  const result = await pool.query<{ id: string; isBanned: boolean; emailVerified: boolean }>(
+    `select id, is_banned as "isBanned",
+            (email_verified_at is not null or telegram_id is not null) as "emailVerified"
+     from users where id = $1`,
+    [userId]
+  );
+  const user = result.rows[0];
+  if (!user) throw new Error("Invalid user");
+  if (user.isBanned) throw new Error("Account is banned");
+  return user;
+}
+
 async function authenticateSocket(token: string) {
   const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
   if (!payload.jti) throw new Error("Missing session id");
@@ -58,18 +72,65 @@ async function authenticateSocket(token: string) {
     }
   }
 
-  const result = await pool.query<{ id: string; isBanned: boolean; emailVerified: boolean }>(
-    `select id, is_banned as "isBanned",
-            (email_verified_at is not null or telegram_id is not null) as "emailVerified"
-     from users where id = $1`,
-    [payload.sub]
-  );
-  const user = result.rows[0];
-  if (!user) throw new Error("Invalid user");
-  if (user.isBanned) throw new Error("Account is banned");
-
+  const user = await verifyUserAlive(payload.sub);
   return { userId: user.id, jti: payload.jti, emailVerified: user.emailVerified };
 }
+
+/**
+ * Ticket-first handshake auth: `?ticket=` (one-time, Redis-backed - works when the WS
+ * endpoint lives on a different domain than the frontend, where the httpOnly auth cookie
+ * never arrives) with the same-origin cookie as fallback for single-domain deployments.
+ * The ticket's session is re-checked against Redis revocation and the user row, so a
+ * banned user or revoked session can't ride in on a ticket issued moments earlier.
+ */
+async function authenticateHandshake(req: http.IncomingMessage) {
+  const url = new URL(req.url ?? "/ws", "http://localhost");
+  const ticket = url.searchParams.get("ticket");
+
+  if (ticket) {
+    const identity = await consumeWsTicket(ticket);
+    if (!identity) throw new Error("Invalid ticket");
+    const redis = getRedis();
+    if (redis) {
+      try {
+        const exists = await redis.exists(`session:${identity.jti}`);
+        if (!exists) throw new Error("Session expired");
+      } catch (error) {
+        if (error instanceof Error && error.message === "Session expired") throw error;
+        logger.warn({ error, jti: identity.jti }, "ws_session_revocation_check_failed_redis_unavailable");
+      }
+    }
+    const user = await verifyUserAlive(identity.userId);
+    return { userId: identity.userId, jti: identity.jti, emailVerified: user.emailVerified };
+  }
+
+  const token = readCookie(req.headers.cookie, ACCESS_COOKIE);
+  if (!token) throw new Error("Missing token");
+  return authenticateSocket(token);
+}
+
+function allowedOrigins(): Set<string> {
+  const origins = new Set<string>([env.FRONTEND_URL]);
+  for (const origin of (env.ADDITIONAL_ALLOWED_ORIGINS ?? "").split(",")) {
+    const trimmed = origin.trim();
+    if (trimmed) origins.add(trimmed);
+  }
+  return origins;
+}
+
+/**
+ * Browsers always send Origin on WebSocket handshakes - an unknown Origin means a foreign
+ * site is trying to open a socket with the visitor's cookies. Requests without an Origin
+ * header (non-browser clients, tests, health probes) are allowed: they carry no ambient
+ * browser credentials to hijack.
+ */
+function isOriginAllowed(req: http.IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  return allowedOrigins().has(origin);
+}
+
+const MAX_CONNECTIONS_PER_USER = 12;
 
 function sendJson(client: WebSocket, payload: unknown) {
   if (client.readyState === WebSocket.OPEN) {
@@ -163,7 +224,7 @@ export function isUserOnline(userId: string) {
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
 export function attachWebSocketServer(server: http.Server) {
-  const wss = new WebSocketServer({ server, path: "/ws" });
+  const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 64 * 1024 });
 
   // Server-side heartbeat: ping every 30 s; terminate clients that miss a pong.
   // This cleans up zombie connections (mobile sleep, NAT timeouts) without waiting for
@@ -186,12 +247,12 @@ export function attachWebSocketServer(server: http.Server) {
     client.on("pong", () => { client.isAlive = true; });
 
     try {
-      // The access token lives in an httpOnly cookie, so the browser attaches it to the
-      // WS handshake automatically — no token ever needs to be readable by frontend JS.
-      const token = readCookie(req.headers.cookie, ACCESS_COOKIE);
-      if (!token) throw new Error("Missing token");
+      if (!isOriginAllowed(req)) throw new Error("Origin not allowed");
 
-      const { userId, jti, emailVerified } = await authenticateSocket(token);
+      const { userId, jti, emailVerified } = await authenticateHandshake(req);
+      if ((clientsByUser.get(userId)?.size ?? 0) >= MAX_CONNECTIONS_PER_USER) {
+        throw new Error("Too many connections");
+      }
       client.userId = userId;
       client.jti = jti;
       client.emailVerified = emailVerified;

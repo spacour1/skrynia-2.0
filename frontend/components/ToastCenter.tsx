@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@/lib/navigation";
 import { Bell, CheckCircle2, Heart, MessageCircle, ReceiptText, X } from "lucide-react";
-import { WS_URL } from "@/lib/api";
+import { openAuthedSocket } from "@/lib/ws";
 import { useAuth } from "@/lib/auth-store";
 import { APP_TOAST_EVENT, type AppToastPayload } from "@/lib/toast-events";
 
@@ -53,10 +53,14 @@ export function ToastCenter() {
 
     let closedByEffect = false;
 
-    function connect() {
-      // The access token lives in an httpOnly cookie, so the browser authenticates the
-      // WS handshake automatically — no token needs to be readable by frontend JS.
-      const ws = new WebSocket(WS_URL);
+    async function connect() {
+      // Cross-domain WS: authenticate with a fresh one-time ticket per connection attempt
+      // (see lib/ws.ts); same-origin cookie auth remains the fallback.
+      const ws = await openAuthedSocket();
+      if (closedByEffect) {
+        ws.close();
+        return;
+      }
       socketRef.current = ws;
 
       ws.addEventListener("message", (event) => {

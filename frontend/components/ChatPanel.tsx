@@ -3,7 +3,8 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Flag, FileText, ImageIcon, Loader2, Paperclip, Send, X } from "lucide-react";
-import { apiFetch, ApiError, AUTH_REFRESHED_EVENT, WS_URL } from "@/lib/api";
+import { apiFetch, ApiError, AUTH_REFRESHED_EVENT } from "@/lib/api";
+import { openAuthedSocket } from "@/lib/ws";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
 import { EmailNotVerifiedNotice } from "./EmailNotVerifiedNotice";
@@ -91,10 +92,14 @@ export function ChatPanel({
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let attempt = 0;
 
-    function connect() {
-      // The access token lives in an httpOnly cookie, so the browser authenticates the
-      // WS handshake automatically — no token needs to be readable by frontend JS.
-      const ws = new WebSocket(WS_URL);
+    async function connect() {
+      // Cross-domain WS: authenticate with a fresh one-time ticket per connection attempt
+      // (see lib/ws.ts); same-origin cookie auth remains the fallback.
+      const ws = await openAuthedSocket();
+      if (cancelled) {
+        ws.close();
+        return;
+      }
       socket.current = ws;
 
       ws.addEventListener("open", () => {

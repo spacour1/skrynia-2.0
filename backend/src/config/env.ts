@@ -18,6 +18,8 @@ const schema = z.object({
   REFRESH_ROTATION_ENABLED: z.coerce.boolean().default(true),
   COOKIE_DOMAIN: z.string().optional(),
   FRONTEND_URL: z.string().default("http://localhost:3000"),
+  // Comma-separated extra origins allowed to open WebSocket connections (besides FRONTEND_URL).
+  ADDITIONAL_ALLOWED_ORIGINS: z.string().default(""),
   PLATFORM_FEE_BPS: z.coerce.number().int().min(500).max(1500).default(1000),
   AUTO_RELEASE_HOURS: z.coerce.number().int().min(1).default(72),
   STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),

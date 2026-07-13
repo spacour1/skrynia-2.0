@@ -13,7 +13,8 @@ import type { AuthedRequest } from "../../common/types.js";
 import { isUserOnline } from "../chat/ws.service.js";
 import { requestWithdrawal } from "./wallet.service.js";
 import { createAndSendVerificationEmail, fireAndForget } from "../auth/verification.service.js";
-import { revokeAllUserSessions } from "../auth/session.service.js";
+import { issueSession, revokeAllUserSessions } from "../auth/session.service.js";
+import { setAuthCookies } from "../../common/cookies.js";
 import { checkPhoneResendRateLimit } from "./phone-verification.service.js";
 import { sendPhoneVerificationCode, checkPhoneVerificationCode } from "../../common/sms.js";
 import { createTelegramConnectToken, disconnectTelegram } from "./telegram-link.service.js";
@@ -160,9 +161,14 @@ router.post(
     if (!ok) throw badRequest("Current password is incorrect");
     const nextHash = await bcrypt.hash(input.newPassword, 12);
     await pool.query(`update users set password_hash = $2, updated_at = now() where id = $1`, [req.user.id, nextHash]);
-    // Kill every other session on a password change, but keep the tab that just made the
-    // change logged in - it just proved it knows the new password.
-    await revokeAllUserSessions(req.user.id, { exceptJti: req.sessionId });
+    // Kill every session on a password change - including this one's refresh token, which
+    // exceptJti used to leave dangling-revoked (the tab then silently logged out ~15 min
+    // later when its access token expired). Instead the caller immediately gets a brand
+    // new access+refresh+csrf session in this response: other devices are out, this tab
+    // stays seamlessly signed in.
+    await revokeAllUserSessions(req.user.id);
+    const session = await issueSession(req.user.id, req.user.role);
+    setAuthCookies(res, session);
     await createNotification({
       userId: req.user.id,
       type: "password_changed",

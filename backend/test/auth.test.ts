@@ -215,6 +215,39 @@ describe("password reset invalidates old sessions", () => {
     // ...but the other, older session is revoked.
     await authB.get("/auth/me").expect(401);
   });
+
+  it("rotates the caller a full new session on password change: refresh keeps working, other devices are fully out", async () => {
+    const authA = new AuthedAgent();
+    await authA.register();
+    const oldPassword = authA.password;
+    const authB = new AuthedAgent();
+    authB.email = authA.email;
+    authB.password = oldPassword;
+    await authB.login();
+
+    const change = await authA
+      .post("/users/me/password")
+      .send({ currentPassword: oldPassword, newPassword: "A-brand-new-password1" })
+      .expect(200);
+    // The response carries a fresh session (access+refresh+csrf); adopt the new csrf so
+    // this agent's later mutating calls stay valid.
+    authA.csrfToken = cookieValue(change.headers["set-cookie"] as unknown as string[], "csrf_token")!;
+
+    // Device A: access works now AND its refresh token still works (this used to break -
+    // exceptJti kept the access session but revoked every refresh token, logging the tab
+    // out as soon as the 15-minute access window ended).
+    await authA.get("/auth/me").expect(200);
+    await authA.refresh().then((r) => expect(r.status).toBe(200));
+    await authA.get("/auth/me").expect(200);
+
+    // Device B: both access and refresh are dead.
+    await authB.get("/auth/me").expect(401);
+    await authB.refresh().then((r) => expect(r.status).toBe(401));
+
+    // Old password no longer logs in; the new one does.
+    await request(app).post("/auth/login").send({ email: authA.email, password: oldPassword }).expect(400);
+    await request(app).post("/auth/login").send({ email: authA.email, password: "A-brand-new-password1" }).expect(200);
+  });
 });
 
 describe("Redis transient outages do not force a logout", () => {

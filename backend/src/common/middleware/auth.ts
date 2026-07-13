@@ -65,3 +65,36 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
 export function requireAuth(req: Partial<AuthedRequest>): asserts req is AuthedRequest {
   if (!req.user) throw new ApiError(401, "Unauthorized", "unauthorized");
 }
+
+/**
+ * Populates req.user when a valid access token is present, but never rejects the request:
+ * anonymous, expired, revoked or banned viewers simply continue without a user. For public
+ * endpoints that behave differently for the resource owner or staff (e.g. previewing a
+ * paused listing) - authorization decisions stay in the route, this only identifies.
+ */
+export const authenticateOptional: RequestHandler = async (req, _res, next) => {
+  try {
+    const token = req.cookies?.[ACCESS_COOKIE];
+    if (!token) return next();
+
+    const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+    if (await isSessionRevoked(payload.jti)) return next();
+
+    const result = await pool.query<AuthUser>(
+      `select id, email, display_name as "displayName", role, is_banned as "isBanned",
+              (email_verified_at is not null or telegram_id is not null) as "emailVerified",
+              (phone_verified_at is not null) as "phoneVerified"
+       from users
+       where id = $1`,
+      [payload.sub]
+    );
+    const user = result.rows[0];
+    if (user && !user.isBanned) {
+      req.user = user;
+      req.sessionId = payload.jti;
+    }
+    next();
+  } catch {
+    next();
+  }
+};

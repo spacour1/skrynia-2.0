@@ -2,6 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { pool } from "../../db/pool.js";
 import { asyncHandler, badRequest, notFound } from "../../common/errors.js";
+import { authenticateOptional } from "../../common/middleware/auth.js";
+import type { AuthedRequest } from "../../common/types.js";
 import { cacheGet, cacheSet } from "../../common/redis.js";
 import { moneyToCents, paginationSchema } from "../../common/validation.js";
 import { getActiveSchemaForSection, getSchemaByVersion } from "../catalog/catalog.service.js";
@@ -317,8 +319,12 @@ router.get(
 
 router.get(
   "/products/:id",
+  authenticateOptional,
   asyncHandler(async (req, res) => {
     const id = z.string().uuid().parse(req.params.id);
+    const viewer = (req as Partial<AuthedRequest>).user;
+    // Only fully public payloads are ever cached (see cacheSet below), so a cache hit is
+    // always safe to serve to anyone.
     const cached = await cacheGet(`marketplace:product:${id}`);
     if (cached) return res.json(cached);
     const result = await pool.query(
@@ -332,6 +338,7 @@ router.get(
               g.id as "gameId", g.slug as "gameSlug", g.name as "gameName",
               gs.id as "sectionId", gs.slug as "sectionSlug", gs.name as "sectionName",
               u.id as "sellerId", u.display_name as "sellerDisplayName",
+              u.is_banned as "sellerIsBanned",
               coalesce(avg(r.rating), 0)::float as "sellerRating",
               count(distinct r.id)::int as "sellerReviewCount",
               count(distinct pf.user_id)::int as "favoriteCount",
@@ -349,6 +356,15 @@ router.get(
       [id]
     );
     if (!result.rows[0]) throw notFound("Product not found");
+
+    // Public visibility matches the list endpoint: active product, seller not banned.
+    // (Unlike the list, a sold-out active product stays reachable by direct link - the
+    // page shows real stock instead of 404ing bookmarks/SEO.) The owner and staff can
+    // still open non-public listings as a preview.
+    const detailRow = result.rows[0] as { status: string; sellerIsBanned: boolean; sellerId: string };
+    const isPubliclyVisible = detailRow.status === "active" && !detailRow.sellerIsBanned;
+    const canPreview = Boolean(viewer && (viewer.id === detailRow.sellerId || viewer.role === "admin" || viewer.role === "moderator"));
+    if (!isPubliclyVisible && !canPreview) throw notFound("Product not found");
     const reviews = await pool.query(
       `select r.id, r.rating, r.comment, r.created_at as "createdAt",
               b.display_name as "buyerDisplayName",
@@ -368,8 +384,11 @@ router.get(
     // already-created lot displays.
     const metadataFields =
       row.sectionId && row.schemaVersion ? (await getSchemaByVersion(row.sectionId, row.schemaVersion))?.fields ?? [] : [];
-    const payload = { product: { ...addSellerPresence([row])[0], metadataFields }, reviews: reviews.rows };
-    await cacheSet(`marketplace:product:${id}`, payload, 60);
+    const { sellerIsBanned: _sellerIsBanned, ...publicRow } = row;
+    const payload = { product: { ...addSellerPresence([publicRow])[0], metadataFields }, reviews: reviews.rows };
+    // Never cache non-public payloads: owner/staff previews of paused or blocked listings
+    // must not become servable to anonymous visitors through the cache.
+    if (isPubliclyVisible) await cacheSet(`marketplace:product:${id}`, payload, 60);
     res.json(payload);
   })
 );

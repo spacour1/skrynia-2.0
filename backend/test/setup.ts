@@ -18,3 +18,5 @@ process.env.REFRESH_TOKEN_TTL_DAYS = "90";
 // rate-limit behaviour, so raise the ceilings far above what the suite can generate.
 process.env.AUTH_RATE_LIMIT_PER_15MIN = "100000";
 process.env.API_RATE_LIMIT_PER_MIN = "100000";
+process.env.WRITE_RATE_LIMIT_PER_MIN = "100000";
+process.env.PUBLIC_READ_RATE_LIMIT_PER_MIN = "100000";

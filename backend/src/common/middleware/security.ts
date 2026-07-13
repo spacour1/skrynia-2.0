@@ -103,7 +103,7 @@ export const webhookRateLimit = rateLimit({
 
 export const writeRateLimit = rateLimit({
   windowMs: 60 * 1000,
-  limit: 60,
+  limit: env.WRITE_RATE_LIMIT_PER_MIN,
   standardHeaders: "draft-7",
   legacyHeaders: false,
   store: makeStore("rl:write:"),

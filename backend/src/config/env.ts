@@ -69,6 +69,7 @@ const schema = z.object({
   // For global limiting across replicas, add a Redis store (rate-limit-redis).
   PUBLIC_READ_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(10).default(600),
   API_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(10).default(300),
+  WRITE_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(60),
   AUTH_RATE_LIMIT_PER_15MIN: z.coerce.number().int().min(1).default(20),
   METRICS_USER: z.string().default("metrics"),
   METRICS_PASSWORD: z.string().default("dev-metrics-password-change-me"),

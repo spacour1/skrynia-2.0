@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { pool } from "../../db/pool.js";
+import { inTx, pool, type DbClient } from "../../db/pool.js";
 import { asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
@@ -63,15 +63,18 @@ router.get(
   })
 );
 
-async function replaceProductMedia(productId: string, urls: string[]) {
-  await pool.query(`delete from product_media where product_id = $1`, [productId]);
+// Always called inside the same transaction as the product row change: a failure between
+// the delete and the insert must roll the whole operation back, never leave a listing
+// stripped of its media.
+async function replaceProductMedia(client: DbClient, productId: string, urls: string[]) {
+  await client.query(`delete from product_media where product_id = $1`, [productId]);
   if (!urls.length) return;
   const values: unknown[] = [productId];
   const rows = urls.map((url, index) => {
     values.push(url, index);
     return `($1, $${values.length - 1}, $${values.length})`;
   });
-  await pool.query(
+  await client.query(
     `insert into product_media(product_id, url, sort_order) values ${rows.join(", ")}`,
     values
   );
@@ -131,37 +134,40 @@ router.post(
     // The section's schema (not the frontend) decides which metadata keys are valid - see
     // catalog.validation.ts. Unknown keys are dropped; missing required ones reject the lot.
     const { metadata, schemaVersion } = await validateLotMetadata(categorization.sectionId, input.metadata);
-    const result = await pool.query(
-      `insert into products(
-         seller_id, category_id, game_id, section_id, title, description, price_cents, old_price_cents,
-         currency, stock, delivery_type, product_type, server, platform, delivery_template, metadata, schema_version
-       )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-       returning id`,
-      [
-        req.user.id,
-        categorization.categoryId,
-        categorization.gameId,
-        categorization.sectionId,
-        input.title,
-        input.description,
-        moneyToCents(input.price),
-        input.oldPrice ? moneyToCents(input.oldPrice) : null,
-        input.currency.toUpperCase(),
-        input.stock,
-        input.deliveryType,
-        categorization.productType ?? input.productType ?? "service",
-        input.server ?? null,
-        input.platform ?? null,
-        input.deliveryTemplate ?? null,
-        metadata,
-        schemaVersion
-      ]
-    );
-    if (input.media?.length) await replaceProductMedia(result.rows[0].id, input.media);
+    const productId = await inTx(async (client) => {
+      const result = await client.query(
+        `insert into products(
+           seller_id, category_id, game_id, section_id, title, description, price_cents, old_price_cents,
+           currency, stock, delivery_type, product_type, server, platform, delivery_template, metadata, schema_version
+         )
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+         returning id`,
+        [
+          req.user.id,
+          categorization.categoryId,
+          categorization.gameId,
+          categorization.sectionId,
+          input.title,
+          input.description,
+          moneyToCents(input.price),
+          input.oldPrice ? moneyToCents(input.oldPrice) : null,
+          input.currency.toUpperCase(),
+          input.stock,
+          input.deliveryType,
+          categorization.productType ?? input.productType ?? "service",
+          input.server ?? null,
+          input.platform ?? null,
+          input.deliveryTemplate ?? null,
+          metadata,
+          schemaVersion
+        ]
+      );
+      if (input.media?.length) await replaceProductMedia(client, result.rows[0].id, input.media);
+      return result.rows[0].id as string;
+    });
     await cacheDelPattern("marketplace:products:*");
     await cacheDel("marketplace:games");
-    res.status(201).json({ id: result.rows[0].id });
+    res.status(201).json({ id: productId });
   })
 );
 
@@ -256,11 +262,13 @@ router.patch(
       schema_version: schemaVersion,
       status: input.status
     });
-    if (sets.length) {
-      sets.push("updated_at = now()");
-      await pool.query(`update products set ${sets.join(", ")} where id = $1`, values);
-    }
-    if (input.media !== undefined) await replaceProductMedia(id, input.media);
+    await inTx(async (client) => {
+      if (sets.length) {
+        sets.push("updated_at = now()");
+        await client.query(`update products set ${sets.join(", ")} where id = $1`, values);
+      }
+      if (input.media !== undefined) await replaceProductMedia(client, id, input.media);
+    });
     await cacheDel(`marketplace:product:${id}`);
     await cacheDelPattern("marketplace:products:*");
     await cacheDel("marketplace:games");

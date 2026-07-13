@@ -1,51 +1,8 @@
 "use client";
 
-import { CheckCircle2, Loader2, Mail, MailCheck, MailWarning, Phone } from "lucide-react";
+import { CheckCircle2, Clock, Loader2, Phone } from "lucide-react";
 import { SectionHeader, StatusMessage } from "./settings-ui";
 import type { PhoneStep, SettingsT } from "./types";
-
-export function EmailVerificationCard({
-  verified,
-  email,
-  resendPending,
-  message,
-  onResend,
-  t
-}: {
-  verified: boolean;
-  email: string;
-  resendPending: boolean;
-  message: string;
-  onResend: () => void;
-  t: SettingsT;
-}) {
-  return (
-    <section className="app-card overflow-hidden">
-      <SectionHeader icon={Mail} title={t("settings.emailVerify.title")} text={t("settings.emailVerify.text")} />
-      <div className="space-y-4 p-5">
-        {verified ? (
-          <div className="flex items-center gap-3 rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-4 text-sm text-emerald-700 dark:text-emerald-300">
-            <MailCheck className="h-5 w-5 shrink-0" />
-            <span className="font-bold">{t("settings.emailVerify.verified")}</span>
-          </div>
-        ) : (
-          <>
-            <div className="flex items-center gap-3 rounded-lg border border-amber-400/40 bg-amber-100 p-4 text-sm text-amber-900 dark:bg-amber-400/10 dark:text-amber-200">
-              <MailWarning className="h-5 w-5 shrink-0" />
-              <span className="font-bold">{t("settings.emailVerify.notVerified")}</span>
-            </div>
-            <p className="text-sm leading-6 text-muted">{t("settings.emailVerify.sentTo", { email })}</p>
-            <button className="app-button-secondary w-full" type="button" disabled={resendPending} onClick={onResend}>
-              {resendPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
-              {t("settings.emailVerify.resend")}
-            </button>
-          </>
-        )}
-        <StatusMessage message={message} />
-      </div>
-    </section>
-  );
-}
 
 export function PhoneVerificationCard({
   verified,
@@ -79,7 +36,7 @@ export function PhoneVerificationCard({
   t: SettingsT;
 }) {
   return (
-    <section className="app-card overflow-hidden">
+    <section className="app-card scroll-mt-24 overflow-hidden" id="phone-verification">
       <SectionHeader icon={Phone} title={t("settings.phone.title")} text={t("settings.phone.text")} />
       <div className="space-y-4 p-5">
         {verified ? (
@@ -97,6 +54,10 @@ export function PhoneVerificationCard({
               {requestPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4" />}
               {t("settings.phone.sendCode")}
             </button>
+            <p className="flex items-center gap-2 rounded-lg border border-amber-400/40 bg-amber-100 p-3 text-xs font-bold text-amber-900 dark:bg-amber-400/10 dark:text-amber-200">
+              <Clock className="h-4 w-4 shrink-0" />
+              {t("settings.phone.notVerifiedNotice")}
+            </p>
           </>
         ) : (
           <>
@@ -109,7 +70,7 @@ export function PhoneVerificationCard({
               {confirmPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
               {t("settings.phone.confirmCode")}
             </button>
-            <button className="w-full text-center text-sm font-bold text-muted underline underline-offset-2 transition hover:text-ink" type="button" onClick={() => setStep("enter")}>
+            <button className="focus-ring w-full text-center text-sm font-bold text-muted underline underline-offset-2 transition hover:text-ink" type="button" onClick={() => setStep("enter")}>
               {t("settings.phone.changeNumber")}
             </button>
           </>

@@ -2,20 +2,17 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { UserRound } from "lucide-react";
 import { apiFetch, type User } from "@/lib/api";
 import { useAuth } from "@/lib/auth-store";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useI18n } from "@/lib/i18n";
-import { EmailVerificationCard, PhoneVerificationCard } from "./_components/VerificationCards";
+import { PhoneVerificationCard } from "./_components/VerificationCards";
 import { LanguageCard } from "./_components/LanguageCard";
 import { NotificationsCard } from "./_components/NotificationsCard";
-import { PasswordCard } from "./_components/PasswordCard";
-import { ProfileForm } from "./_components/ProfileForm";
-import { TwoFactorCard } from "./_components/TwoFactorCard";
-import { WorksCard } from "./_components/WorksCard";
+import { PaymentsCard } from "./_components/PaymentsCard";
+import { ProfileCard } from "./_components/ProfileCard";
+import { SecurityCard } from "./_components/SecurityCard";
 import { emptyProfile, isStrongPassword } from "./_components/settings-state";
-import { AvatarView, Summary } from "./_components/settings-ui";
 import type { ProfileState } from "./_components/types";
 
 export default function SettingsPage() {
@@ -70,24 +67,43 @@ function SettingsContent() {
     onError: (err) => setProfileMessage(err instanceof Error ? err.message : t("settings.avatar.uploadFailed"))
   });
 
+  function saveProfile(next: ProfileState) {
+    return apiFetch<{ user: User }>("/users/me", {
+      method: "PATCH",
+      body: JSON.stringify({
+        ...next,
+        settings: {
+          ...(me.data?.user.settings ?? {}),
+          profileDescription: next.profileDescription.trim()
+        }
+      })
+    });
+  }
+
+  function applySavedUser(response: { user: User }) {
+    if (authUser) setUser({ ...authUser, ...response.user });
+    queryClient.invalidateQueries({ queryKey: ["me-settings"] });
+  }
+
   const updateProfile = useMutation({
-    mutationFn: () =>
-      apiFetch<{ user: User }>("/users/me", {
-        method: "PATCH",
-        body: JSON.stringify({
-          ...profile,
-          settings: {
-            ...(me.data?.user.settings ?? {}),
-            profileDescription: profile.profileDescription.trim()
-          }
-        })
-      }),
+    mutationFn: saveProfile,
     onSuccess: (response) => {
       setProfileMessage(t("settings.profile.saved"));
-      if (authUser) setUser({ ...authUser, ...response.user });
-      queryClient.invalidateQueries({ queryKey: ["me-settings"] });
+      applySavedUser(response);
     },
     onError: (err) => setProfileMessage(err instanceof Error ? err.message : t("settings.profile.saveFailed"))
+  });
+
+  const [pushMessage, setPushMessage] = useState("");
+  // Same PATCH as updateProfile, but reports into the notifications card so the
+  // push toggle there gives feedback in place.
+  const updatePush = useMutation({
+    mutationFn: saveProfile,
+    onSuccess: (response) => {
+      setPushMessage(t("settings.profile.saved"));
+      applySavedUser(response);
+    },
+    onError: (err) => setPushMessage(err instanceof Error ? err.message : t("settings.profile.saveFailed"))
   });
 
   const changePassword = useMutation({
@@ -222,6 +238,13 @@ function SettingsContent() {
     setProfileMessage(t("settings.avatar.deleteNotice"));
   }
 
+  function togglePush(checked: boolean) {
+    const next = { ...profile, pushEnabled: checked };
+    setProfile(next);
+    setPushMessage("");
+    updatePush.mutate(next);
+  }
+
   function submitPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -247,76 +270,84 @@ function SettingsContent() {
 
   return (
     <div className="mx-auto max-w-[1440px] space-y-6">
-      <section className="app-card overflow-hidden">
-        <div className="grid gap-6 bg-panel/60 p-6 lg:grid-cols-[1fr_360px] lg:items-center">
-          <div className="flex items-center gap-5">
-            <AvatarView src={avatarSrc} initial={initial} size="large" />
-            <div>
-              <p className="inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1 text-xs font-bold text-brand">
-                <UserRound className="h-3.5 w-3.5" />
-                {t("settings.badge")}
-              </p>
-              <h1 className="mt-3 text-3xl font-black text-ink">{profile.displayName || t("settings.profile.title")}</h1>
-              <p className="mt-2 text-sm leading-6 text-muted">{t("settings.headerText")}</p>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <Summary label={t("auth.email")} value={profile.email || "-"} />
-            <Summary label={t("common.role")} value={authUser?.role ?? "-"} />
-          </div>
+      <header>
+        <h1 className="text-3xl font-black text-ink">{t("settings.title")}</h1>
+        <p className="mt-2 text-sm text-muted">{t("settings.subtitle")}</p>
+      </header>
+
+      <ProfileCard
+        profile={profile}
+        setProfile={setProfile}
+        avatarSrc={avatarSrc}
+        initial={initial}
+        role={authUser?.role ?? "-"}
+        emailVerified={Boolean(me.data?.user.emailVerified)}
+        phone={me.data?.user.phone ?? ""}
+        phoneVerified={Boolean(me.data?.user.phoneVerified)}
+        profileMessage={profileMessage}
+        verifyMessage={verifyMessage}
+        uploadPending={uploadAvatar.isPending}
+        updatePending={updateProfile.isPending}
+        resendPending={resendVerification.isPending}
+        onSubmit={(event) => {
+          event.preventDefault();
+          updateProfile.mutate(profile);
+        }}
+        onPickAvatar={pickAvatar}
+        onClearAvatar={clearAvatar}
+        onResendVerification={() => resendVerification.mutate()}
+        t={t}
+      />
+
+      <div className="grid items-start gap-6 xl:grid-cols-2">
+        <div className="space-y-6">
+          <SecurityCard
+            password={{
+              isPending: changePassword.isPending,
+              message: passwordMessage,
+              onSubmit: submitPassword
+            }}
+            twoFactor={{
+              enabled: Boolean(me.data?.user.twoFactorEnabled),
+              step: twoFaStep,
+              setup: twoFaSetup,
+              code: twoFaCode,
+              backupCodes,
+              message: twoFaMessage,
+              disablePassword,
+              showDisablePrompt,
+              startPending: startTwoFactorSetup.isPending,
+              confirmPending: confirmTwoFactorSetup.isPending,
+              disablePending: disableTwoFactorMutation.isPending,
+              setStep: setTwoFaStep,
+              setCode: setTwoFaCode,
+              setDisablePassword,
+              setShowDisablePrompt,
+              onStart: () => startTwoFactorSetup.mutate(),
+              onConfirm: () => confirmTwoFactorSetup.mutate(),
+              onDisable: () => disableTwoFactorMutation.mutate()
+            }}
+            t={t}
+          />
+          <NotificationsCard
+            emailEnabled={preferences.data?.preferences.emailEnabled ?? true}
+            telegramEnabled={preferences.data?.preferences.telegramEnabled ?? true}
+            telegramConnected={Boolean(me.data?.user.telegramConnected)}
+            pushEnabled={profile.pushEnabled}
+            connectPending={connectTelegram.isPending}
+            pushPending={updatePush.isPending}
+            message={telegramMessage || pushMessage}
+            onEmailChange={(checked) => updatePreferences.mutate({ emailEnabled: checked })}
+            onTelegramChange={(checked) => updatePreferences.mutate({ telegramEnabled: checked })}
+            onPushChange={togglePush}
+            onConnectTelegram={() => connectTelegram.mutate()}
+            onDisconnectTelegram={() => disconnectTelegram.mutate()}
+            t={t}
+          />
         </div>
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
-        <ProfileForm
-          profile={profile}
-          setProfile={setProfile}
-          avatarSrc={avatarSrc}
-          initial={initial}
-          profileMessage={profileMessage}
-          uploadPending={uploadAvatar.isPending}
-          updatePending={updateProfile.isPending}
-          onSubmit={(event) => {
-            event.preventDefault();
-            updateProfile.mutate();
-          }}
-          onPickAvatar={pickAvatar}
-          onClearAvatar={clearAvatar}
-          t={t}
-        />
-
-        <aside className="space-y-6">
+        <div className="space-y-6">
+          <PaymentsCard cards={[]} wallets={[]} t={t} />
           <LanguageCard locale={locale} switchLocale={switchLocale} t={t} />
-          <PasswordCard isPending={changePassword.isPending} message={passwordMessage} onSubmit={submitPassword} t={t} />
-          <TwoFactorCard
-            enabled={Boolean(me.data?.user.twoFactorEnabled)}
-            step={twoFaStep}
-            setup={twoFaSetup}
-            code={twoFaCode}
-            backupCodes={backupCodes}
-            message={twoFaMessage}
-            disablePassword={disablePassword}
-            showDisablePrompt={showDisablePrompt}
-            startPending={startTwoFactorSetup.isPending}
-            confirmPending={confirmTwoFactorSetup.isPending}
-            disablePending={disableTwoFactorMutation.isPending}
-            setStep={setTwoFaStep}
-            setCode={setTwoFaCode}
-            setDisablePassword={setDisablePassword}
-            setShowDisablePrompt={setShowDisablePrompt}
-            onStart={() => startTwoFactorSetup.mutate()}
-            onConfirm={() => confirmTwoFactorSetup.mutate()}
-            onDisable={() => disableTwoFactorMutation.mutate()}
-            t={t}
-          />
-          <EmailVerificationCard
-            verified={Boolean(me.data?.user.emailVerified)}
-            email={profile.email}
-            resendPending={resendVerification.isPending}
-            message={verifyMessage}
-            onResend={() => resendVerification.mutate()}
-            t={t}
-          />
           <PhoneVerificationCard
             verified={Boolean(me.data?.user.phoneVerified)}
             verifiedPhone={me.data?.user.phone ?? ""}
@@ -333,21 +364,8 @@ function SettingsContent() {
             onConfirm={() => confirmPhoneCode.mutate()}
             t={t}
           />
-          <NotificationsCard
-            emailEnabled={preferences.data?.preferences.emailEnabled ?? true}
-            telegramEnabled={preferences.data?.preferences.telegramEnabled ?? true}
-            telegramConnected={Boolean(me.data?.user.telegramConnected)}
-            connectPending={connectTelegram.isPending}
-            message={telegramMessage}
-            onEmailChange={(checked) => updatePreferences.mutate({ emailEnabled: checked })}
-            onTelegramChange={(checked) => updatePreferences.mutate({ telegramEnabled: checked })}
-            onConnectTelegram={() => connectTelegram.mutate()}
-            onDisconnectTelegram={() => disconnectTelegram.mutate()}
-            t={t}
-          />
-          <WorksCard t={t} />
-        </aside>
-      </section>
+        </div>
+      </div>
     </div>
   );
 }

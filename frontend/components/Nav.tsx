@@ -8,13 +8,9 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Bell,
   ChevronDown,
-  Coins,
-  FileText,
   Gauge,
   Headphones,
   Heart,
-  Home,
-  KeyRound,
   LayoutGrid,
   MessageCircle,
   PackagePlus,
@@ -22,11 +18,7 @@ import {
   Search,
   Settings,
   ShoppingBag,
-  Store,
-  Swords,
-  Users,
   WalletCards,
-  Wrench,
   X
 } from "lucide-react";
 import { apiFetch, money, type Game } from "@/lib/api";
@@ -36,7 +28,7 @@ import { captureEvent } from "@/lib/posthog";
 import { CatalogPanel } from "./nav/CatalogPanel";
 import { NotificationDropdown, ProfileDropdown } from "./nav/NavDropdowns";
 import { SearchSuggest } from "./nav/SearchSuggest";
-import { CatalogMegaMenu, SideNavButton } from "./nav/SideNav";
+import { SideNavButton } from "./nav/SideNav";
 import type { NotificationItem, SuggestProduct } from "./nav/types";
 
 type WalletResponse = {
@@ -63,7 +55,6 @@ export function Nav() {
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [catalogOpen, setCatalogOpen] = useState(false);
   const [catalogPanelOpen, setCatalogPanelOpen] = useState(false);
 
   useEffect(() => {
@@ -124,20 +115,13 @@ export function Nav() {
         : "user";
 
   const navItems = [
-    { label: t("nav.home"), href: "/", icon: Home },
-    { label: t("nav.catAccounts"), href: "/#game-catalog", icon: Users },
-    { label: t("nav.catItems"), href: "/#game-catalog", icon: Swords },
-    { label: t("nav.catKeys"), href: "/#game-catalog", icon: KeyRound },
-    { label: t("nav.catCurrency"), href: "/#game-catalog", icon: Coins },
-    { label: t("nav.catServices"), href: "/#game-catalog", icon: Wrench },
-    { label: t("nav.catDigital"), href: "/#game-catalog", icon: FileText },
+    { label: t("nav.createListing"), href: "/seller/create", icon: PackagePlus, auth: true, match: "/seller/create" },
     { label: t("nav.favorites"), href: "/favorites", icon: Heart, auth: true },
-    { label: t("nav.chats"), href: "/messages", icon: MessageCircle, auth: true },
+    { label: t("nav.chats"), href: "/messages", icon: MessageCircle, auth: true, match: "/messages" },
     { label: t("nav.myPurchases"), href: "/orders?role=buyer", icon: ShoppingBag, auth: true, match: "/orders" },
-    { label: t("nav.mySales"), href: "/seller/sales", icon: Store, auth: true, match: "/seller/sales" },
     { label: t("nav.support"), href: "/support", icon: Headphones },
     { label: t("nav.settings"), href: "/settings", icon: Settings, auth: true },
-    ...(user?.role === "admin" || user?.role === "moderator" ? [{ label: t("nav.admin"), href: "/admin", icon: Gauge, auth: true }] : [])
+    ...(user?.role === "admin" || user?.role === "moderator" ? [{ label: t("nav.admin"), href: "/admin", icon: Gauge, auth: true, match: "/admin" }] : [])
   ];
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
@@ -186,7 +170,6 @@ export function Nav() {
   }
 
   function openRoute(href: string, auth?: boolean) {
-    setCatalogOpen(false);
     router.push(auth && !user ? "/login" : href);
   }
 
@@ -364,24 +347,14 @@ export function Nav() {
 
       <aside className="fixed bottom-0 left-0 top-[86px] z-30 hidden w-[188px] flex-col border-r border-line/70 bg-surface/85 px-3 py-4 shadow-[18px_0_70px_rgba(0,0,0,0.16)] backdrop-blur-xl lg:flex">
         <nav className="flex-1 space-y-1.5 overflow-y-auto pr-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {navItems.map((item, index) => (
-            <div
+          {navItems.map((item) => (
+            <SideNavButton
               key={item.label}
-              className={`relative w-full ${index === 1 || index === 7 ? "!mt-4 border-t border-line/60 pt-4" : ""}`}
-              onMouseEnter={item.href === "/" ? () => setCatalogOpen(true) : undefined}
-              onMouseLeave={item.href === "/" ? () => setCatalogOpen(false) : undefined}
-            >
-              <SideNavButton
-                icon={item.icon}
-                label={item.label}
-                active={(item.href === "/" ? pathname === "/" || catalogOpen : pathname === item.href) || Boolean(item.match && pathname.startsWith(item.match))}
-                onClick={item.href === "/" ? () => {
-                  router.push("/");
-                  setCatalogOpen(true);
-                } : () => openRoute(item.href, item.auth)}
-              />
-              {item.href === "/" && catalogOpen ? <CatalogMegaMenu games={games.data?.games ?? []} onGame={(slug) => openRoute(`/games/${slug}`)} /> : null}
-            </div>
+              icon={item.icon}
+              label={item.label}
+              active={pathname === item.href || Boolean(item.match && pathname.startsWith(item.match))}
+              onClick={() => openRoute(item.href, item.auth)}
+            />
           ))}
         </nav>
         <SellerCta variant={sellerCtaVariant} onGo={(href) => openRoute(href, false)} />

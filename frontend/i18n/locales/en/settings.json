@@ -1,15 +1,19 @@
 {
   "settings": {
     "title": "Settings",
-    "badge": "Account settings",
-    "headerText": "Profile, avatar, notifications, security, and sign-in.",
+    "subtitle": "Manage your profile, security, payments, and notifications.",
+    "status": {
+      "verified": "Verified",
+      "notVerified": "Not verified"
+    },
     "language": {
       "title": "Interface language",
-      "text": "Choose a language. It is saved for future visits and applied across the whole site."
+      "text": "Choose the language used across the site."
     },
     "profile": {
       "title": "Profile",
-      "text": "The details buyers and sellers see on the platform.",
+      "editTitle": "Profile details",
+      "editText": "The details buyers and sellers see on the platform.",
       "nameLabel": "Display name",
       "bio": "Public profile description",
       "bioPlaceholder": "Tell buyers about yourself, your experience, delivery rules, and product categories.",
@@ -18,7 +22,7 @@
       "saveFailed": "Could not save settings"
     },
     "avatar": {
-      "upload": "Upload avatar",
+      "change": "Change avatar",
       "delete": "Delete",
       "deleteNotice": "The avatar will be removed after saving the profile.",
       "hint": "PNG, JPG, or WEBP up to 8 MB. After uploading, click \"Save profile\".",
@@ -32,8 +36,11 @@
       "title": "Push notifications",
       "text": "Orders, messages, and important events."
     },
+    "security": {
+      "title": "Security",
+      "text": "Protect your account"
+    },
     "password": {
-      "title": "Password",
       "text": "At least 8 characters, with an uppercase letter, a number, and a special character. Use the new password the next time you sign in.",
       "current": "Current password",
       "new": "New password",
@@ -46,7 +53,10 @@
     },
     "twofa": {
       "title": "Two-factor authentication",
-      "text": "A code from an authenticator app (Google Authenticator, Authy, etc.) on every sign-in.",
+      "statusOn": "Enabled",
+      "statusOff": "Disabled",
+      "shortText": "Add an extra layer of protection to your account.",
+      "recommended": "Recommended",
       "enabled": "2FA enabled",
       "enable": "Enable 2FA",
       "disable": "Disable 2FA",
@@ -61,20 +71,31 @@
       "invalidCode": "Invalid code",
       "disableFailed": "Could not disable 2FA"
     },
+    "payments": {
+      "title": "Payments",
+      "text": "Manage your payment methods and wallets",
+      "cardsTitle": "Bank cards",
+      "walletsTitle": "Crypto wallets / e-wallets",
+      "addCard": "Add card",
+      "addWallet": "Add wallet",
+      "cardsEmpty": "No cards added yet",
+      "walletsEmpty": "No wallets added yet",
+      "comingSoon": "Coming soon",
+      "connected": "Connected",
+      "cardValid": "Valid thru {exp}"
+    },
     "emailVerify": {
-      "title": "Email verification",
-      "text": "Protect your account and unlock order notifications by email.",
-      "verified": "Email verified",
-      "notVerified": "Email not verified",
       "sentTo": "We sent a link to {email} at registration. If it didn't arrive, send it again.",
-      "resend": "Resend email",
+      "resend": "Verify email",
       "sent": "Email sent — check your inbox (and spam folder)",
       "alreadyVerified": "Email already verified",
       "sendFailed": "Could not send the email"
     },
     "phone": {
       "title": "Phone verification",
-      "text": "Required for withdrawals. Optional for everything else on the site.",
+      "text": "Verify your phone number for account security and access recovery.",
+      "verifyAction": "Verify number",
+      "notVerifiedNotice": "Number not verified",
       "verified": "Phone verified: {phone}",
       "numberLabel": "Phone number",
       "sendCode": "Send code by SMS",
@@ -89,11 +110,11 @@
     },
     "notifs": {
       "title": "Notifications",
-      "text": "Where to send orders, messages, disputes, and other important events.",
+      "text": "Choose how you want to receive notifications.",
       "emailTitle": "Email notifications",
-      "emailText": "Emails about key order events.",
+      "emailText": "Get important updates in your inbox.",
       "telegramTitle": "Telegram notifications",
-      "telegramText": "Requires connecting the Telegram bot below."
+      "telegramText": "Get messages about purchases, sales, and chat."
     },
     "telegram": {
       "connected": "Telegram connected",
@@ -101,12 +122,6 @@
       "connect": "Connect Telegram",
       "disconnected": "Telegram disconnected",
       "connectFailed": "Could not get the connection link"
-    },
-    "works": {
-      "title": "What already works",
-      "item1": "The avatar is uploaded as a file to the backend and stored in the profile.",
-      "item2": "Name, email, and toggles are updated in the database.",
-      "item3": "The session refreshes after saving, so the avatar shows up in the navigation without re-login."
     }
   }
 }

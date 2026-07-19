@@ -76,3 +76,84 @@ setup; UUID-isolated keys exercise normal behavior.
 - Marketplace invalidation is best-effort when Redis is unavailable, consistent with the
   existing cache layer. Durable side effects belong to the later outbox stage.
 - Frontend unit tests remain deferred to the frontend reliability stage.
+
+## Stage 2: secure two-factor lifecycle
+
+Status: complete.
+
+Planned commit: `fix(auth): make two-factor replacement and backup codes atomic`
+
+### Confirmed defects
+
+- Starting setup overwrote the only TOTP secret and immediately invalidated the active
+  authenticator before the replacement was confirmed.
+- TOTP secrets were stored as plaintext.
+- Backup-code consumption used a read/compare/unconditional-update sequence, allowing two
+  concurrent requests to accept the same code.
+- Disable deleted the method and backup codes and changed the user flag in three separate
+  transactions.
+- Replacement setup and backup-code regeneration had no recent-authentication contract;
+  disable accepted only passwords, leaving Telegram-only accounts without a safe path.
+
+### Implementation
+
+- Added forward-only migration `1783290300000_secure-2fa-lifecycle.sql` with separate active
+  and pending encrypted-secret bundles, pending timestamps, all-or-none constraints, and an
+  expiry index.
+- Added AES-256-GCM authenticated encryption using a required production
+  `TWO_FACTOR_ENCRYPTION_KEY`; every row stores ciphertext, IV, authentication tag, and key
+  version. AAD binds ciphertext to the user ID and key version.
+- Existing plaintext secrets are encrypted in bounded batches and cleared before the API
+  starts listening. Per-user migration checks also cover an in-flight legacy record.
+- Setup preserves the active method and creates a pending method with a 20-minute TTL.
+  Confirmation locks the user/method rows, verifies the pending secret, promotes it, rotates
+  backup codes, enables the user flag, and records a security audit in one transaction.
+- Backup codes are still bcrypt-hashed and are now consumed with
+  `UPDATE ... WHERE used_at IS NULL RETURNING`, so only one concurrent request can succeed.
+- Disable locks the user and performs method deletion, backup-code deletion, flag update,
+  and explicit security audit in one transaction.
+- Replacement, disable, and backup-code regeneration require the current password or a
+  confirmed active TOTP. Telegram-only accounts use the TOTP path.
+- Added `/users/me/2fa/backup-codes/regenerate`; all 2FA mutation routes use the auth rate
+  limiter.
+- Updated the settings UI for authenticator replacement, backup-code regeneration, and
+  password/TOTP reauthentication in all three locales.
+- No financial formula, payment provider, ledger, payout, wallet, or accounting behavior
+  changed.
+
+### Regression coverage
+
+Added seven integration scenarios:
+
+1. Active TOTP remains valid during replacement; pending TOTP cannot log in until confirmed.
+2. Pending setup expires after 20 minutes without disturbing the active method.
+3. Two concurrent uses of one backup code produce exactly one success.
+4. Backup-code regeneration requires reauthentication and invalidates the old set.
+5. A Telegram-only account disables 2FA through the real HTTP route using active TOTP.
+6. Injected security-audit failure rolls the complete disable transaction back.
+7. A confirmed legacy plaintext secret is encrypted, cleared, and remains usable.
+
+The schema contract now asserts encrypted method columns and no legacy plaintext.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `cd backend && npm run build` | PASS |
+| Targeted lifecycle/schema Vitest run | PASS, 13/13 |
+| `cd backend && npm test` | PASS, 174/174 in 17/17 files |
+| Clean database migration smoke | PASS, all 29 migrations |
+| Lifecycle/schema tests on clean database | PASS, 13/13 |
+| `cd frontend && npm run typecheck` | PASS |
+| `cd frontend && npm run i18n:check` | PASS, 0 errors and 25 baseline warnings |
+| `cd frontend && npm test` | NOT AVAILABLE, package has no `test` script |
+| `cd frontend && npm run build` | PASS, with existing Sentry/OpenTelemetry warnings |
+| `docker compose config --quiet` with required secrets | PASS |
+
+### Deployment constraints
+
+- Set and durably back up a unique 32-byte production key before applying the migration or
+  starting the new application. The key must remain stable for version 1 ciphertext.
+- The current runtime intentionally fails closed on an unknown key version. A future key
+  rotation must deploy a keyring/re-encryption migration before incrementing the version.

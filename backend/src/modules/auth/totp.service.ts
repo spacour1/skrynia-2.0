@@ -69,6 +69,11 @@ function totpAt(secret: string, counter: number): string {
   return String(binCode % 10 ** TOTP_DIGITS).padStart(TOTP_DIGITS, "0");
 }
 
+export function generateTotpCode(secret: string, atTimeMs: number = Date.now()): string {
+  const counter = Math.floor(atTimeMs / 1000 / TOTP_PERIOD_SECONDS);
+  return totpAt(secret, counter);
+}
+
 /** Accepts the current 30s window and one step on either side, so a slow typist or minor clock drift between server and phone doesn't get rejected. */
 export function verifyTotpCode(secret: string, code: string, atTimeMs: number = Date.now()): boolean {
   const trimmed = code.replace(/\s+/g, "");

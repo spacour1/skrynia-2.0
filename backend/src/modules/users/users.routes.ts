@@ -20,7 +20,12 @@ import { sendPhoneVerificationCode, checkPhoneVerificationCode } from "../../com
 import { createTelegramConnectToken, disconnectTelegram } from "./telegram-link.service.js";
 import { getNotificationPreferences, updateNotificationPreferences } from "../notifications/preferences.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
-import { confirmTwoFactor, disableTwoFactor, setupTwoFactor } from "../auth/twofa.service.js";
+import {
+  confirmTwoFactor,
+  disableTwoFactor,
+  regenerateTwoFactorBackupCodes,
+  setupTwoFactor
+} from "../auth/twofa.service.js";
 import { deleteStoredFile } from "../storage/storage.routes.js";
 import { locales } from "../../i18n/config.js";
 import { getRequestLocale } from "../../i18n/t.js";
@@ -276,11 +281,32 @@ router.post(
   })
 );
 
+const twoFactorReauthenticationSchema = z.object({
+  currentPassword: z.string().min(1).max(256).optional(),
+  totpCode: z.string().min(4).max(16).optional()
+});
+
+function twoFactorAuditContext(req: AuthedRequest) {
+  const endpoint = req.route?.path ? `${req.baseUrl}${req.route.path}` : req.originalUrl;
+  return {
+    traceId: req.traceId,
+    method: req.method,
+    path: req.originalUrl,
+    endpoint
+  };
+}
+
 router.post(
   "/me/2fa/setup",
   authenticate,
+  authRateLimit,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { secret, otpauthUri } = await setupTwoFactor(req.user.id, req.user.email);
+    const reauthentication = twoFactorReauthenticationSchema.parse(req.body ?? {});
+    const { secret, otpauthUri } = await setupTwoFactor(
+      req.user.id,
+      req.user.email,
+      reauthentication
+    );
     res.json({ secret, otpauthUri });
   })
 );
@@ -290,27 +316,45 @@ const twoFactorEnableSchema = z.object({ code: z.string().min(4).max(16) });
 router.post(
   "/me/2fa/enable",
   authenticate,
+  authRateLimit,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = twoFactorEnableSchema.parse(req.body);
-    const backupCodes = await confirmTwoFactor(req.user.id, input.code);
+    const backupCodes = await confirmTwoFactor(
+      req.user.id,
+      input.code,
+      twoFactorAuditContext(req)
+    );
     res.json({ backupCodes });
   })
 );
 
-const twoFactorDisableSchema = z.object({ currentPassword: z.string().min(1) });
-
 router.post(
   "/me/2fa/disable",
   authenticate,
+  authRateLimit,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const input = twoFactorDisableSchema.parse(req.body);
-    const result = await pool.query(`select password_hash from users where id = $1`, [req.user.id]);
-    const hash = result.rows[0]?.password_hash;
-    if (!hash) throw badRequest("Password login is not enabled for this account");
-    const ok = await bcrypt.compare(input.currentPassword, hash);
-    if (!ok) throw badRequest("Current password is incorrect");
-    await disableTwoFactor(req.user.id);
+    const reauthentication = twoFactorReauthenticationSchema.parse(req.body ?? {});
+    await disableTwoFactor(
+      req.user.id,
+      reauthentication,
+      twoFactorAuditContext(req)
+    );
     res.json({ ok: true });
+  })
+);
+
+router.post(
+  "/me/2fa/backup-codes/regenerate",
+  authenticate,
+  authRateLimit,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const reauthentication = twoFactorReauthenticationSchema.parse(req.body ?? {});
+    const backupCodes = await regenerateTwoFactorBackupCodes(
+      req.user.id,
+      reauthentication,
+      twoFactorAuditContext(req)
+    );
+    res.json({ backupCodes });
   })
 );
 

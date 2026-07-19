@@ -6,6 +6,7 @@ import { attachWebSocketServer } from "./modules/chat/ws.service.js";
 import { startJobWorker } from "./modules/jobs/queue.js";
 import { initErrorTracking } from "./common/middleware/request-context.js";
 import { logger } from "./common/logger.js";
+import { migrateLegacyTwoFactorSecrets } from "./modules/auth/twofa.service.js";
 
 // Railway containers have no outbound IPv6 route, but Node's default DNS order
 // returns IPv6 addresses first - that made every SMTP connection to smtp.gmail.com
@@ -16,9 +17,21 @@ dns.setDefaultResultOrder("ipv4first");
 initErrorTracking();
 const app = createApp();
 const server = http.createServer(app);
-attachWebSocketServer(server);
-startJobWorker();
 
-server.listen(env.PORT, () => {
-  logger.info({ port: env.PORT }, "api_listening");
+async function startServer() {
+  const migratedTwoFactorSecrets = await migrateLegacyTwoFactorSecrets();
+  if (migratedTwoFactorSecrets > 0) {
+    logger.info({ count: migratedTwoFactorSecrets }, "legacy_two_factor_secrets_encrypted");
+  }
+
+  attachWebSocketServer(server);
+  startJobWorker();
+  server.listen(env.PORT, () => {
+    logger.info({ port: env.PORT }, "api_listening");
+  });
+}
+
+startServer().catch((error) => {
+  logger.fatal({ error }, "api_start_failed");
+  process.exitCode = 1;
 });

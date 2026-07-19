@@ -14,6 +14,10 @@ export type PhoneStep = "enter" | "code_sent";
 
 export type TwoFaStep = "idle" | "setup" | "backupCodes";
 
+export type TwoFaReauthAction = "replace" | "regenerate" | "disable";
+
+export type TwoFaReauthMethod = "password" | "totp";
+
 // Payment methods are presentational-only for now: there is no backend API for
 // them yet. These models define the contract the future API should satisfy.
 export type BankCard = {

@@ -13,7 +13,12 @@ import { PaymentsCard } from "./_components/PaymentsCard";
 import { ProfileCard } from "./_components/ProfileCard";
 import { SecurityCard } from "./_components/SecurityCard";
 import { emptyProfile, isStrongPassword } from "./_components/settings-state";
-import type { ProfileState } from "./_components/types";
+import type {
+  ProfileState,
+  TwoFaReauthAction,
+  TwoFaReauthMethod,
+  TwoFaStep
+} from "./_components/types";
 
 export default function SettingsPage() {
   return (
@@ -161,20 +166,42 @@ function SettingsContent() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notification-preferences"] })
   });
 
-  const [twoFaStep, setTwoFaStep] = useState<"idle" | "setup" | "backupCodes">("idle");
+  const [twoFaStep, setTwoFaStep] = useState<TwoFaStep>("idle");
   const [twoFaSetup, setTwoFaSetup] = useState<{ secret: string; otpauthUri: string } | null>(null);
   const [twoFaCode, setTwoFaCode] = useState("");
   const [backupCodes, setBackupCodes] = useState<string[]>([]);
   const [twoFaMessage, setTwoFaMessage] = useState("");
-  const [disablePassword, setDisablePassword] = useState("");
-  const [showDisablePrompt, setShowDisablePrompt] = useState(false);
+  const [twoFaReauthAction, setTwoFaReauthAction] = useState<TwoFaReauthAction | null>(null);
+  const [twoFaReauthMethod, setTwoFaReauthMethod] = useState<TwoFaReauthMethod>("password");
+  const [twoFaReauthValue, setTwoFaReauthValue] = useState("");
+
+  type TwoFaReauthentication = {
+    currentPassword?: string;
+    totpCode?: string;
+  };
+
+  function clearTwoFaReauthentication() {
+    setTwoFaReauthAction(null);
+    setTwoFaReauthValue("");
+  }
+
+  function currentTwoFaReauthentication(): TwoFaReauthentication {
+    return twoFaReauthMethod === "password"
+      ? { currentPassword: twoFaReauthValue }
+      : { totpCode: twoFaReauthValue.trim() };
+  }
 
   const startTwoFactorSetup = useMutation({
-    mutationFn: () => apiFetch<{ secret: string; otpauthUri: string }>("/users/me/2fa/setup", { method: "POST" }),
+    mutationFn: (reauthentication: TwoFaReauthentication) =>
+      apiFetch<{ secret: string; otpauthUri: string }>("/users/me/2fa/setup", {
+        method: "POST",
+        body: JSON.stringify(reauthentication)
+      }),
     onSuccess: (data) => {
       setTwoFaSetup(data);
       setTwoFaStep("setup");
       setTwoFaMessage("");
+      clearTwoFaReauthentication();
     },
     onError: (err) => setTwoFaMessage(err instanceof Error ? err.message : t("settings.twofa.setupFailed"))
   });
@@ -184,6 +211,7 @@ function SettingsContent() {
     onSuccess: ({ backupCodes: codes }) => {
       setBackupCodes(codes);
       setTwoFaStep("backupCodes");
+      setTwoFaSetup(null);
       setTwoFaCode("");
       queryClient.invalidateQueries({ queryKey: ["me-settings"] });
     },
@@ -191,16 +219,46 @@ function SettingsContent() {
   });
 
   const disableTwoFactorMutation = useMutation({
-    mutationFn: () => apiFetch("/users/me/2fa/disable", { method: "POST", body: JSON.stringify({ currentPassword: disablePassword }) }),
+    mutationFn: (reauthentication: TwoFaReauthentication) =>
+      apiFetch("/users/me/2fa/disable", {
+        method: "POST",
+        body: JSON.stringify(reauthentication)
+      }),
     onSuccess: () => {
-      setShowDisablePrompt(false);
-      setDisablePassword("");
+      clearTwoFaReauthentication();
       setTwoFaStep("idle");
       setTwoFaSetup(null);
+      setBackupCodes([]);
       queryClient.invalidateQueries({ queryKey: ["me-settings"] });
     },
     onError: (err) => setTwoFaMessage(err instanceof Error ? err.message : t("settings.twofa.disableFailed"))
   });
+
+  const regenerateTwoFactorBackupCodes = useMutation({
+    mutationFn: (reauthentication: TwoFaReauthentication) =>
+      apiFetch<{ backupCodes: string[] }>("/users/me/2fa/backup-codes/regenerate", {
+        method: "POST",
+        body: JSON.stringify(reauthentication)
+      }),
+    onSuccess: ({ backupCodes: codes }) => {
+      setBackupCodes(codes);
+      setTwoFaStep("backupCodes");
+      setTwoFaMessage("");
+      clearTwoFaReauthentication();
+    },
+    onError: (err) => setTwoFaMessage(err instanceof Error ? err.message : t("settings.twofa.regenerateFailed"))
+  });
+
+  function submitTwoFaSecurityAction() {
+    const reauthentication = currentTwoFaReauthentication();
+    if (twoFaReauthAction === "replace") {
+      startTwoFactorSetup.mutate(reauthentication);
+    } else if (twoFaReauthAction === "regenerate") {
+      regenerateTwoFactorBackupCodes.mutate(reauthentication);
+    } else if (twoFaReauthAction === "disable") {
+      disableTwoFactorMutation.mutate(reauthentication);
+    }
+  }
 
   const connectTelegram = useMutation({
     mutationFn: () => apiFetch<{ link: string }>("/users/me/telegram/connect", { method: "POST" }),
@@ -314,18 +372,22 @@ function SettingsContent() {
               code: twoFaCode,
               backupCodes,
               message: twoFaMessage,
-              disablePassword,
-              showDisablePrompt,
+              reauthAction: twoFaReauthAction,
+              reauthMethod: twoFaReauthMethod,
+              reauthValue: twoFaReauthValue,
               startPending: startTwoFactorSetup.isPending,
               confirmPending: confirmTwoFactorSetup.isPending,
               disablePending: disableTwoFactorMutation.isPending,
+              regeneratePending: regenerateTwoFactorBackupCodes.isPending,
               setStep: setTwoFaStep,
               setCode: setTwoFaCode,
-              setDisablePassword,
-              setShowDisablePrompt,
-              onStart: () => startTwoFactorSetup.mutate(),
+              setReauthAction: setTwoFaReauthAction,
+              setReauthMethod: setTwoFaReauthMethod,
+              setReauthValue: setTwoFaReauthValue,
+              onCancelReauthentication: clearTwoFaReauthentication,
+              onStart: () => startTwoFactorSetup.mutate({}),
               onConfirm: () => confirmTwoFactorSetup.mutate(),
-              onDisable: () => disableTwoFactorMutation.mutate()
+              onSubmitReauthentication: submitTwoFaSecurityAction
             }}
             t={t}
           />

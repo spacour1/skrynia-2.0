@@ -6,6 +6,8 @@ process.env.DATABASE_URL =
 // nothing to clean up between runs - they just sit until their TTL expires.
 process.env.REDIS_URL = process.env.TEST_REDIS_URL ?? "redis://localhost:6379/15";
 process.env.JWT_SECRET = "test-secret-aaaaaaaaaaaaaaaaaaaaaaaa";
+process.env.TWO_FACTOR_ENCRYPTION_KEY = "11".repeat(32);
+process.env.TWO_FACTOR_ENCRYPTION_KEY_VERSION = "1";
 process.env.METRICS_PASSWORD = "test-metrics-password-aaaa";
 // Pin this rather than inherit a developer's local .env: auth.test.ts asserts the
 // refresh cookie's Max-Age is well over 60 days, which only holds at the code's own

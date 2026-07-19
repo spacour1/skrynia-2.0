@@ -34,6 +34,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-marketplace}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-marketplace}
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env to a long random production secret}
+      TWO_FACTOR_ENCRYPTION_KEY: ${TWO_FACTOR_ENCRYPTION_KEY:?TWO_FACTOR_ENCRYPTION_KEY must be set in .env}
+      TWO_FACTOR_ENCRYPTION_KEY_VERSION: ${TWO_FACTOR_ENCRYPTION_KEY_VERSION:-1}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-http://localhost:4000}
       PLATFORM_FEE_BPS: ${PLATFORM_FEE_BPS:-1000}
@@ -93,6 +95,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-marketplace}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-marketplace}
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env to a long random production secret}
+      TWO_FACTOR_ENCRYPTION_KEY: ${TWO_FACTOR_ENCRYPTION_KEY:?TWO_FACTOR_ENCRYPTION_KEY must be set in .env}
+      TWO_FACTOR_ENCRYPTION_KEY_VERSION: ${TWO_FACTOR_ENCRYPTION_KEY_VERSION:-1}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-http://localhost:4000}
       PLATFORM_FEE_BPS: ${PLATFORM_FEE_BPS:-1000}

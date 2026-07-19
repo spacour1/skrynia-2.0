@@ -120,8 +120,33 @@ describe("catalog schema versions contract", () => {
 describe("2FA schema contract", () => {
   it("stores TOTP methods and hashed one-time backup codes per user", async () => {
     const userId = await createUser("user");
-    await pool.query(`insert into user_2fa_methods(user_id, secret, confirmed_at) values ($1, 'enc-secret', now())`, [userId]);
+    await pool.query(
+      `insert into user_2fa_methods(
+         user_id,
+         active_secret_ciphertext,
+         active_secret_iv,
+         active_secret_auth_tag,
+         active_secret_version,
+         confirmed_at
+       )
+       values ($1, 'ciphertext', 'iv', 'auth-tag', 1, now())`,
+      [userId]
+    );
     await pool.query(`insert into user_2fa_backup_codes(user_id, code_hash) values ($1, 'hash-1'), ($1, 'hash-2')`, [userId]);
+
+    const method = await pool.query<{
+      legacy_secret: string | null;
+      active_secret_ciphertext: string | null;
+    }>(
+      `select legacy_secret, active_secret_ciphertext
+       from user_2fa_methods
+       where user_id = $1`,
+      [userId]
+    );
+    expect(method.rows[0]).toEqual({
+      legacy_secret: null,
+      active_secret_ciphertext: "ciphertext"
+    });
 
     const codes = await pool.query<{ code_hash: string; used_at: string | null }>(
       `select code_hash, used_at from user_2fa_backup_codes where user_id = $1 order by code_hash`,

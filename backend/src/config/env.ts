@@ -3,6 +3,9 @@ import { z } from "zod";
 
 dotenv.config();
 
+const DEV_TWO_FACTOR_ENCRYPTION_KEY =
+  "6465762d74776f2d666163746f722d656e6372797074696f6e2d6b65792d3031";
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(4000),
@@ -10,6 +13,11 @@ const schema = z.object({
   REDIS_URL: z.string().optional(),
   PG_POOL_MAX: z.coerce.number().int().min(1).max(200).default(20),
   JWT_SECRET: z.string().min(24).default("dev-secret-change-me-for-production"),
+  TWO_FACTOR_ENCRYPTION_KEY: z
+    .string()
+    .regex(/^[a-fA-F0-9]{64}$/, "TWO_FACTOR_ENCRYPTION_KEY must be 64 hexadecimal characters")
+    .default(DEV_TWO_FACTOR_ENCRYPTION_KEY),
+  TWO_FACTOR_ENCRYPTION_KEY_VERSION: z.coerce.number().int().min(1).default(1),
   ACCESS_TOKEN_TTL_MIN: z.coerce.number().int().min(1).default(15),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).default(90),
   // Reserved for a future opt-in "stay signed in on this device" toggle; until that ships,
@@ -85,6 +93,14 @@ const schema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["JWT_SECRET"],
       message: "JWT_SECRET must be set to a real secret in production"
+    });
+  }
+
+  if (value.TWO_FACTOR_ENCRYPTION_KEY === DEV_TWO_FACTOR_ENCRYPTION_KEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["TWO_FACTOR_ENCRYPTION_KEY"],
+      message: "TWO_FACTOR_ENCRYPTION_KEY must be set to a unique 32-byte key in production"
     });
   }
 

@@ -79,6 +79,20 @@ const schema = z.object({
   API_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(10).default(300),
   WRITE_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(60),
   AUTH_RATE_LIMIT_PER_15MIN: z.coerce.number().int().min(1).default(20),
+  ANONYMOUS_WRITE_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).optional(),
+  CREDENTIAL_RATE_LIMIT_PER_15MIN: z.coerce.number().int().min(1).optional(),
+  CREDENTIAL_RATE_LIMIT_PER_IDENTITY_15MIN: z.coerce.number().int().min(1).optional(),
+  AUTHENTICATED_WRITE_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).optional(),
+  AUTHENTICATED_WRITE_RATE_LIMIT_PER_IP: z.coerce.number().int().min(1).optional(),
+  WS_TICKET_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(30),
+  WS_TICKET_RATE_LIMIT_PER_IP: z.coerce.number().int().min(1).default(120),
+  PHONE_OTP_RATE_LIMIT_PER_15MIN: z.coerce.number().int().min(1).default(10),
+  PHONE_OTP_RATE_LIMIT_PER_IP_15MIN: z.coerce.number().int().min(1).default(30),
+  EMAIL_VERIFICATION_RATE_LIMIT_PER_15MIN: z.coerce.number().int().min(1).default(10),
+  EMAIL_VERIFICATION_RATE_LIMIT_PER_IP_15MIN: z.coerce.number().int().min(1).default(30),
+  PASSWORD_RESET_RATE_LIMIT_PER_15MIN: z.coerce.number().int().min(1).default(10),
+  PASSWORD_RESET_RATE_LIMIT_PER_IP_15MIN: z.coerce.number().int().min(1).default(30),
+  WEBHOOK_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(60),
   METRICS_USER: z.string().default("metrics"),
   METRICS_PASSWORD: z.string().default("dev-metrics-password-change-me"),
   // Lets the dev/test payment-simulation endpoints (success/failure/wait_accept) run in a
@@ -128,7 +142,25 @@ const schema = z.object({
 
 });
 
-export const env = schema.parse(process.env);
+const parsedEnv = schema.parse(process.env);
+
+// Keep the old aggregate knobs as fallbacks so existing deployments retain their
+// effective ceilings while operators migrate to the separated limiter configuration.
+export const env = {
+  ...parsedEnv,
+  ANONYMOUS_WRITE_RATE_LIMIT_PER_MIN:
+    parsedEnv.ANONYMOUS_WRITE_RATE_LIMIT_PER_MIN ?? parsedEnv.WRITE_RATE_LIMIT_PER_MIN,
+  CREDENTIAL_RATE_LIMIT_PER_15MIN:
+    parsedEnv.CREDENTIAL_RATE_LIMIT_PER_15MIN ?? parsedEnv.AUTH_RATE_LIMIT_PER_15MIN,
+  CREDENTIAL_RATE_LIMIT_PER_IDENTITY_15MIN:
+    parsedEnv.CREDENTIAL_RATE_LIMIT_PER_IDENTITY_15MIN ??
+    parsedEnv.CREDENTIAL_RATE_LIMIT_PER_15MIN ??
+    parsedEnv.AUTH_RATE_LIMIT_PER_15MIN,
+  AUTHENTICATED_WRITE_RATE_LIMIT_PER_MIN:
+    parsedEnv.AUTHENTICATED_WRITE_RATE_LIMIT_PER_MIN ?? parsedEnv.WRITE_RATE_LIMIT_PER_MIN,
+  AUTHENTICATED_WRITE_RATE_LIMIT_PER_IP:
+    parsedEnv.AUTHENTICATED_WRITE_RATE_LIMIT_PER_IP ?? parsedEnv.API_RATE_LIMIT_PER_MIN
+};
 
 // Email is non-critical to keep the site running: warn instead of refusing to start, since
 // verify-email/password-reset just no-op (see common/mailer.ts) until Resend is configured.

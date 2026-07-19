@@ -5,7 +5,13 @@ import helmet from "helmet";
 import * as Sentry from "@sentry/node";
 import path from "node:path";
 import { env } from "./config/env.js";
-import { apiRateLimit, metricsAuth, publicReadRateLimit, writeRateLimit } from "./common/middleware/security.js";
+import {
+  anonymousWriteRateLimit,
+  authenticatedWriteRateLimit,
+  identifyRateLimitSubject,
+  metricsAuth,
+  publicReadRateLimit
+} from "./common/middleware/security.js";
 import { csrfProtection } from "./common/middleware/csrf.js";
 import { requestContext } from "./common/middleware/request-context.js";
 import { localeContext } from "./i18n/t.js";
@@ -48,8 +54,9 @@ export function createApp() {
   app.use(express.json({ limit: "1mb" }));
   app.use(requestContext);
   app.use(localeContext);
-  app.use(apiRateLimit);
-  app.use(writeRateLimit);
+  app.use(identifyRateLimitSubject);
+  app.use(anonymousWriteRateLimit);
+  app.use(authenticatedWriteRateLimit);
   app.use(csrfProtection);
   app.use("/uploads", express.static(path.resolve(env.LOCAL_UPLOAD_DIR)));
 

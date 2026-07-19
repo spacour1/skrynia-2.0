@@ -17,6 +17,9 @@ declare global {
     interface Request {
       user?: AuthUser;
       sessionId?: string;
+      rateLimitUserId?: string;
+      rateLimitSessionId?: string;
+      rateLimitPhoneHash?: string;
       traceId?: string;
       startTime?: bigint;
     }

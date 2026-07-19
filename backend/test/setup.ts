@@ -15,10 +15,24 @@ process.env.METRICS_PASSWORD = "test-metrics-password-aaaa";
 // this test for reasons that have nothing to do with the code under test.
 process.env.REFRESH_TOKEN_TTL_DAYS = "90";
 // The whole suite shares one IP (supertest/localhost) and the auth limiter's 15-minute
-// window survives in Redis (db 15) across runs - production-sized limits made full runs
-// and quick re-runs fail with 429s unrelated to the code under test. No test asserts
-// rate-limit behaviour, so raise the ceilings far above what the suite can generate.
+// window survives in Redis (db 15) across runs - production-sized limits made unrelated
+// integration suites fail on quick re-runs. The dedicated rate-limit test overrides these
+// before importing the app and clears only `rl:*` keys between its scenarios.
 process.env.AUTH_RATE_LIMIT_PER_15MIN = "100000";
 process.env.API_RATE_LIMIT_PER_MIN = "100000";
 process.env.WRITE_RATE_LIMIT_PER_MIN = "100000";
 process.env.PUBLIC_READ_RATE_LIMIT_PER_MIN = "100000";
+process.env.ANONYMOUS_WRITE_RATE_LIMIT_PER_MIN = "100000";
+process.env.CREDENTIAL_RATE_LIMIT_PER_15MIN = "100000";
+process.env.CREDENTIAL_RATE_LIMIT_PER_IDENTITY_15MIN = "100000";
+process.env.AUTHENTICATED_WRITE_RATE_LIMIT_PER_MIN = "100000";
+process.env.AUTHENTICATED_WRITE_RATE_LIMIT_PER_IP = "100000";
+process.env.WS_TICKET_RATE_LIMIT_PER_MIN = "100000";
+process.env.WS_TICKET_RATE_LIMIT_PER_IP = "100000";
+process.env.PHONE_OTP_RATE_LIMIT_PER_15MIN = "100000";
+process.env.PHONE_OTP_RATE_LIMIT_PER_IP_15MIN = "100000";
+process.env.EMAIL_VERIFICATION_RATE_LIMIT_PER_15MIN = "100000";
+process.env.EMAIL_VERIFICATION_RATE_LIMIT_PER_IP_15MIN = "100000";
+process.env.PASSWORD_RESET_RATE_LIMIT_PER_15MIN = "100000";
+process.env.PASSWORD_RESET_RATE_LIMIT_PER_IP_15MIN = "100000";
+process.env.WEBHOOK_RATE_LIMIT_PER_MIN = "100000";

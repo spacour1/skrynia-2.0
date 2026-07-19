@@ -6,7 +6,12 @@ import { pool } from "../../db/pool.js";
 import { ApiError, asyncHandler, badRequest, forbidden, serviceUnavailable } from "../../common/errors.js";
 import { getRedis } from "../../common/redis.js";
 import { authenticate } from "../../common/middleware/auth.js";
-import { authRateLimit } from "../../common/middleware/security.js";
+import {
+  credentialRateLimit,
+  emailVerificationRateLimit,
+  passwordResetRateLimit,
+  wsTicketRateLimit
+} from "../../common/middleware/security.js";
 import { REFRESH_COOKIE, setAuthCookies, clearAuthCookies } from "../../common/cookies.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { disconnectUser } from "../chat/ws.service.js";
@@ -64,7 +69,7 @@ const twoFactorVerifySchema = z.object({ twoFactorToken: z.string().min(1), code
 
 router.post(
   "/register",
-  authRateLimit,
+  credentialRateLimit,
   asyncHandler(async (req, res) => {
     const input = registerSchema.parse(req.body);
     const passwordHash = await bcrypt.hash(input.password, 12);
@@ -99,7 +104,7 @@ router.post(
 
 router.post(
   "/login",
-  authRateLimit,
+  credentialRateLimit,
   asyncHandler(async (req, res) => {
     const input = loginSchema.parse(req.body);
     const result = await pool.query(
@@ -130,7 +135,7 @@ router.post(
 
 router.post(
   "/2fa/verify",
-  authRateLimit,
+  credentialRateLimit,
   asyncHandler(async (req, res) => {
     const input = twoFactorVerifySchema.parse(req.body);
     let userId: string;
@@ -161,7 +166,7 @@ router.post(
 
 router.post(
   "/telegram",
-  authRateLimit,
+  credentialRateLimit,
   asyncHandler(async (req, res) => {
     const input = telegramSchema.parse(req.body);
     verifyTelegramAuth(input);
@@ -264,7 +269,7 @@ router.post(
 router.post(
   "/verify-email/request",
   authenticate,
-  authRateLimit,
+  emailVerificationRateLimit,
   asyncHandler(async (req: AuthedRequest, res) => {
     const result = await pool.query(
       `select id, email, display_name as "displayName",
@@ -305,7 +310,7 @@ router.post(
 
 router.post(
   "/verify-email/confirm",
-  authRateLimit,
+  emailVerificationRateLimit,
   asyncHandler(async (req, res) => {
     const input = emailVerifyConfirmSchema.parse(req.body);
     const userId = await consumeEmailVerificationToken(input.token);
@@ -316,7 +321,7 @@ router.post(
 
 router.post(
   "/password/forgot",
-  authRateLimit,
+  passwordResetRateLimit,
   asyncHandler(async (req, res) => {
     const input = passwordForgotSchema.parse(req.body);
     const result = await pool.query(`select id, email from users where email = $1`, [input.email.toLowerCase()]);
@@ -336,7 +341,7 @@ router.post(
 
 router.post(
   "/password/reset",
-  authRateLimit,
+  passwordResetRateLimit,
   asyncHandler(async (req, res) => {
     const input = passwordResetSchema.parse(req.body);
     const userId = await consumePasswordResetToken(input.token);
@@ -355,8 +360,8 @@ router.post(
 // user/session identity to the WS handshake on a possibly different domain.
 router.post(
   "/ws-ticket",
-  authRateLimit,
   authenticate,
+  wsTicketRateLimit,
   asyncHandler(async (req: AuthedRequest, res) => {
     const { ticket, expiresInSeconds } = await issueWsTicket({
       userId: req.user.id,

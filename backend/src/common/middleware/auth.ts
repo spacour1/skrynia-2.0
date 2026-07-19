@@ -55,6 +55,8 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
 
     req.user = user;
     req.sessionId = payload.jti;
+    req.rateLimitUserId = user.id;
+    req.rateLimitSessionId = payload.jti;
     Sentry.setUser({ id: user.id, segment: user.role });
     next();
   } catch (error) {
@@ -92,6 +94,8 @@ export const authenticateOptional: RequestHandler = async (req, _res, next) => {
     if (user && !user.isBanned) {
       req.user = user;
       req.sessionId = payload.jti;
+      req.rateLimitUserId = user.id;
+      req.rateLimitSessionId = payload.jti;
     }
     next();
   } catch {

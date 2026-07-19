@@ -293,7 +293,8 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
-    public payload?: unknown
+    public payload?: unknown,
+    public retryAfterSeconds?: number
   ) {
     super(message);
   }
@@ -302,6 +303,16 @@ export class ApiError extends Error {
     const normalized = this.payload as { error?: { code?: string } } | undefined;
     return normalized?.error?.code;
   }
+}
+
+function parseRetryAfter(value: string | null) {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds);
+
+  const retryAt = Date.parse(value);
+  if (!Number.isFinite(retryAt)) return undefined;
+  return Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
 }
 
 export function isEmailNotVerifiedError(error: unknown): boolean {
@@ -456,11 +467,21 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, isRet
     }
 
     const payload = await response.json().catch(() => ({}));
-    const normalized = payload as { message?: string; error?: { message?: string; code?: string; traceId?: string } };
+    const normalized = payload as {
+      message?: string;
+      error?: {
+        message?: string;
+        code?: string;
+        traceId?: string;
+        retryAfterSeconds?: number;
+      };
+    };
     throw new ApiError(
       normalized.error?.message ?? normalized.message ?? "Request failed",
       response.status,
-      payload
+      payload,
+      parseRetryAfter(response.headers.get("Retry-After")) ??
+        normalized.error?.retryAfterSeconds
     );
   }
 

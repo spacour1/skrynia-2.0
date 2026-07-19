@@ -234,3 +234,90 @@ message content updates, and dispute message deletion.
   financial state transition and are not replayed by the recovery worker. Making those
   side effects durable is intentionally deferred to the outbox stage.
 - The stale-claim timeout is currently a fixed 15 minutes.
+
+## Stage 4: separated rate limiting
+
+Status: complete.
+
+Planned commit: `fix(security): separate authenticated and credential rate limits`
+
+### Confirmed defects
+
+- Global API and write limiters ran before authentication, so `req.user` was never
+  available and every protected caller behind one address shared an IP-only bucket.
+- Login, registration, 2FA, authenticated security actions, and WebSocket ticket minting
+  shared the same auth limiter.
+- Authenticated writes had no independent user ceiling plus aggregate IP ceiling.
+- The 429 response did not explicitly guarantee `Retry-After`, and the frontend discarded
+  that response metadata.
+
+### Implementation
+
+- Added a pre-limiter identity middleware that verifies only the signed access-token
+  envelope and exposes user/session IDs. It never authorizes, checks revocation, queries
+  users, or turns an invalid token into an auth result; route `authenticate` remains the
+  security decision.
+- Replaced the pre-auth aggregate API limiter with distinct `publicReadRateLimit`,
+  `anonymousWriteRateLimit`, and `authenticatedWriteRateLimit` middleware. Authenticated
+  writes consume both a user bucket and an independent IP ceiling.
+- Added separate credential, WebSocket ticket, phone OTP, email verification, password
+  reset, and webhook limiters. Sensitive routes are excluded from general write buckets,
+  so their traffic cannot exhaust unrelated flows.
+- Credential keys use IP plus HMAC-SHA-256 email, Telegram identity, or 2FA-token identity
+  when available. Phone OTP uses user ID, HMAC-SHA-256 phone, and IP. Email and phone
+  values never appear in Redis keys as plaintext.
+- WebSocket tickets use a session bucket with user fallback plus an IP ceiling. Added
+  independent `WS_TICKET_RATE_LIMIT_PER_MIN` and `WS_TICKET_RATE_LIMIT_PER_IP`
+  configuration suitable for reconnect traffic.
+- Added configurable ceilings for every limiter family and wired them through production
+  Compose. Legacy aggregate environment settings remain as fallbacks during deployment
+  migration.
+- Every 429 now carries an integer `Retry-After` header and matching JSON value. Frontend
+  `ApiError.retryAfterSeconds` parses either delta-seconds or an HTTP date without
+  automatically replaying mutating requests.
+- No migration or financial, provider, ledger, payout, wallet, fee, or accounting change
+  was required.
+
+### Regression coverage
+
+Added six real HTTP scenarios with production-style Redis stores and deliberately low
+ceilings:
+
+1. Two authenticated users behind one IP have independent user buckets; the limited user
+   receives 429 while the other continues.
+2. One user cannot bypass the user ceiling by changing source IP.
+3. Multiple users still share the independent authenticated IP ceiling.
+4. Exhausting WS ticket issuance does not block login.
+5. Exhausting login attempts does not block WS reconnect ticket issuance.
+6. Credential identity is enforced across IPs, and Redis keys do not contain plaintext
+   email.
+
+The 429 scenario asserts a positive integer `Retry-After` header equal to the JSON value.
+The dedicated test overrides the suite-wide high ceilings before importing the app and
+clears only `rl:*` keys between cases.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `cd backend && npm run build` | PASS |
+| Targeted low-ceiling rate-limit run | PASS, 6/6 |
+| Neighboring auth/2FA/email/WS/validation run | PASS, 50/50 |
+| `cd backend && npm test` | PASS, 180/180 in 18/18 files |
+| Clean database migration smoke | PASS, all 30 migrations |
+| Rate-limit/schema tests on clean database | PASS, 12/12 |
+| `cd frontend && npm run typecheck` | PASS |
+| `cd frontend && npm run i18n:check` | PASS, 0 errors and 25 baseline warnings |
+| `cd frontend && npm test` | NOT AVAILABLE, package has no `test` script |
+| `cd frontend && npm run build` | PASS, with existing Sentry/OpenTelemetry warnings |
+| `docker compose config --quiet` with required secrets | PASS |
+
+### Deployment constraints
+
+- Configure `REDIS_URL` on every API replica so buckets are shared. Without Redis, the
+  documented fallback is an in-memory bucket per process.
+- Set `TRUST_PROXY` to the exact trusted proxy-hop count; incorrect proxy trust makes IP
+  ceilings either shared too broadly or derived from an untrusted forwarding header.
+- New sensitive write endpoints must be assigned to a dedicated limiter or removed from
+  the general-write exclusion registry in the same change.

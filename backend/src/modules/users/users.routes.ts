@@ -6,7 +6,10 @@ import { asyncHandler, badRequest, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { requirePhoneVerified } from "../../common/middleware/require-phone-verified.js";
-import { authRateLimit } from "../../common/middleware/security.js";
+import {
+  credentialRateLimit,
+  phoneOtpRateLimit
+} from "../../common/middleware/security.js";
 import { cacheGet, cacheSet } from "../../common/redis.js";
 import { moneyToCents } from "../../common/validation.js";
 import type { AuthedRequest } from "../../common/types.js";
@@ -157,6 +160,7 @@ router.patch(
 router.post(
   "/me/password",
   authenticate,
+  credentialRateLimit,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = changePasswordSchema.parse(req.body);
     const result = await pool.query(`select password_hash from users where id = $1`, [req.user.id]);
@@ -247,7 +251,7 @@ const phoneConfirmSchema = z.object({ code: z.string().min(4).max(8) });
 router.post(
   "/me/phone/request",
   authenticate,
-  authRateLimit,
+  phoneOtpRateLimit,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = phoneRequestSchema.parse(req.body);
     await checkPhoneResendRateLimit(req.user.id);
@@ -266,7 +270,7 @@ router.post(
 router.post(
   "/me/phone/confirm",
   authenticate,
-  authRateLimit,
+  phoneOtpRateLimit,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = phoneConfirmSchema.parse(req.body);
     const result = await pool.query(`select phone from users where id = $1`, [req.user.id]);
@@ -299,7 +303,7 @@ function twoFactorAuditContext(req: AuthedRequest) {
 router.post(
   "/me/2fa/setup",
   authenticate,
-  authRateLimit,
+  credentialRateLimit,
   asyncHandler(async (req: AuthedRequest, res) => {
     const reauthentication = twoFactorReauthenticationSchema.parse(req.body ?? {});
     const { secret, otpauthUri } = await setupTwoFactor(
@@ -316,7 +320,7 @@ const twoFactorEnableSchema = z.object({ code: z.string().min(4).max(16) });
 router.post(
   "/me/2fa/enable",
   authenticate,
-  authRateLimit,
+  credentialRateLimit,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = twoFactorEnableSchema.parse(req.body);
     const backupCodes = await confirmTwoFactor(
@@ -331,7 +335,7 @@ router.post(
 router.post(
   "/me/2fa/disable",
   authenticate,
-  authRateLimit,
+  credentialRateLimit,
   asyncHandler(async (req: AuthedRequest, res) => {
     const reauthentication = twoFactorReauthenticationSchema.parse(req.body ?? {});
     await disableTwoFactor(
@@ -346,7 +350,7 @@ router.post(
 router.post(
   "/me/2fa/backup-codes/regenerate",
   authenticate,
-  authRateLimit,
+  credentialRateLimit,
   asyncHandler(async (req: AuthedRequest, res) => {
     const reauthentication = twoFactorReauthenticationSchema.parse(req.body ?? {});
     const backupCodes = await regenerateTwoFactorBackupCodes(
@@ -361,7 +365,7 @@ router.post(
 router.post(
   "/me/telegram/connect",
   authenticate,
-  authRateLimit,
+  credentialRateLimit,
   asyncHandler(async (req: AuthedRequest, res) => {
     const { token, link } = await createTelegramConnectToken(req.user.id);
     res.json({ token, link });

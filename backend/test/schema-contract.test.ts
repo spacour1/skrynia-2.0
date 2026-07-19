@@ -117,6 +117,60 @@ describe("catalog schema versions contract", () => {
   });
 });
 
+describe("product section/schema database contract", () => {
+  it("requires every product section/schema pair to reference the same section schema", async () => {
+    const admin = await createUser("admin");
+    const seller = await createUser("user");
+    const group = await pool.query<{ id: string }>(
+      `insert into catalog_groups(slug, name, status) values ($1, 'G', 'active') returning id`,
+      [`g-${randomUUID().slice(0, 8)}`]
+    );
+    const game = await pool.query<{ id: string }>(
+      `insert into games(group_id, slug, name, status) values ($1, $2, 'Game', 'active') returning id`,
+      [group.rows[0].id, `i-${randomUUID().slice(0, 8)}`]
+    );
+    const category = await pool.query<{ id: string }>(`select id from categories limit 1`);
+    const section = await pool.query<{ id: string }>(
+      `insert into game_sections(game_id, category_id, slug, name, status, current_schema_version)
+       values ($1, $2, $3, 'S', 'active', 1) returning id`,
+      [game.rows[0].id, category.rows[0].id, `s-${randomUUID().slice(0, 8)}`]
+    );
+    await pool.query(
+      `insert into catalog_section_schemas(section_id, version, schema, status, created_by)
+       values ($1, 1, '{"fields":[]}', 'active', $2)`,
+      [section.rows[0].id, admin]
+    );
+
+    const baseValues = [
+      seller,
+      category.rows[0].id,
+      game.rows[0].id,
+      section.rows[0].id
+    ];
+    await expect(
+      pool.query(
+        `insert into products(
+           seller_id, category_id, game_id, section_id, schema_version,
+           title, description, price_cents, currency, stock, delivery_type
+         )
+         values ($1, $2, $3, $4, null, 'Missing version', 'A sufficiently long description', 1000, 'UAH', 1, 'manual')`,
+        baseValues
+      )
+    ).rejects.toThrow(/products_section_schema_nullity_check/);
+
+    await expect(
+      pool.query(
+        `insert into products(
+           seller_id, category_id, game_id, section_id, schema_version,
+           title, description, price_cents, currency, stock, delivery_type
+         )
+         values ($1, $2, $3, $4, 99, 'Missing pair', 'A sufficiently long description', 1000, 'UAH', 1, 'manual')`,
+        baseValues
+      )
+    ).rejects.toThrow(/products_section_schema_fk/);
+  });
+});
+
 describe("2FA schema contract", () => {
   it("stores TOTP methods and hashed one-time backup codes per user", async () => {
     const userId = await createUser("user");

@@ -1,4 +1,4 @@
-import { inTx, pool } from "../../db/pool.js";
+import { inTx, pool, type DbClient } from "../../db/pool.js";
 import { badRequest, notFound } from "../../common/errors.js";
 import { parseCatalogSchema, validateMetadataAgainstSchema, type CatalogSchema } from "./catalog.validation.js";
 import { recordCatalogAudit } from "./catalog.helpers.js";
@@ -135,11 +135,12 @@ export async function getActiveSchemaForSection(sectionId: string): Promise<Cata
  */
 export async function validateLotMetadata(
   sectionId: string | null,
-  rawMetadata: Record<string, unknown>
+  rawMetadata: Record<string, unknown>,
+  db: DbClient = pool
 ): Promise<{ metadata: Record<string, unknown>; schemaVersion: number | null }> {
   if (!sectionId) return { metadata: rawMetadata, schemaVersion: null };
 
-  const result = await pool.query(
+  const result = await db.query(
     `select gs.current_schema_version as "schemaVersion", cs.schema
      from game_sections gs
      left join catalog_section_schemas cs on cs.section_id = gs.id and cs.version = gs.current_schema_version and cs.status = 'active'
@@ -169,6 +170,7 @@ export type ActiveSectionChain = {
   groupId: string;
   productType: string;
   allowedDeliveryTypes: string[];
+  schemaVersion: number;
 };
 
 /**
@@ -178,8 +180,12 @@ export type ActiveSectionChain = {
  * can never be attached to a section that isn't fully live, regardless of which route it
  * comes through.
  */
-export async function resolveActiveSectionChain(sectionId: string): Promise<ActiveSectionChain> {
-  const result = await pool.query(
+export async function resolveActiveSectionChain(
+  sectionId: string,
+  db: DbClient = pool,
+  options: { lock?: boolean } = {}
+): Promise<ActiveSectionChain> {
+  const result = await db.query(
     `select
        gs.id as "sectionId", gs.category_id as "categoryId", gs.game_id as "gameId",
        gs.product_type as "productType", gs.allowed_delivery_types as "allowedDeliveryTypes",
@@ -191,7 +197,8 @@ export async function resolveActiveSectionChain(sectionId: string): Promise<Acti
      join games g on g.id = gs.game_id
      join catalog_groups cg on cg.id = g.group_id
      left join catalog_section_schemas cs on cs.section_id = gs.id and cs.version = gs.current_schema_version
-     where gs.id = $1`,
+     where gs.id = $1
+     ${options.lock ? "for share of gs, g, cg" : ""}`,
     [sectionId]
   );
   const row = result.rows[0];
@@ -209,6 +216,7 @@ export async function resolveActiveSectionChain(sectionId: string): Promise<Acti
     gameId: row.gameId,
     groupId: row.groupId,
     productType: row.productType,
-    allowedDeliveryTypes: row.allowedDeliveryTypes
+    allowedDeliveryTypes: row.allowedDeliveryTypes,
+    schemaVersion: row.currentSchemaVersion
   };
 }

@@ -410,3 +410,78 @@ Backend integration coverage verifies:
 - Reverse proxies must preserve `X-Session-Rotated`, and production deployments should
   leave cross-origin cookie fallback disabled unless the cookie domain is intentionally
   configured for that WebSocket origin.
+
+## Stage 6: product section/schema consistency
+
+Status: complete.
+
+Planned commit: `fix(catalog): preserve product section schema consistency`
+
+### Confirmed defects
+
+- `PATCH /marketplace/products/:id` allowed `sectionId` to change while leaving metadata
+  and `schema_version` pinned to the previous section.
+- Explicit `metadata: null` skipped schema validation and could clear required fields
+  without updating the schema version.
+- Product activation checked the active catalog chain and delivery type, but did not
+  reject a stale schema pair or revalidate the stored metadata against the current schema.
+- Product creation and update resolved catalog state outside the write transaction,
+  leaving a race with schema publication or catalog status changes.
+- PostgreSQL did not require a sectioned product to reference an existing schema version
+  from that section.
+
+### Implementation
+
+- A real section change now requires `metadata` in the same request and returns
+  `400 validation_error` before any product field is changed when it is absent.
+- Product creation and update now resolve the active group/item/section chain, validate
+  delivery and metadata, and write the product in one transaction. Section, item, and
+  group rows are share-locked while the contract is selected.
+- `PATCH` locks the product row with `FOR UPDATE`, validates `metadata: null` as an empty
+  object, and writes `section_id`, `schema_version`, and filtered metadata together.
+- Reactivation repeats catalog, active-schema, required-field, metadata, and delivery
+  validation. A stale schema pair cannot be activated without resubmitting current
+  metadata; a valid resubmission advances the product to the active schema version.
+- Existing section-owned category, game, and product type values are no longer
+  overwritten by unrelated client fields. Reactivation re-derives them from the section.
+- Added migration `1783290500000_enforce-product-section-schema-consistency.sql`. It
+  backfills legacy null versions from an existing current section schema, clears versions
+  on sectionless products, enforces pair nullability, and adds the composite foreign key:
+  `(section_id, schema_version) -> catalog_section_schemas(section_id, version)`.
+- No frontend or financial, provider, ledger, payout, wallet, fee, or accounting change
+  was required.
+
+### Regression coverage
+
+1. Changing section A to B without metadata returns 400 and preserves the old section,
+   schema version, metadata, title, and media.
+2. Changing to section B with valid metadata updates all three contract fields together
+   and drops metadata keys not declared by B.
+3. Invalid new-section metadata leaves every product field and media row unchanged.
+4. A paused product pinned to schema v1 cannot reactivate after v2 publication without
+   current metadata; valid v2 metadata updates the pair and activates it.
+5. PostgreSQL rejects both a section without a schema version and a non-existent
+   section/version pair.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `cd backend && npm run build` | PASS |
+| Targeted catalog/schema-contract run | PASS, 57/57 |
+| `cd backend && npm test` | PASS, 190/190 in 18/18 files |
+| Clean database migration smoke | PASS, all 31 migrations |
+| New constraints on clean database | PASS, both validated |
+| Catalog/schema-contract tests on clean database | PASS, 57/57 |
+
+### Remaining constraints
+
+- PostgreSQL guarantees that the structural section/version pair exists, while JSON
+  metadata conformance remains an application-level validation because it depends on the
+  versioned dynamic schema document.
+- Active products intentionally remain pinned to their historical schema when a new
+  version is published. The current schema is required again when metadata changes or a
+  paused product is reactivated.
+- A deployment containing an irreparable pre-existing mismatched non-null pair will stop
+  during constraint validation instead of silently assigning metadata to another schema.

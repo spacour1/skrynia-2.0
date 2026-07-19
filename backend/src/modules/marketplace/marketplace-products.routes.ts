@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { inTx, pool, type DbClient } from "../../db/pool.js";
-import { asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
+import { ApiError, asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { moneyToCents } from "../../common/validation.js";
@@ -91,6 +91,7 @@ type Categorization = {
   productType: string | null;
   /** null = no restriction (sectionless legacy path); a section always has a concrete list. */
   allowedDeliveryTypes: string[] | null;
+  activeSchemaVersion: number | null;
 };
 
 /**
@@ -103,9 +104,13 @@ type Categorization = {
  * validates) any client-supplied categoryId/gameId/productType against the section's own
  * record.
  */
-async function resolveCategorization(input: { categoryId?: string | null; gameId?: string | null; sectionId?: string | null }): Promise<Categorization> {
+async function resolveCategorization(
+  input: { categoryId?: string | null; gameId?: string | null; sectionId?: string | null },
+  db: DbClient = pool,
+  lockSection = false
+): Promise<Categorization> {
   if (input.sectionId) {
-    const chain = await resolveActiveSectionChain(input.sectionId);
+    const chain = await resolveActiveSectionChain(input.sectionId, db, { lock: lockSection });
     if (input.gameId && input.gameId !== chain.gameId) {
       throw badRequest("Section does not belong to the selected game");
     }
@@ -114,11 +119,19 @@ async function resolveCategorization(input: { categoryId?: string | null; gameId
       gameId: chain.gameId,
       sectionId: chain.sectionId,
       productType: chain.productType,
-      allowedDeliveryTypes: chain.allowedDeliveryTypes
+      allowedDeliveryTypes: chain.allowedDeliveryTypes,
+      activeSchemaVersion: chain.schemaVersion
     };
   }
   if (!input.categoryId) throw badRequest("categoryId or sectionId is required");
-  return { categoryId: input.categoryId, gameId: input.gameId ?? null, sectionId: null, productType: null, allowedDeliveryTypes: null };
+  return {
+    categoryId: input.categoryId,
+    gameId: input.gameId ?? null,
+    sectionId: null,
+    productType: null,
+    allowedDeliveryTypes: null,
+    activeSchemaVersion: null
+  };
 }
 
 function assertDeliveryTypeAllowed(allowedDeliveryTypes: string[] | null | undefined, deliveryType: string) {
@@ -133,12 +146,14 @@ router.post(
   requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = productSchema.parse(req.body);
-    const categorization = await resolveCategorization(input);
-    assertDeliveryTypeAllowed(categorization.allowedDeliveryTypes, input.deliveryType);
-    // The section's schema (not the frontend) decides which metadata keys are valid - see
-    // catalog.validation.ts. Unknown keys are dropped; missing required ones reject the lot.
-    const { metadata, schemaVersion } = await validateLotMetadata(categorization.sectionId, input.metadata);
-    const productId = await inTx(async (client) => {
+    const created = await inTx(async (client) => {
+      const categorization = await resolveCategorization(input, client, true);
+      assertDeliveryTypeAllowed(categorization.allowedDeliveryTypes, input.deliveryType);
+      // The section's schema (not the frontend) decides which metadata keys are valid.
+      const { metadata, schemaVersion } = await validateLotMetadata(categorization.sectionId, input.metadata, client);
+      if (schemaVersion !== categorization.activeSchemaVersion) {
+        throw new ApiError(400, "The section schema changed while validating metadata", "validation_error");
+      }
       const result = await client.query(
         `insert into products(
            seller_id, category_id, game_id, section_id, title, description, price_cents, old_price_cents,
@@ -167,16 +182,16 @@ router.post(
         ]
       );
       if (input.media?.length) await replaceProductMedia(client, result.rows[0].id, input.media);
-      return result.rows[0].id as string;
+      return { productId: result.rows[0].id as string, categorization };
     });
     await invalidateProductCaches({
-      productId,
+      productId: created.productId,
       sellerId: req.user.id,
-      categoryId: categorization.categoryId,
-      gameId: categorization.gameId,
-      sectionId: categorization.sectionId
+      categoryId: created.categorization.categoryId,
+      gameId: created.categorization.gameId,
+      sectionId: created.categorization.sectionId
     });
-    res.status(201).json({ id: productId });
+    res.status(201).json({ id: created.productId });
   })
 );
 
@@ -194,87 +209,127 @@ router.patch(
     const id = z.string().uuid().parse(req.params.id);
     const input = productPatchSchema.parse(req.body);
 
-    const existing = await pool.query<ProductCacheContext & { deliveryType: string }>(
-      `select id as "productId", seller_id as "sellerId", category_id as "categoryId",
-              game_id as "gameId", section_id as "sectionId", delivery_type as "deliveryType"
-       from products where id = $1 and status != 'deleted'`,
-      [id]
-    );
-    const existingProduct = existing.rows[0];
-    if (!existingProduct) throw notFound("Product not found");
-    if (existingProduct.sellerId !== req.user.id && req.user.role !== "admin") throw forbidden();
+    const result = await inTx(async (client) => {
+      const existing = await client.query<
+        ProductCacheContext & {
+          deliveryType: string;
+          metadata: Record<string, unknown>;
+          schemaVersion: number | null;
+        }
+      >(
+        `select id as "productId", seller_id as "sellerId", category_id as "categoryId",
+                game_id as "gameId", section_id as "sectionId", delivery_type as "deliveryType",
+                metadata, schema_version as "schemaVersion"
+         from products where id = $1 and status != 'deleted'
+         for update`,
+        [id]
+      );
+      const existingProduct = existing.rows[0];
+      if (!existingProduct) throw notFound("Product not found");
+      if (existingProduct.sellerId !== req.user.id && req.user.role !== "admin") throw forbidden();
 
-    // Only re-derive categorization when the caller is actually changing the section;
-    // otherwise leave category/game/section untouched rather than trusting a stray categoryId.
-    // sectionId === null is a deliberate "detach from this section" request and needs its
-    // own categoryId to fall back to, same as creating a sectionless listing does.
-    let categorization: { categoryId?: string | null; gameId?: string | null; sectionId?: string | null; productType?: string | null };
-    // null = "no restriction known yet"; undefined stays undefined only for the "section
-    // unchanged and nothing that needs re-checking" case below.
-    let allowedDeliveryTypes: string[] | null | undefined;
-    if (input.sectionId) {
-      const resolved = await resolveCategorization(input);
-      categorization = resolved;
-      allowedDeliveryTypes = resolved.allowedDeliveryTypes;
-    } else if (input.sectionId === null) {
-      if (!input.categoryId) throw badRequest("categoryId is required when clearing sectionId");
-      categorization = { categoryId: input.categoryId, gameId: input.gameId ?? null, sectionId: null, productType: input.productType };
-      allowedDeliveryTypes = null;
-    } else {
-      categorization = { categoryId: input.categoryId, gameId: input.gameId, sectionId: undefined, productType: undefined };
-
-      // sectionId isn't changing, but touching metadata/deliveryType or reactivating the lot
-      // still requires the *existing* section to be a fully active chain right now - plain
-      // cosmetic edits (title/description/price/media) on a lot sitting in an archived
-      // section stay allowed and never reach this check.
-      const needsActiveChainCheck = input.metadata != null || input.deliveryType !== undefined || input.status === "active";
-      if (needsActiveChainCheck && existingProduct.sectionId) {
-        allowedDeliveryTypes = (await resolveActiveSectionChain(existingProduct.sectionId)).allowedDeliveryTypes;
+      const existingSectionId = existingProduct.sectionId ?? null;
+      const targetSectionId = input.sectionId === undefined ? existingSectionId : input.sectionId;
+      const sectionChanged = input.sectionId !== undefined && targetSectionId !== existingSectionId;
+      const metadataProvided = input.metadata !== undefined;
+      if (sectionChanged && !metadataProvided) {
+        throw new ApiError(400, "metadata is required when changing sectionId", "validation_error");
       }
-    }
-    if (allowedDeliveryTypes) {
-      assertDeliveryTypeAllowed(allowedDeliveryTypes, input.deliveryType ?? existingProduct.deliveryType);
-    }
 
-    const priceCents = input.price === undefined ? undefined : moneyToCents(input.price);
-    const oldPriceCents = input.oldPrice === undefined ? undefined : input.oldPrice === null ? null : moneyToCents(input.oldPrice);
+      let categorization: {
+        categoryId?: string | null;
+        gameId?: string | null;
+        sectionId?: string | null;
+        productType?: string | null;
+      };
+      let allowedDeliveryTypes: string[] | null | undefined;
+      let activeSchemaVersion: number | null | undefined;
 
-    // Only re-validate metadata when the caller is actually sending new metadata content;
-    // an explicit null (clear to {}) or an omitted field needs no schema check. schema_version
-    // is only updated alongside a metadata re-validation - changing sectionId alone (without
-    // resending metadata in the same request) leaves the old metadata/version pair as-is
-    // rather than silently pointing schema_version at a schema for a different section.
-    const effectiveSectionId = categorization.sectionId !== undefined ? categorization.sectionId : existingProduct.sectionId;
-    let validatedMetadata: Record<string, unknown> | null | undefined = input.metadata;
-    let schemaVersion: number | undefined;
-    if (input.metadata != null) {
-      const validated = await validateLotMetadata(effectiveSectionId ?? null, input.metadata);
-      validatedMetadata = validated.metadata;
-      schemaVersion = validated.schemaVersion ?? undefined;
-    }
+      if (input.sectionId) {
+        const resolved = await resolveCategorization(input, client, true);
+        categorization = resolved;
+        allowedDeliveryTypes = resolved.allowedDeliveryTypes;
+        activeSchemaVersion = resolved.activeSchemaVersion;
+      } else if (input.sectionId === null && sectionChanged) {
+        if (!input.categoryId) throw badRequest("categoryId is required when clearing sectionId");
+        categorization = {
+          categoryId: input.categoryId,
+          gameId: input.gameId ?? null,
+          sectionId: null,
+          productType: input.productType
+        };
+        allowedDeliveryTypes = null;
+        activeSchemaVersion = null;
+      } else {
+        // A section owns its category, game, and product type. Ignore those client fields
+        // unless this is a legacy sectionless listing.
+        categorization = existingSectionId
+          ? { categoryId: undefined, gameId: undefined, sectionId: undefined, productType: undefined }
+          : { categoryId: input.categoryId, gameId: input.gameId, sectionId: undefined, productType: input.productType };
 
-    const { sets, values } = buildDynamicUpdate(id, {
-      category_id: categorization.categoryId,
-      game_id: categorization.gameId,
-      section_id: categorization.sectionId,
-      title: input.title,
-      description: input.description,
-      price_cents: priceCents,
-      currency: input.currency?.toUpperCase(),
-      stock: input.stock,
-      delivery_type: input.deliveryType,
-      product_type: categorization.productType ?? input.productType,
-      old_price_cents: oldPriceCents,
-      server: input.server,
-      platform: input.platform,
-      delivery_template: input.deliveryTemplate,
-      // metadata's column is `not null default '{}'`, so an explicit null "clears" to {}
-      // rather than to an actual SQL null.
-      metadata: validatedMetadata === null ? {} : validatedMetadata,
-      schema_version: schemaVersion,
-      status: input.status
-    });
-    const updatedProduct = await inTx(async (client) => {
+        const needsActiveChainCheck = metadataProvided || input.deliveryType !== undefined || input.status === "active";
+        if (needsActiveChainCheck && existingSectionId) {
+          const chain = await resolveActiveSectionChain(existingSectionId, client, { lock: true });
+          allowedDeliveryTypes = chain.allowedDeliveryTypes;
+          activeSchemaVersion = chain.schemaVersion;
+          if (input.status === "active") {
+            categorization.categoryId = chain.categoryId;
+            categorization.gameId = chain.gameId;
+            categorization.productType = chain.productType;
+          }
+        }
+      }
+
+      if (allowedDeliveryTypes) {
+        assertDeliveryTypeAllowed(allowedDeliveryTypes, input.deliveryType ?? existingProduct.deliveryType);
+      }
+      if (
+        input.status === "active" &&
+        targetSectionId &&
+        !metadataProvided &&
+        existingProduct.schemaVersion !== activeSchemaVersion
+      ) {
+        throw new ApiError(
+          400,
+          "metadata must be resubmitted before activating a product with an outdated schema",
+          "validation_error"
+        );
+      }
+
+      let validatedMetadata: Record<string, unknown> | undefined;
+      let schemaVersion: number | null | undefined;
+      if (metadataProvided || input.status === "active") {
+        const rawMetadata = metadataProvided ? input.metadata ?? {} : existingProduct.metadata;
+        const validated = await validateLotMetadata(targetSectionId, rawMetadata, client);
+        if (targetSectionId && validated.schemaVersion !== activeSchemaVersion) {
+          throw new ApiError(400, "The section schema changed while validating metadata", "validation_error");
+        }
+        validatedMetadata = validated.metadata;
+        schemaVersion = validated.schemaVersion;
+      }
+
+      const priceCents = input.price === undefined ? undefined : moneyToCents(input.price);
+      const oldPriceCents = input.oldPrice === undefined ? undefined : input.oldPrice === null ? null : moneyToCents(input.oldPrice);
+      const { sets, values } = buildDynamicUpdate(id, {
+        category_id: categorization.categoryId,
+        game_id: categorization.gameId,
+        section_id: categorization.sectionId,
+        title: input.title,
+        description: input.description,
+        price_cents: priceCents,
+        currency: input.currency?.toUpperCase(),
+        stock: input.stock,
+        delivery_type: input.deliveryType,
+        product_type: categorization.productType,
+        old_price_cents: oldPriceCents,
+        server: input.server,
+        platform: input.platform,
+        delivery_template: input.deliveryTemplate,
+        metadata: validatedMetadata,
+        schema_version: schemaVersion,
+        status: input.status
+      });
+
       let context: ProductCacheContext = existingProduct;
       if (sets.length) {
         sets.push("updated_at = now()");
@@ -287,9 +342,9 @@ router.patch(
         context = updated.rows[0];
       }
       if (input.media !== undefined) await replaceProductMedia(client, id, input.media);
-      return context;
+      return { existingProduct, updatedProduct: context };
     });
-    await invalidateProductCacheBatch([existingProduct, updatedProduct]);
+    await invalidateProductCacheBatch([result.existingProduct, result.updatedProduct]);
     res.json({ ok: true });
   })
 );

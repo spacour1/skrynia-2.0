@@ -72,9 +72,29 @@ async function createGroupItemSection(adminId: string) {
 
 async function createProductForSection(sellerId: string, sectionId: string, gameId: string, metadata: Record<string, unknown> = {}) {
   const category = await pool.query<{ id: string }>(`select id from categories limit 1`);
+  const section = await pool.query<{ currentSchemaVersion: number | null }>(
+    `select current_schema_version as "currentSchemaVersion" from game_sections where id = $1`,
+    [sectionId]
+  );
+  if (section.rows[0]?.currentSchemaVersion === null) {
+    await pool.query(
+      `insert into catalog_section_schemas(section_id, version, schema, status)
+       values ($1, 1, '{"fields":[]}', 'draft')
+       on conflict (section_id, version) do nothing`,
+      [sectionId]
+    );
+    await pool.query(`update game_sections set current_schema_version = 1 where id = $1`, [sectionId]);
+  }
   const result = await pool.query<{ id: string }>(
-    `insert into products(seller_id, category_id, game_id, section_id, title, description, price_cents, currency, stock, delivery_type, metadata)
-     values ($1, $2, $3, $4, 'Test product', 'Test description that is long enough', 1000, 'UAH', 5, 'manual', $5)
+    `insert into products(
+       seller_id, category_id, game_id, section_id, title, description,
+       price_cents, currency, stock, delivery_type, metadata, schema_version
+     )
+     values (
+       $1, $2, $3, $4, 'Test product', 'Test description that is long enough',
+       1000, 'UAH', 5, 'manual', $5,
+       (select current_schema_version from game_sections where id = $4)
+     )
      returning id`,
     [sellerId, category.rows[0].id, gameId, sectionId, metadata]
   );
@@ -488,6 +508,145 @@ describe("allowedDeliveryTypes enforcement", () => {
     const patched = await seller.patch(`/marketplace/products/${created.body.id}`).send({ deliveryType: "instant" });
     expect(patched.status).toBe(400);
     expect(patched.body.error.message).toMatch(/does not allow delivery type/);
+  });
+});
+
+describe("product section/schema consistency", () => {
+  const rankField = {
+    key: "rank",
+    label: "Rank",
+    type: "select",
+    required: true,
+    options: ["Herald", "Divine"],
+    filterable: true,
+    showInCard: true,
+    sortOrder: 1
+  };
+  const regionField = {
+    key: "region",
+    label: "Region",
+    type: "select",
+    required: true,
+    options: ["EU", "NA"],
+    filterable: true,
+    showInCard: true,
+    sortOrder: 1
+  };
+
+  async function createProductInSectionA() {
+    const admin = await createUser("admin");
+    const seller = await agentForUser(await verifiedSeller(), "user");
+    const sectionA = await activeSectionWithSchema(admin, [rankField]);
+    const sectionB = await activeSectionWithSchema(admin, [regionField]);
+    const created = await seller.post("/marketplace/products").send({
+      sectionId: sectionA.section.id,
+      title: "Section consistency lot",
+      description: "A description that is definitely long enough for validation",
+      price: "100",
+      deliveryType: "manual",
+      metadata: { rank: "Divine" }
+    });
+    expect(created.status).toBe(201);
+    return { admin, seller, productId: created.body.id as string, sectionA, sectionB };
+  }
+
+  async function loadContract(productId: string) {
+    const result = await pool.query<{
+      sectionId: string | null;
+      schemaVersion: number | null;
+      metadata: Record<string, unknown>;
+      title: string;
+      status: string;
+    }>(
+      `select section_id as "sectionId", schema_version as "schemaVersion", metadata, title, status
+       from products where id = $1`,
+      [productId]
+    );
+    return result.rows[0];
+  }
+
+  it("rejects changing section without metadata and leaves the old contract untouched", async () => {
+    const { seller, productId, sectionB } = await createProductInSectionA();
+    const before = await loadContract(productId);
+
+    const response = await seller.patch(`/marketplace/products/${productId}`).send({
+      sectionId: sectionB.section.id,
+      title: "Must not be persisted"
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe("validation_error");
+    expect(await loadContract(productId)).toEqual(before);
+  });
+
+  it("updates section, schema version, and validated metadata together", async () => {
+    const { seller, productId, sectionB } = await createProductInSectionA();
+
+    const response = await seller.patch(`/marketplace/products/${productId}`).send({
+      sectionId: sectionB.section.id,
+      metadata: { region: "EU", staleKey: "dropped" }
+    });
+
+    expect(response.status).toBe(200);
+    const row = await loadContract(productId);
+    expect(row).toMatchObject({
+      sectionId: sectionB.section.id,
+      schemaVersion: 1,
+      metadata: { region: "EU" }
+    });
+    const matchingSchema = await pool.query(
+      `select 1 from catalog_section_schemas where section_id = $1 and version = $2`,
+      [row.sectionId, row.schemaVersion]
+    );
+    expect(matchingSchema.rows).toHaveLength(1);
+  });
+
+  it("does not partially update any product fields when new-section metadata is invalid", async () => {
+    const { seller, productId, sectionB } = await createProductInSectionA();
+    const before = await loadContract(productId);
+
+    const response = await seller.patch(`/marketplace/products/${productId}`).send({
+      sectionId: sectionB.section.id,
+      title: "Must roll back",
+      metadata: { region: "APAC" },
+      media: ["https://cdn.test/should-not-persist.webp"]
+    });
+
+    expect(response.status).toBe(400);
+    expect(await loadContract(productId)).toEqual(before);
+    const media = await pool.query(`select 1 from product_media where product_id = $1`, [productId]);
+    expect(media.rows).toHaveLength(0);
+  });
+
+  it("cannot reactivate an outdated schema pair until current metadata is submitted", async () => {
+    const admin = await createUser("admin");
+    const seller = await agentForUser(await verifiedSeller(), "user");
+    const { section } = await activeSectionWithSchema(admin, [rankField]);
+    const created = await seller.post("/marketplace/products").send({
+      sectionId: section.id,
+      title: "Paused schema lot",
+      description: "A description that is definitely long enough for validation",
+      price: "100",
+      deliveryType: "manual",
+      metadata: { rank: "Divine" }
+    });
+    expect(created.status).toBe(201);
+    expect((await seller.patch(`/marketplace/products/${created.body.id}`).send({ status: "paused" })).status).toBe(200);
+
+    const v2 = await createSchemaVersion(section.id, { fields: [regionField] }, admin);
+    await publishSchemaVersion(section.id, v2.id, admin);
+
+    const rejected = await seller.patch(`/marketplace/products/${created.body.id}`).send({ status: "active" });
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.error.code).toBe("validation_error");
+    expect(await loadContract(created.body.id)).toMatchObject({ status: "paused", schemaVersion: 1, metadata: { rank: "Divine" } });
+
+    const activated = await seller.patch(`/marketplace/products/${created.body.id}`).send({
+      status: "active",
+      metadata: { region: "EU" }
+    });
+    expect(activated.status).toBe(200);
+    expect(await loadContract(created.body.id)).toMatchObject({ status: "active", schemaVersion: 2, metadata: { region: "EU" } });
   });
 });
 

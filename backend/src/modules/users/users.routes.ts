@@ -33,6 +33,7 @@ import { deleteStoredFile } from "../storage/storage.routes.js";
 import { locales } from "../../i18n/config.js";
 import { getRequestLocale } from "../../i18n/t.js";
 import { attachCardMetadata } from "../marketplace/marketplace.helpers.js";
+import { normalizedRequestEndpoint, requestPath } from "../../common/request-url.js";
 
 const router = Router();
 
@@ -295,12 +296,11 @@ const twoFactorReauthenticationSchema = z.object({
 });
 
 function twoFactorAuditContext(req: AuthedRequest) {
-  const endpoint = req.route?.path ? `${req.baseUrl}${req.route.path}` : req.originalUrl;
   return {
     traceId: req.traceId,
     method: req.method,
-    path: req.originalUrl,
-    endpoint
+    path: requestPath(req),
+    endpoint: normalizedRequestEndpoint(req)
   };
 }
 

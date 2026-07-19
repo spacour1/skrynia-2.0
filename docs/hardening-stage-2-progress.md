@@ -485,3 +485,80 @@ Planned commit: `fix(catalog): preserve product section schema consistency`
   paused product is reactivated.
 - A deployment containing an irreparable pre-existing mismatched non-null pair will stop
   during constraint validation instead of silently assigning metadata to another schema.
+
+## Stage 7: safe audit URLs
+
+Status: complete.
+
+Planned commit: `fix(security): remove query secrets from audit paths`
+
+### Confirmed defects
+
+- The generic audit middleware persisted `req.originalUrl` in `audit_logs.path`, so query
+  values such as tokens, codes, secrets, or WebSocket tickets could be stored verbatim.
+- The structured HTTP logger emitted the same full URL.
+- The 2FA domain-audit context also copied `originalUrl` into security audit rows.
+- Sentry's HTTP integration could attach full request URLs, query strings, request data,
+  cookies, and URL-bearing breadcrumbs independently of the application audit row.
+- The recursive redactor returned objects unchanged after its depth limit and did not
+  classify compound ticket/code keys such as `wsTicket` or `verificationCode`.
+
+### Implementation
+
+- Added centralized safe request helpers. Audit `path` is now the full pathname assembled
+  from `baseUrl + req.path`, while `endpoint` is the normalized parameterized route.
+  Mounted-route prefixes are reconstructed after Express unwinds an errored router.
+- The generic audit row and structured HTTP log now contain only safe path/endpoint plus a
+  recursively redacted query object. Request bodies remain excluded.
+- Token, secret, password, ticket, code, OTP, IBAN, and card key families are redacted
+  case-insensitively at every nesting level. Objects beyond the depth ceiling are
+  truncated instead of being returned unsanitized.
+- Updated the 2FA security-audit context and rate-limit route matching to use safe pathname
+  helpers. Runtime source no longer references `originalUrl`.
+- Added Sentry `beforeBreadcrumb`, `beforeSend`, and `beforeSendTransaction` sanitizers.
+  They strip query strings from request, transaction, and nested breadcrumb URL fields,
+  remove request body/cookies/query data, and redact sensitive headers.
+- The WebSocket handshake reads `req.url` only to consume the one-time ticket and never
+  logs or persists that URL.
+- Added an injectable request logger solely at application construction boundaries, which
+  allows tests to verify the serialized Pino output without replacing the production
+  logger.
+- Added forward-only migration
+  `1783290600000_remove-query-secrets-from-audit-paths.sql`, which removes query strings
+  from historical `audit_logs.path` and `audit_logs.endpoint` values.
+- No frontend or financial, provider, ledger, payout, wallet, fee, or accounting change
+  was required.
+
+### Regression coverage
+
+1. `POST /test?token=<secret>&safe=value` stores `/test` as both path and endpoint.
+2. The secret is absent from the complete PostgreSQL audit row.
+3. The captured structured log contains the safe query value and redacts the token.
+4. Recursive redaction covers compound ticket/code keys.
+5. Sentry request URLs, transactions, headers, request payloads, cookies, and WebSocket
+   ticket breadcrumbs are sanitized without retaining the secret.
+6. A real Stage-6-to-Stage-7 upgrade seeded with legacy query secrets rewrites both
+   historical columns to `/test`.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `cd backend && npm run build` | PASS |
+| Targeted audit-redaction run | PASS, 6/6 |
+| `cd backend && npm test` | PASS, 192/192 in 18/18 files |
+| Legacy upgrade migration smoke | PASS, path and endpoint scrubbed |
+| Clean database migration smoke | PASS, all 32 migrations |
+| Audit-redaction tests on clean database | PASS, 6/6 |
+| Main and clean database query-path scan | PASS, 0 rows containing `?` |
+| Runtime `originalUrl` source scan | PASS, 0 references |
+
+### Deployment constraints
+
+- Reverse-proxy and hosting-platform access logs are outside this repository. Production
+  ingress must log a pathname or a query-stripped request URI; otherwise it can still
+  capture ticket/token query values before the request reaches the application.
+- Arbitrary application code must not interpolate full URLs into exception messages.
+  The Sentry sanitizer covers structured request and breadcrumb URL fields, not opaque
+  free-form strings that happen to contain a URL.

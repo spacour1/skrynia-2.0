@@ -16,6 +16,7 @@ const EXACT_SENSITIVE_KEYS = new Set(
     "refreshToken",
     "csrfToken",
     "secret",
+    "ticket",
     "code",
     "otp",
     "totp",
@@ -37,7 +38,7 @@ const EXACT_SENSITIVE_KEYS = new Set(
   ].map((key) => key.toLowerCase())
 );
 
-const SENSITIVE_KEY_FRAGMENTS = ["password", "token", "secret", "otp", "iban", "card"];
+const SENSITIVE_KEY_FRAGMENTS = ["password", "token", "secret", "ticket", "code", "otp", "iban", "card"];
 
 function isSensitiveKey(key: string): boolean {
   const lower = key.toLowerCase();
@@ -46,7 +47,8 @@ function isSensitiveKey(key: string): boolean {
 }
 
 export function redactSensitive(value: unknown, depth = 0): unknown {
-  if (depth > 8 || !value || typeof value !== "object") return value;
+  if (!value || typeof value !== "object") return value;
+  if (depth > 8) return "[truncated]";
   if (Array.isArray(value)) return value.map((item) => redactSensitive(item, depth + 1));
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).map(([key, item]) => [

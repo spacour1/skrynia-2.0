@@ -8,6 +8,7 @@ import { pool } from "../../db/pool.js";
 import { ACCESS_COOKIE } from "../cookies.js";
 import { rateLimitHitsTotal } from "../metrics.js";
 import { getRedis } from "../redis.js";
+import { requestPath as safeRequestPath } from "../request-url.js";
 
 function timingSafeEqual(a: string, b: string) {
   const bufA = Buffer.from(a);
@@ -69,7 +70,7 @@ const DEDICATED_WRITE_PATHS = new Set([
 ]);
 
 function requestPath(req: Request) {
-  const path = req.originalUrl.split("?")[0].replace(/\/+$/, "");
+  const path = safeRequestPath(req).replace(/\/+$/, "");
   return path || "/";
 }
 

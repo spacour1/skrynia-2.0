@@ -13,7 +13,7 @@ import {
   publicReadRateLimit
 } from "./common/middleware/security.js";
 import { csrfProtection } from "./common/middleware/csrf.js";
-import { requestContext } from "./common/middleware/request-context.js";
+import { createRequestContext, type RequestLogger } from "./common/middleware/request-context.js";
 import { localeContext } from "./i18n/t.js";
 import { errorHandler } from "./common/errors.js";
 import { metricsText } from "./common/metrics.js";
@@ -36,7 +36,7 @@ import currencyRoutes from "./modules/currencies/currencies.routes.js";
 import catalogRoutes from "./modules/catalog/catalog.routes.js";
 import adminCatalogRoutes from "./modules/catalog/admin-catalog.routes.js";
 
-export function createApp() {
+export function createApp(options: { requestLogger?: RequestLogger } = {}) {
   const app = express();
   // TRUST_PROXY=1 is required behind Railway/Fly/Cloudflare so that req.ip resolves
   // to the real client IP from X-Forwarded-For instead of the proxy's address.
@@ -58,7 +58,7 @@ export function createApp() {
   );
   app.use(cookieParser());
   app.use(express.json({ limit: "1mb" }));
-  app.use(requestContext);
+  app.use(createRequestContext(options.requestLogger));
   app.use(localeContext);
   app.use(identifyRateLimitSubject);
   app.use(anonymousWriteRateLimit);

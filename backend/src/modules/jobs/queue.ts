@@ -13,6 +13,7 @@ import { sendEmail, renderBrandedEmail } from "../../common/mailer.js";
 import { sendTelegramMessage, type TelegramButton } from "../../common/telegram-bot.js";
 import { normalizeLocale } from "../../i18n/config.js";
 import { t } from "../../i18n/t.js";
+import { recoverStaleDisputeResolutions } from "../disputes/dispute-resolution.service.js";
 
 export type MarketplaceJobName =
   | "escrow_release"
@@ -135,6 +136,8 @@ async function processEscrowRelease(orderId?: string) {
 }
 
 async function processDisputeTimers(disputeId?: string) {
+  await recoverStaleDisputeResolutions(disputeId);
+
   const stale = await pool.query(
     `select d.id, d.order_id as "orderId", o.buyer_id as "buyerId", o.seller_id as "sellerId"
      from disputes d

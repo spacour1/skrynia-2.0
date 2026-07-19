@@ -6,11 +6,17 @@ import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
-import { refundEscrow, releaseEscrow } from "../orders/ledger.service.js";
 import { recordOrderEvent } from "../orders/order-events.service.js";
 import { notifyOrderEvent } from "../chat/ws.service.js";
 import { createNotification, notifyAdmins } from "../notifications/notifications.service.js";
 import { getMessages, postOrderSystemMessage } from "../chat/chat.service.js";
+import {
+  createDisputeMessage,
+  getOrderDispute,
+  hideDisputeMessage,
+  listDisputeMessages
+} from "./dispute-messages.service.js";
+import { resolveDisputeResolution } from "./dispute-resolution.service.js";
 
 const router = Router();
 
@@ -23,6 +29,38 @@ const resolveSchema = z.object({
   adminNote: z.string().min(3).max(3000)
 });
 
+const messageSchema = z.object({
+  body: z.string().trim().min(1).max(5000),
+  attachmentUrl: z.string().url().max(2048).optional().nullable()
+});
+
+const hideMessageSchema = z.object({
+  reason: z.string().trim().min(3).max(500)
+});
+
+function participantDisputeDto(dispute: Record<string, unknown>) {
+  return {
+    id: dispute.id,
+    order_id: dispute.order_id,
+    opened_by: dispute.opened_by,
+    reason: dispute.reason,
+    status: dispute.status,
+    resolution: dispute.resolution,
+    created_at: dispute.created_at,
+    resolved_at: dispute.resolved_at
+  };
+}
+
+router.get(
+  "/orders/:orderId/dispute",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const orderId = z.string().uuid().parse(req.params.orderId);
+    const result = await getOrderDispute(orderId, req.user);
+    res.json(result);
+  })
+);
+
 router.post(
   "/orders/:orderId/dispute",
   authenticate,
@@ -31,34 +69,59 @@ router.post(
     const orderId = z.string().uuid().parse(req.params.orderId);
     const input = openSchema.parse(req.body);
 
-    // Order lock + status flip + dispute upsert are one transaction: there is no window
-    // where the order says 'disputed' but no dispute row exists, and two concurrent opens
-    // (or an open racing a confirm/deliver transition) serialize on the row lock.
-    const { row, dispute, repeated } = await inTx(async (client) => {
+    // Order lock, status flip, and dispute creation/check are one transaction. There is no
+    // window where the order says 'disputed' but no dispute row exists, and two concurrent
+    // opens (or an open racing a confirm/deliver transition) serialize on the row lock.
+    const { row, dispute, repeated, messageSuggested } = await inTx(async (client) => {
       const order = await client.query(`select * from orders where id = $1 for update`, [orderId]);
       const orderRow = order.rows[0];
       if (!orderRow) throw notFound("Order not found");
       if (orderRow.buyer_id !== req.user.id && orderRow.seller_id !== req.user.id) throw forbidden();
 
-      // A retry of an already-opened dispute is idempotent, not an error - it refreshes
-      // the reason and returns the existing dispute.
       const isRepeat = orderRow.status === "disputed";
       if (!isRepeat && !["paid", "in_progress", "delivered"].includes(orderRow.status)) {
         throw badRequest("Only active escrowed orders can be disputed");
       }
 
+      if (isRepeat) {
+        const existing = await client.query(
+          `select * from disputes where order_id = $1 for update`,
+          [orderId]
+        );
+        const existingDispute = existing.rows[0];
+        if (!existingDispute) throw badRequest("Dispute state is inconsistent");
+        return {
+          row: orderRow,
+          dispute: existingDispute,
+          repeated: true,
+          messageSuggested:
+            existingDispute.opened_by !== req.user.id ||
+            existingDispute.reason !== input.reason
+        };
+      }
+
       await client.query(`update orders set status = 'disputed', updated_at = now() where id = $1`, [orderId]);
-      const upserted = await client.query(
+      const inserted = await client.query(
         `insert into disputes(order_id, opened_by, reason)
          values ($1, $2, $3)
-         on conflict (order_id) do update set reason = excluded.reason, updated_at = now()
          returning *`,
         [orderId, req.user.id, input.reason]
       );
-      return { row: orderRow, dispute: upserted.rows[0], repeated: isRepeat };
+      return {
+        row: orderRow,
+        dispute: inserted.rows[0],
+        repeated: false,
+        messageSuggested: false
+      };
     });
 
-    if (repeated) return res.status(200).json({ dispute });
+    if (repeated) {
+      return res.status(200).json({
+        dispute: participantDisputeDto(dispute),
+        repeated: true,
+        messageSuggested
+      });
+    }
 
     notifyOrderEvent(row.buyer_id, { type: "order_disputed", orderId });
     notifyOrderEvent(row.seller_id, { type: "order_disputed", orderId });
@@ -82,7 +145,51 @@ router.post(
       body: input.reason
     });
     await postOrderSystemMessage(orderId, "dispute_opened", "system.disputeOpened", { reason: input.reason });
-    res.status(201).json({ dispute });
+    res.status(201).json({ dispute: participantDisputeDto(dispute) });
+  })
+);
+
+router.get(
+  "/:id/messages",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const id = z.string().uuid().parse(req.params.id);
+    const messages = await listDisputeMessages(id, req.user);
+    res.json({ messages });
+  })
+);
+
+router.post(
+  "/:id/messages",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const id = z.string().uuid().parse(req.params.id);
+    const input = messageSchema.parse(req.body);
+    const message = await createDisputeMessage({
+      disputeId: id,
+      user: req.user,
+      body: input.body,
+      attachmentUrl: input.attachmentUrl
+    });
+    res.status(201).json({ message });
+  })
+);
+
+router.post(
+  "/:id/messages/:messageId/hide",
+  authenticate,
+  requireRole("admin"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const id = z.string().uuid().parse(req.params.id);
+    const messageId = z.string().uuid().parse(req.params.messageId);
+    const input = hideMessageSchema.parse(req.body);
+    const message = await hideDisputeMessage({
+      disputeId: id,
+      messageId,
+      admin: req.user,
+      reason: input.reason
+    });
+    res.json({ message });
   })
 );
 
@@ -132,8 +239,9 @@ router.get(
     const messages = dispute.rows[0].conversation_id
       ? await getMessages(dispute.rows[0].conversation_id, { limit: 200, viewerIsAdmin: true })
       : [];
+    const disputeMessages = await listDisputeMessages(id, req.user);
 
-    res.json({ dispute: dispute.rows[0], messages });
+    res.json({ dispute: dispute.rows[0], messages, disputeMessages });
   })
 );
 
@@ -145,105 +253,55 @@ router.post(
     const id = z.string().uuid().parse(req.params.id);
     const input = resolveSchema.parse(req.body);
 
-    // Resolution state machine (open -> resolving -> resolved). The escrow operation is
-    // the existing financial service and manages its own transaction, so it cannot join a
-    // dispute UPDATE transaction - instead the dispute is atomically CLAIMED first:
-    //  - two admins can never both pass the claim, so refund/release runs at most once;
-    //  - if the escrow op throws, the claim reverts to 'open' and the resolve is retryable;
-    //  - if the process dies after the escrow op but before the final update, the dispute
-    //    stays 'resolving' with the order already terminal - a retry with the same
-    //    decision finishes the bookkeeping WITHOUT running the escrow op again.
-    const claim = await pool.query(
-      `update disputes set status = 'resolving', admin_id = $2, updated_at = now()
-       where id = $1 and status = 'open'
-       returning *`,
-      [id, req.user.id]
-    );
-    let row = claim.rows[0];
-    let escrowAlreadyApplied = false;
+    // The service persists a stable decision/operation before touching escrow and can
+    // reconcile that operation after a crash without accepting a replacement decision.
+    const result = await resolveDisputeResolution({
+      disputeId: id,
+      decision: input.decision,
+      adminId: req.user.id,
+      adminNote: input.adminNote
+    });
+    const row = result.dispute;
 
-    if (!row) {
-      const existing = await pool.query(
-        `select d.*, o.status as order_status
-         from disputes d join orders o on o.id = d.order_id
-         where d.id = $1`,
-        [id]
+    if (result.newlyResolved) {
+      notifyOrderEvent(row.buyer_id, { type: "dispute_resolved", orderId: row.order_id, decision: input.decision });
+      notifyOrderEvent(row.seller_id, { type: "dispute_resolved", orderId: row.order_id, decision: input.decision });
+      await Promise.all(
+        [row.buyer_id, row.seller_id].map((userId: string) =>
+          createNotification({
+            userId,
+            type: "dispute_resolved",
+            titleKey: "notifications.disputeResolved.title",
+            bodyKey: input.decision === "refund" ? "notifications.disputeResolved.bodyRefund" : "notifications.disputeResolved.bodyRelease",
+            orderId: row.order_id
+          })
+        )
       );
-      const current = existing.rows[0];
-      if (!current) throw notFound("Dispute not found");
-      const terminalForDecision = input.decision === "refund" ? "refunded" : "completed";
-      if (current.status === "resolving" && current.order_status === terminalForDecision) {
-        row = current;
-        escrowAlreadyApplied = true;
-      } else if (current.status === "resolving") {
-        throw badRequest("Dispute resolution is already in progress");
-      } else {
-        throw badRequest("Dispute already resolved");
-      }
+      await recordOrderEvent({
+        orderId: row.order_id,
+        actorId: row.admin_id,
+        type: "dispute_resolved",
+        templateKey: "orderEvents.disputeResolved",
+        // The original claim note is preserved across retries and recovery.
+        body: row.admin_note ?? undefined,
+        metadata: { decision: input.decision, operationId: result.operationId }
+      });
+      await postOrderSystemMessage(row.order_id, "dispute_resolved", "system.disputeResolved", { note: row.admin_note ?? "" }, {
+        decision: input.decision,
+        operationId: result.operationId
+      });
+      await postOrderSystemMessage(
+        row.order_id,
+        input.decision === "refund" ? "refunded" : "escrow_released",
+        input.decision === "refund" ? "system.refunded" : "system.fundsReleased"
+      );
     }
-
-    const orderParties = await pool.query(`select buyer_id, seller_id, status from orders where id = $1`, [row.order_id]);
-    row = { ...row, ...orderParties.rows[0] };
-
-    let order;
-    if (!escrowAlreadyApplied) {
-      try {
-        order =
-          input.decision === "refund"
-            ? await refundEscrow(row.order_id, req.user.id)
-            : await releaseEscrow(row.order_id, req.user.id);
-      } catch (escrowError) {
-        // Money did not move - release the claim so the resolution can be retried.
-        await pool.query(`update disputes set status = 'open', updated_at = now() where id = $1 and status = 'resolving'`, [id]);
-        throw escrowError;
-      }
-    }
-
-    const updated = await pool.query(
-      `update disputes
-       set status = 'resolved',
-           resolution = $2,
-           admin_id = $3,
-           admin_note = $4,
-           resolved_at = now(),
-           updated_at = now()
-       where id = $1 and status = 'resolving'
-       returning *`,
-      [id, input.decision, req.user.id, input.adminNote]
-    );
-    if (!updated.rows[0]) throw badRequest("Dispute already resolved");
-
-    notifyOrderEvent(row.buyer_id, { type: "dispute_resolved", orderId: row.order_id, decision: input.decision });
-    notifyOrderEvent(row.seller_id, { type: "dispute_resolved", orderId: row.order_id, decision: input.decision });
-    await Promise.all(
-      [row.buyer_id, row.seller_id].map((userId: string) =>
-        createNotification({
-          userId,
-          type: "dispute_resolved",
-          titleKey: "notifications.disputeResolved.title",
-          bodyKey: input.decision === "refund" ? "notifications.disputeResolved.bodyRefund" : "notifications.disputeResolved.bodyRelease",
-          orderId: row.order_id
-        })
-      )
-    );
-    await recordOrderEvent({
-      orderId: row.order_id,
-      actorId: req.user.id,
-      type: "dispute_resolved",
-      templateKey: "orderEvents.disputeResolved",
-      // The admin note is free text written by the admin — stored raw, never translated.
-      body: input.adminNote,
-      metadata: { decision: input.decision }
+    res.json({
+      dispute: row,
+      order: result.order,
+      operationId: result.operationId,
+      idempotent: !result.newlyResolved
     });
-    await postOrderSystemMessage(row.order_id, "dispute_resolved", "system.disputeResolved", { note: input.adminNote }, {
-      decision: input.decision
-    });
-    await postOrderSystemMessage(
-      row.order_id,
-      input.decision === "refund" ? "refunded" : "escrow_released",
-      input.decision === "refund" ? "system.refunded" : "system.fundsReleased"
-    );
-    res.json({ dispute: updated.rows[0], order });
   })
 );
 

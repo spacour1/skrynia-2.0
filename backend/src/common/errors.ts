@@ -25,6 +25,10 @@ export function badRequest(message = "Invalid request") {
   return new ApiError(400, message, "bad_request");
 }
 
+export function conflict(message = "Conflict") {
+  return new ApiError(409, message, "conflict");
+}
+
 export function unauthorized(message = "Unauthorized") {
   return new ApiError(401, message, "unauthorized");
 }

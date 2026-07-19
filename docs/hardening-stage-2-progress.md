@@ -157,3 +157,80 @@ The schema contract now asserts encrypted method columns and no legacy plaintext
   starting the new application. The key must remain stable for version 1 ciphertext.
 - The current runtime intentionally fails closed on an unknown key version. A future key
   rotation must deploy a keyring/re-encryption migration before incrementing the version.
+
+## Stage 3: immutable dispute evidence and recoverable resolution
+
+Status: complete.
+
+Planned commit: `fix(disputes): make evidence immutable and resolution recoverable`
+
+### Confirmed defects
+
+- Reopening an existing dispute overwrote its original reason and updated timestamp.
+- Resolution persisted neither the requested decision nor a stable operation identity
+  before calling escrow.
+- A failed escrow call reset the dispute to an unclaimed state, allowing a later retry to
+  choose the opposite decision.
+- A process crash could leave `resolving` indefinitely; recovery depended on a caller
+  repeating the original request correctly.
+- Dispute evidence had no append-only participant/admin message channel.
+
+### Implementation
+
+- Added forward-only migration `1783290400000_harden-dispute-lifecycle.sql`.
+- Database triggers make the original `opened_by`, `reason`, and `created_at` immutable.
+  Repeated opens return the existing dispute without rewriting evidence; a different
+  participant or reason is directed to the message channel.
+- Added append-only `dispute_messages` with participant/admin authorization, optional
+  attachment URLs, indexes, validation, immutable content, and idempotent admin hiding.
+- Added durable `resolution_decision`, `resolution_operation_id`,
+  `resolving_started_at`, `resolution_attempts`, and `last_resolution_error` fields with
+  state constraints and a unique operation index.
+- Resolution now claims the decision and operation in a transaction before escrow,
+  preserves the original admin/note on every retry, rejects opposite decisions with 409,
+  and records retryable failures without discarding claim identity.
+- Matching terminal order state is reconciled into `resolved` without calling escrow
+  again. A queue worker reclaims claims older than 15 minutes using only persisted
+  decision, operation, and administrator data.
+- Existing escrow, ledger, provider, payout, wallet, fee, and accounting code was not
+  changed.
+
+### Regression coverage
+
+Added five integration scenarios:
+
+1. Buyer evidence remains byte-for-byte unchanged after a seller repeats the open with a
+   different reason; the seller can append a message, outsiders are denied, and admin
+   moderation does not mutate message content.
+2. An escrow failure stores `resolution_failed`, the original decision and operation ID,
+   then retries the same operation; an opposite decision is rejected.
+3. A stale crash-before-escrow claim is recovered by the worker with the persisted
+   decision and operation ID.
+4. A crash-after-escrow state is finalized without a second escrow call; subsequent
+   same-decision retries are idempotent and an opposite decision is rejected.
+5. Two concurrent admins produce one escrow call, one success, and one 409 conflict.
+
+The tests also exercise database-level rejection of original-evidence updates, dispute
+message content updates, and dispute message deletion.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `cd backend && npm run build` | PASS |
+| Targeted dispute Vitest run | PASS, 5/5 |
+| `cd backend && npm test` | PASS, 174/174 in 17/17 files |
+| Clean database migration smoke | PASS, all 30 migrations |
+| Dispute/schema tests on clean database | PASS, 11/11 |
+| `cd frontend && npm run typecheck` | PASS |
+| `cd frontend && npm run i18n:check` | PASS, 0 errors and 25 baseline warnings |
+| `cd frontend && npm test` | NOT AVAILABLE, package has no `test` script |
+| `cd frontend && npm run build` | PASS, with existing Sentry/OpenTelemetry warnings |
+
+### Remaining constraints
+
+- Resolution notifications and order-event/chat side effects still run after the durable
+  financial state transition and are not replayed by the recovery worker. Making those
+  side effects durable is intentionally deferred to the outbox stage.
+- The stale-claim timeout is currently a fixed 15 minutes.

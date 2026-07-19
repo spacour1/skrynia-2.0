@@ -34,6 +34,11 @@ import { locales } from "../../i18n/config.js";
 import { getRequestLocale } from "../../i18n/t.js";
 import { attachCardMetadata } from "../marketplace/marketplace.helpers.js";
 import { normalizedRequestEndpoint, requestPath } from "../../common/request-url.js";
+import {
+  toPublicSellerDto,
+  toPublicSellerStatsDto,
+  type PublicSellerOverviewRow
+} from "./public-seller.dto.js";
 
 const router = Router();
 
@@ -462,17 +467,66 @@ router.get(
   "/:id",
   asyncHandler(async (req, res) => {
     const id = z.string().uuid().parse(req.params.id);
-    const user = await pool.query(
-      `select u.id, u.display_name as "displayName", u.avatar_url as "avatarUrl", u.role, u.settings, u.created_at as "createdAt",
-              coalesce(avg(r.rating), 0)::float as "ratingAverage",
-              count(r.id)::int as "reviewCount"
+    const overview = await pool.query<PublicSellerOverviewRow>(
+      `with product_stats as (
+         select
+           count(*) filter (where status = 'active')::int as active_listings,
+           coalesce(sum(sales_count) filter (where status != 'deleted'), 0)::int as total_sales
+         from products
+         where seller_id = $1
+       ),
+       favorite_stats as (
+         select count(*)::int as favorite_count
+         from product_favorites pf
+         join products p on p.id = pf.product_id
+         where p.seller_id = $1 and p.status != 'deleted'
+       ),
+       order_stats as (
+         select
+           count(*) filter (where status in ('paid', 'in_progress', 'delivered'))::int as active_orders,
+           count(*) filter (where status = 'completed')::int as completed_orders,
+           count(*) filter (where status = 'disputed')::int as disputed_orders,
+           count(*) filter (where status = 'refunded')::int as refunded_orders,
+           count(*) filter (where status in ('completed', 'disputed', 'refunded'))::int as terminal_orders,
+           coalesce(sum(amount_cents) filter (where status = 'completed'), 0)::bigint as completed_revenue_cents
+         from orders
+         where seller_id = $1
+       ),
+       review_stats as (
+         select coalesce(avg(rating), 0)::float as rating_average, count(*)::int as review_count
+         from reviews
+         where seller_id = $1
+       )
+       select
+         u.id,
+         u.display_name as "displayName",
+         u.avatar_url as "avatarUrl",
+         u.created_at as "createdAt",
+         rs.rating_average as "ratingAverage",
+         rs.review_count as "reviewCount",
+         ps.active_listings as "activeListings",
+         ps.total_sales as "totalSales",
+         fs.favorite_count as "favoriteCount",
+         os.active_orders as "activeOrders",
+         os.completed_orders as "completedOrders",
+         os.disputed_orders as "disputedOrders",
+         os.refunded_orders as "refundedOrders",
+         os.completed_revenue_cents as "completedRevenueCents",
+         case
+           when os.terminal_orders >= 3
+             then round(100.0 * os.completed_orders / nullif(os.terminal_orders, 0), 0)::int
+           else null
+         end as "successRate",
+         (os.terminal_orders >= 3) as "hasEnoughData"
        from users u
-       left join reviews r on r.seller_id = u.id
-       where u.id = $1 and u.is_banned = false
-       group by u.id`,
+       cross join product_stats ps
+       cross join favorite_stats fs
+       cross join order_stats os
+       cross join review_stats rs
+       where u.id = $1 and u.is_banned = false`,
       [id]
     );
-    if (!user.rows[0]) throw notFound("User not found");
+    if (!overview.rows[0]) throw notFound("User not found");
 
     const products = await pool.query(
       `select p.id, p.title, p.description, p.price_cents as "priceCents", p.currency, p.stock,
@@ -510,36 +564,12 @@ router.get(
       [id]
     );
 
-    const stats = await pool.query(
-      `select
-         count(distinct p.id) filter (where p.status = 'active')::int as "activeListings",
-         coalesce(sum(p.sales_count), 0)::int as "totalSales",
-         count(distinct pf.user_id)::int as "favoriteCount",
-         count(distinct o.id) filter (where o.status in ('paid', 'in_progress', 'delivered'))::int as "activeOrders",
-         count(distinct o.id) filter (where o.status = 'completed')::int as "completedOrders",
-         count(distinct o.id) filter (where o.status = 'disputed')::int as "disputedOrders",
-         coalesce(sum(o.amount_cents) filter (where o.status = 'completed'), 0)::bigint as "completedRevenueCents",
-         coalesce(
-           round(
-             100.0 * count(distinct o.id) filter (where o.status = 'completed')
-             / nullif(count(distinct o.id) filter (where o.status in ('completed', 'disputed', 'refunded')), 0),
-             0
-           ),
-           100
-         )::int as "successRate"
-       from users u
-       left join products p on p.seller_id = u.id and p.status != 'deleted'
-       left join product_favorites pf on pf.product_id = p.id
-       left join orders o on o.seller_id = u.id
-       where u.id = $1`,
-      [id]
-    );
-
-    const seller = user.rows[0];
+    const seller = toPublicSellerDto(overview.rows[0], isUserOnline(overview.rows[0].id));
+    const stats = toPublicSellerStatsDto(overview.rows[0]);
     const productsWithCardMetadata = await attachCardMetadata(products.rows);
     res.json({
-      user: { ...seller, online: isUserOnline(seller.id) },
-      stats: stats.rows[0],
+      user: seller,
+      stats,
       products: productsWithCardMetadata.map((product) => ({ ...product, sellerOnline: isUserOnline(seller.id) })),
       reviews: reviews.rows
     });

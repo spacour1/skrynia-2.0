@@ -11,7 +11,7 @@ export function SellerStatsGrid({
 }: {
   activeListings: number;
   completedSales: number;
-  successRate: number;
+  successRate: number | null;
   favoriteCount: number;
 }) {
   const { t } = useI18n();
@@ -19,7 +19,12 @@ export function SellerStatsGrid({
   const stats: Array<{ key: string; label: string; value: string | number; icon: typeof Box }> = [
     { key: "active", label: t("seller.activeListings"), value: activeListings, icon: Box },
     { key: "sales", label: t("seller.completedSales"), value: completedSales, icon: CheckCircle2 },
-    { key: "success", label: t("seller.successRate"), value: `${successRate}%`, icon: ShieldCheck },
+    {
+      key: "success",
+      label: t("seller.successRate"),
+      value: successRate === null ? t("seller.notEnoughData") : `${successRate}%`,
+      icon: ShieldCheck
+    },
     { key: "favorites", label: t("seller.addedToFavorites"), value: favoriteCount, icon: Heart }
   ];
 

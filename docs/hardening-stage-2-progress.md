@@ -562,3 +562,77 @@ Planned commit: `fix(security): remove query secrets from audit paths`
 - Arbitrary application code must not interpolate full URLs into exception messages.
   The Sentry sanitizer covers structured request and breadcrumb URL fields, not opaque
   free-form strings that happen to contain a URL.
+
+## Stage 8: public seller DTO and statistics
+
+Status: complete.
+
+Planned commit: `fix(users): expose safe public profiles and correct seller statistics`
+
+### Confirmed defects
+
+- `GET /users/:id` returned the user's role and complete `settings` object to anonymous
+  callers. That object can contain notification preferences and other private account
+  configuration.
+- Seller products, favorites, and orders were joined before aggregation. Multiple rows
+  from each relation multiplied `sales_count` and completed revenue.
+- A seller without terminal orders received a fabricated `100%` success rate.
+- Category counters included active out-of-stock products even though the public product
+  list excluded them.
+- The seller page depended on private `settings` from the public response.
+
+### Implementation
+
+- Added an explicit `PublicSellerDto` with exactly `id`, `displayName`, `avatarUrl`,
+  `createdAt`, `ratingAverage`, `reviewCount`, and `online`. The public query selects only
+  those account columns and maps them field by field.
+- Seller totals are computed in independent `product_stats`, `favorite_stats`,
+  `order_stats`, and `review_stats` CTEs. Products, favorites, orders, and reviews can no
+  longer multiply one another.
+- The statistics response now includes active listings, total sales, product favorites,
+  active/completed/disputed/refunded orders, completed revenue, success rate, and the
+  `hasEnoughData` signal.
+- Success rate uses completed outcomes divided by completed, disputed, and refunded
+  outcomes. It is `null` until at least three terminal orders exist.
+- Category `activeProductCount` now requires an active product, positive stock, and a
+  non-banned seller, matching public list visibility.
+- The seller page fetches private settings separately through authenticated `/users/me`
+  only for its owner. The cache key includes the authenticated user ID, and profile or
+  banner updates refresh both owner and public profile caches.
+- Added localized "not enough data" output instead of rendering a false percentage.
+- No migration or financial, provider, ledger, payout, wallet, fee, or accounting change
+  was required.
+
+### Regression coverage
+
+1. The public seller object has exactly the seven DTO fields and contains no settings,
+   email, phone, role, notification preference, or private marker.
+2. Two products, three favorites, seven mixed-status orders, and two reviews produce exact
+   totals without join multiplication.
+3. A new seller returns `successRate: null` and `hasEnoughData: false`.
+4. Category count and public list both exclude paused, out-of-stock, and banned-seller
+   products.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `cd backend && npm run build` | PASS |
+| Targeted seller/cache run | PASS, 9/9 |
+| `cd backend && npm test` | PASS, 196/196 in 19/19 files |
+| Clean database migration smoke | PASS, all 32 migrations |
+| Public seller tests on clean database | PASS, 4/4 |
+| `cd frontend && npm run typecheck` | PASS |
+| `cd frontend && npm test` | PASS, 6/6 |
+| `cd frontend && npm run i18n:check` | PASS, 0 errors and 25 baseline warnings |
+| `cd frontend && npm run build` | PASS, with existing Sentry/OpenTelemetry warnings |
+
+### Remaining constraints
+
+- Seller tagline and banner are still stored inside the mixed private `settings` object.
+  Visitors now receive safe defaults. Public customization needs dedicated public columns
+  and an explicit DTO before those values can be exposed again.
+- The minimum sample size is intentionally fixed at three terminal orders.
+- `favoriteCount` counts product-favorite relationships across the seller's non-deleted
+  products, not unique users and not seller-profile favorites.

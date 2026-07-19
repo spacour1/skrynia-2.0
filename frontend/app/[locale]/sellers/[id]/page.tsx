@@ -17,23 +17,23 @@ type SellerResponse = {
   user: {
     id: string;
     displayName: string;
-    avatarUrl?: string | null;
-    role: string;
-    settings?: Record<string, unknown>;
+    avatarUrl: string | null;
     createdAt: string;
     ratingAverage: number;
     reviewCount: number;
-    online?: boolean;
+    online: boolean;
   };
   stats: {
     activeListings: number;
     totalSales: number;
-    completedOrders: number;
-    successRate: number;
     favoriteCount: number;
-    activeOrders?: number;
-    disputedOrders?: number;
-    completedRevenueCents?: string | number;
+    activeOrders: number;
+    completedOrders: number;
+    disputedOrders: number;
+    refundedOrders: number;
+    completedRevenueCents: string;
+    successRate: number | null;
+    hasEnoughData: boolean;
   };
   products: Product[];
   reviews?: Array<{
@@ -69,6 +69,12 @@ export default function SellerPage({ params }: { params: { id: string } }) {
   const seller = useQuery({
     queryKey: ["seller", params.id],
     queryFn: () => apiFetch<SellerResponse>(`/users/${params.id}`)
+  });
+
+  const ownerProfile = useQuery({
+    queryKey: ["seller-owner-settings", userSession?.id],
+    queryFn: () => apiFetch<{ user: User }>("/users/me"),
+    enabled: userSession?.id === params.id
   });
 
   const sellerFavorites = useQuery({
@@ -131,12 +137,14 @@ export default function SellerPage({ params }: { params: { id: string } }) {
       const uploaded = await apiFetch<{ url: string }>("/storage/upload", { method: "POST", body });
       const updated = await apiFetch<{ user: User }>("/users/me", {
         method: "PATCH",
-        body: JSON.stringify({ avatarUrl: uploaded.url, settings: seller.data?.user.settings ?? {} })
+        body: JSON.stringify({ avatarUrl: uploaded.url })
       });
       return updated.user;
     },
     onSuccess: (updated) => {
       client.invalidateQueries({ queryKey: ["seller", params.id] });
+      client.setQueryData(["seller-owner-settings", updated.id], { user: updated });
+      client.invalidateQueries({ queryKey: ["me-settings"] });
       if (userSession?.id === updated.id) setAuthUser({ ...userSession, ...updated });
     },
     onError: () => showAppToast({ title: t("seller.profileSaveFailed") })
@@ -171,8 +179,9 @@ export default function SellerPage({ params }: { params: { id: string } }) {
   const isOwn = userSession?.id === user.id;
   const isFavorite = sellerFavorites.data?.sellerIds.includes(user.id) ?? false;
   const favoriteProductIds = new Set(productFavoriteIds.data?.productIds ?? []);
-  const tagline = readSetting(user.settings, "sellerTagline", "headline") || t("seller.trustedSeller");
-  const bannerUrl = readSetting(user.settings, "sellerBannerUrl", "bannerUrl") || undefined;
+  const editableUser = isOwn && ownerProfile.data?.user.id === user.id ? ownerProfile.data.user : undefined;
+  const tagline = readSetting(editableUser?.settings, "sellerTagline", "headline") || t("seller.trustedSeller");
+  const bannerUrl = readSetting(editableUser?.settings, "sellerBannerUrl", "bannerUrl") || undefined;
 
   function requireAuth(next: () => void) {
     if (!hydrated) return;
@@ -204,6 +213,8 @@ export default function SellerPage({ params }: { params: { id: string } }) {
 
   function handleProfileSaved(updated: User) {
     client.invalidateQueries({ queryKey: ["seller", params.id] });
+    client.setQueryData(["seller-owner-settings", updated.id], { user: updated });
+    client.invalidateQueries({ queryKey: ["me-settings"] });
     if (userSession?.id === updated.id) setAuthUser({ ...userSession, ...updated });
     showAppToast({ title: t("seller.profileSaved") });
     setShowEditProfile(false);
@@ -211,6 +222,8 @@ export default function SellerPage({ params }: { params: { id: string } }) {
 
   function handleBannerSaved(updated: User) {
     client.invalidateQueries({ queryKey: ["seller", params.id] });
+    client.setQueryData(["seller-owner-settings", updated.id], { user: updated });
+    client.invalidateQueries({ queryKey: ["me-settings"] });
     if (userSession?.id === updated.id) setAuthUser({ ...userSession, ...updated });
     showAppToast({ title: t("seller.bannerSaved") });
     setShowEditBanner(false);
@@ -235,8 +248,12 @@ export default function SellerPage({ params }: { params: { id: string } }) {
         messagePending={startChat.isPending}
         messageError={startChat.error}
         onMessage={handleMessage}
-        onEditProfile={() => setShowEditProfile(true)}
-        onEditBanner={() => setShowEditBanner(true)}
+        onEditProfile={() => {
+          if (editableUser) setShowEditProfile(true);
+        }}
+        onEditBanner={() => {
+          if (editableUser) setShowEditBanner(true);
+        }}
         onAvatarPick={handleAvatarPick}
         avatarUploadPending={avatarUpload.isPending}
         stats={{
@@ -287,11 +304,11 @@ export default function SellerPage({ params }: { params: { id: string } }) {
         )}
       </section>
 
-      {showEditProfile ? (
-        <EditSellerProfileModal user={user} onClose={() => setShowEditProfile(false)} onSaved={handleProfileSaved} />
+      {showEditProfile && editableUser ? (
+        <EditSellerProfileModal user={editableUser} onClose={() => setShowEditProfile(false)} onSaved={handleProfileSaved} />
       ) : null}
-      {showEditBanner ? (
-        <EditSellerBannerModal currentBannerUrl={bannerUrl} settings={user.settings} onClose={() => setShowEditBanner(false)} onSaved={handleBannerSaved} />
+      {showEditBanner && editableUser ? (
+        <EditSellerBannerModal currentBannerUrl={bannerUrl} settings={editableUser.settings} onClose={() => setShowEditBanner(false)} onSaved={handleBannerSaved} />
       ) : null}
     </div>
   );

@@ -48,7 +48,7 @@ router.get(
       `select c.id, c.slug, c.name, c.description, c.risk_level as "riskLevel",
               count(p.id) filter (where product_seller.is_banned = false)::int as "activeProductCount"
        from categories c
-       left join products p on p.category_id = c.id and p.status = 'active'
+       left join products p on p.category_id = c.id and p.status = 'active' and p.stock > 0
        left join users product_seller on product_seller.id = p.seller_id
        group by c.id
        order by c.name`

@@ -103,6 +103,7 @@
     "trustedSeller": "Trusted SKRYNIA seller",
     "completedSales": "Completed sales",
     "successRate": "Success rate",
+    "notEnoughData": "Not enough data",
     "addedToFavorites": "Added to favorites",
     "profileSaved": "Profile saved",
     "profileSaveFailed": "Could not save profile",

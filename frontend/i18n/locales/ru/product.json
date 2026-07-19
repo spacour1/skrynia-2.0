@@ -103,6 +103,7 @@
     "trustedSeller": "Доверенный продавец SKRYNIA",
     "completedSales": "Завершенные продажи",
     "successRate": "Успешность сделок",
+    "notEnoughData": "Недостаточно данных",
     "addedToFavorites": "Добавлено в избранное",
     "profileSaved": "Профиль сохранен",
     "profileSaveFailed": "Не удалось сохранить профиль",

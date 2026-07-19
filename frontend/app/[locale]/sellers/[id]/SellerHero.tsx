@@ -66,7 +66,7 @@ export function SellerHero({
   onEditBanner: () => void;
   onAvatarPick: (file: File) => void;
   avatarUploadPending: boolean;
-  stats: { activeListings: number; completedSales: number; successRate: number; favoriteCount: number };
+  stats: { activeListings: number; completedSales: number; successRate: number | null; favoriteCount: number };
 }) {
   const { t, locale } = useI18n();
   const avatarInputRef = useRef<HTMLInputElement>(null);

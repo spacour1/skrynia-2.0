@@ -1,10 +1,16 @@
 import { ApiError, badRequest, forbidden, notFound } from "../../common/errors.js";
 import type { DbClient } from "../../db/pool.js";
-import { pool } from "../../db/pool.js";
-import { defaultLocale } from "../../i18n/config.js";
-import { t, type TranslateParams } from "../../i18n/t.js";
-import { createNotification } from "../notifications/notifications.service.js";
+import { inTx, pool } from "../../db/pool.js";
+import type { TranslateParams } from "../../i18n/t.js";
 import { broadcastConversation, isUserOnline } from "./ws.service.js";
+import { enqueueDomainEvent } from "../outbox/outbox.service.js";
+import {
+  createSystemMessage,
+  getConversationIdForOrder,
+  SYSTEM_SENDER_DISPLAY_NAME
+} from "./system-messages.service.js";
+
+export { createSystemMessage, getConversationIdForOrder };
 
 export type ConversationParties = { buyerId: string; sellerId: string };
 
@@ -52,8 +58,6 @@ export type GroupedConversation = {
   lastMessageBody: string | null;
   contexts: GroupedConversationContext[];
 };
-
-const SYSTEM_SENDER_DISPLAY_NAME = "Система";
 
 const MIN_MESSAGE_LENGTH = 1;
 const MAX_MESSAGE_LENGTH = 3000;
@@ -195,28 +199,6 @@ export async function getOrCreateOrderConversation(
   return { id: reread.rows[0].id as string, existing: true };
 }
 
-async function getConversationNotificationContext(conversationId: string) {
-  const result = await pool.query(
-    `select c.product_id as "productId", c.order_id as "orderId",
-            p.title as "productTitle", o.status as "orderStatus"
-     from conversations c
-     left join products p on p.id = c.product_id
-     left join orders o on o.id = c.order_id
-     where c.id = $1`,
-    [conversationId]
-  );
-  const row = result.rows[0];
-  if (!row) throw notFound("Conversation not found");
-  const type: ConversationContextType = row.orderId ? "order" : row.productId ? "product" : "direct";
-  return {
-    type,
-    productId: (row.productId as string | null) ?? null,
-    productTitle: (row.productTitle as string | null) ?? null,
-    orderId: (row.orderId as string | null) ?? null,
-    orderStatus: (row.orderStatus as string | null) ?? null
-  };
-}
-
 export async function sendMessage(input: {
   conversationId: string;
   senderId: string;
@@ -226,42 +208,27 @@ export async function sendMessage(input: {
   const body = input.body.trim();
   if (body.length < MIN_MESSAGE_LENGTH || body.length > MAX_MESSAGE_LENGTH) throw badRequest("Invalid message");
 
-  const parties = await assertCanSendMessage(input.conversationId, input.senderId);
+  await assertCanSendMessage(input.conversationId, input.senderId);
 
-  const result = await pool.query(
-    `insert into messages(conversation_id, sender_id, body, attachment_url)
-     values ($1, $2, $3, $4)
-     returning id, conversation_id as "conversationId", sender_id as "senderId",
-               (select display_name from users where id = $2) as "senderDisplayName",
-               body, attachment_url as "attachmentUrl", created_at as "createdAt"`,
-    [input.conversationId, input.senderId, body, input.attachmentUrl ?? null]
-  );
-  const message = result.rows[0] as Message;
-
-  const recipientId = parties.buyerId === input.senderId ? parties.sellerId : parties.buyerId;
-  const context = await getConversationNotificationContext(input.conversationId);
-  const templateKey =
-    context.type === "order"
-      ? "notifications.newMessageOrder"
-      : context.type === "product"
-        ? "notifications.newMessageProduct"
-        : "notifications.newMessageDirect";
-  await createNotification({
-    userId: recipientId,
-    type: "message",
-    templateKey,
-    params: {
-      sender: message.senderDisplayName,
-      preview: body.slice(0, 120),
-      productTitle: context.productTitle ?? "",
-      orderId: context.orderId ? context.orderId.slice(0, 8) : ""
-    },
-    conversationId: input.conversationId,
-    productId: context.productId ?? undefined,
-    orderId: context.orderId ?? undefined
+  return inTx(async (client) => {
+    const result = await client.query(
+      `insert into messages(conversation_id, sender_id, body, attachment_url)
+       values ($1, $2, $3, $4)
+       returning id, conversation_id as "conversationId", sender_id as "senderId",
+                 (select display_name from users where id = $2) as "senderDisplayName",
+                 body, attachment_url as "attachmentUrl", created_at as "createdAt"`,
+      [input.conversationId, input.senderId, body, input.attachmentUrl ?? null]
+    );
+    const message = result.rows[0] as Message;
+    await enqueueDomainEvent(client, {
+      eventKey: `message.created:${message.id}`,
+      eventType: "message.created",
+      aggregateType: "message",
+      aggregateId: message.id,
+      payload: { messageId: message.id }
+    });
+    return message;
   });
-
-  return message;
 }
 
 export async function getMessages(
@@ -305,44 +272,6 @@ export async function markConversationRead(conversationId: string, userId: strin
      where id = $1`,
     [conversationId, userId]
   );
-}
-
-/**
- * Posts a system message (sender_id null, kind = 'system') into an order's chat. Used for
- * the order lifecycle timeline (created/paid/started/delivered/disputed/resolved/...) so
- * buyers and sellers see those events inline in the same thread they're already chatting in,
- * instead of only in the separate order_events log.
- */
-export async function createSystemMessage(
-  input: {
-    conversationId: string;
-    type: string;
-    /** i18n key under "system.*" — rendered into the default locale for the stored body. */
-    bodyKey: string;
-    params?: TranslateParams;
-    metadata?: Record<string, unknown>;
-  },
-  client: DbClient = pool
-): Promise<Message> {
-  // The stored body is a default-locale fallback; bodyKey/params ride along in metadata
-  // so the frontend renders the message in the viewer's current language.
-  const body = t(defaultLocale, input.bodyKey, input.params);
-  const metadata = { ...(input.metadata ?? {}), bodyKey: input.bodyKey, ...(input.params ? { params: input.params } : {}) };
-  const result = await client.query(
-    `insert into messages(conversation_id, sender_id, kind, system_type, body, metadata)
-     values ($1, null, 'system', $2, $3, $4)
-     returning id, conversation_id as "conversationId", sender_id as "senderId",
-               '${SYSTEM_SENDER_DISPLAY_NAME}' as "senderDisplayName",
-               body, attachment_url as "attachmentUrl", created_at as "createdAt",
-               kind, system_type as "systemType", metadata`,
-    [input.conversationId, input.type, body, JSON.stringify(metadata)]
-  );
-  return result.rows[0] as Message;
-}
-
-export async function getConversationIdForOrder(orderId: string): Promise<string | null> {
-  const result = await pool.query(`select id from conversations where order_id = $1`, [orderId]);
-  return result.rows[0]?.id ?? null;
 }
 
 /**

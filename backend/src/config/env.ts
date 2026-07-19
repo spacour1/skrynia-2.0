@@ -37,6 +37,14 @@ const schema = z.object({
   SENTRY_RELEASE: z.string().optional(),
   SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).optional(),
   JOB_WORKER_ENABLED: z.coerce.boolean().default(true),
+  OUTBOX_WORKER_ENABLED: z.coerce.boolean().optional(),
+  OUTBOX_POLL_INTERVAL_MS: z.coerce.number().int().min(50).default(1_000),
+  OUTBOX_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(25),
+  OUTBOX_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(5),
+  OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(8),
+  OUTBOX_BASE_BACKOFF_MS: z.coerce.number().int().min(10).default(1_000),
+  OUTBOX_LOCK_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(5 * 60_000),
+  OUTBOX_DELIVERY_TIMEOUT_MS: z.coerce.number().int().min(100).default(5_000),
   S3_ENDPOINT: z.string().optional(),
   S3_REGION: z.string().default("auto"),
   S3_BUCKET: z.string().optional(),
@@ -150,6 +158,8 @@ const parsedEnv = schema.parse(process.env);
 // effective ceilings while operators migrate to the separated limiter configuration.
 export const env = {
   ...parsedEnv,
+  OUTBOX_WORKER_ENABLED:
+    parsedEnv.OUTBOX_WORKER_ENABLED ?? parsedEnv.JOB_WORKER_ENABLED,
   ANONYMOUS_WRITE_RATE_LIMIT_PER_MIN:
     parsedEnv.ANONYMOUS_WRITE_RATE_LIMIT_PER_MIN ?? parsedEnv.WRITE_RATE_LIMIT_PER_MIN,
   CREDENTIAL_RATE_LIMIT_PER_15MIN:

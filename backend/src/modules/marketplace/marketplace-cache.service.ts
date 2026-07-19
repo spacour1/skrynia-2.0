@@ -1,4 +1,9 @@
-import { cacheDel, cacheDelPrefixes } from "../../common/redis.js";
+import {
+  cacheDel,
+  cacheDelPrefixes,
+  cacheDelPrefixesStrict,
+  cacheDelStrict
+} from "../../common/redis.js";
 import { pool } from "../../db/pool.js";
 
 export type ProductCacheContext = {
@@ -16,6 +21,10 @@ export type MarketplaceCacheScope = {
   sectionIds?: readonly string[];
 };
 
+type MarketplaceCacheInvalidationOptions = {
+  strict?: boolean;
+};
+
 const PRODUCT_CACHE_CONTEXT_COLUMNS = `
   id as "productId",
   seller_id as "sellerId",
@@ -28,10 +37,11 @@ function compactIds(values: Array<string | null | undefined>) {
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
-async function deleteExactKeys(keys: string[]) {
+async function deleteExactKeys(keys: string[], strict: boolean) {
   const uniqueKeys = [...new Set(keys)];
+  const deleteKeys = strict ? cacheDelStrict : cacheDel;
   for (let offset = 0; offset < uniqueKeys.length; offset += 500) {
-    await cacheDel(...uniqueKeys.slice(offset, offset + 500));
+    await deleteKeys(...uniqueKeys.slice(offset, offset + 500));
   }
 }
 
@@ -69,7 +79,8 @@ export async function loadSectionProductCacheContexts(sectionId: string) {
 
 export async function invalidateProductCacheBatch(
   contexts: readonly ProductCacheContext[],
-  scope: MarketplaceCacheScope = {}
+  scope: MarketplaceCacheScope = {},
+  options: MarketplaceCacheInvalidationOptions = {}
 ): Promise<void> {
   const productIds = compactIds(contexts.map((context) => context.productId));
   const sellerIds = compactIds([
@@ -102,13 +113,25 @@ export async function invalidateProductCacheBatch(
     ...sectionIds.map((sectionId) => `section:${sectionId}:`)
   ];
 
-  await Promise.all([deleteExactKeys(exactKeys), cacheDelPrefixes(...prefixes)]);
+  const deletePrefixes = options.strict
+    ? cacheDelPrefixesStrict
+    : cacheDelPrefixes;
+  await Promise.all([
+    deleteExactKeys(exactKeys, Boolean(options.strict)),
+    deletePrefixes(...prefixes)
+  ]);
 }
 
-export async function invalidateProductCaches(context: ProductCacheContext): Promise<void> {
-  await invalidateProductCacheBatch([context]);
+export async function invalidateProductCaches(
+  context: ProductCacheContext,
+  options: MarketplaceCacheInvalidationOptions = {}
+): Promise<void> {
+  await invalidateProductCacheBatch([context], {}, options);
 }
 
-export async function invalidateCatalogCaches(scope: MarketplaceCacheScope = {}): Promise<void> {
-  await invalidateProductCacheBatch([], scope);
+export async function invalidateCatalogCaches(
+  scope: MarketplaceCacheScope = {},
+  options: MarketplaceCacheInvalidationOptions = {}
+): Promise<void> {
+  await invalidateProductCacheBatch([], scope, options);
 }

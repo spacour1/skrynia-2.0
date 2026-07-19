@@ -5,13 +5,16 @@ import { inTx, pool } from "../../db/pool.js";
 import { asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
-import { cacheDel, cacheDelPattern, cacheGet, cacheSet } from "../../common/redis.js";
+import { cacheGet, cacheSet } from "../../common/redis.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { releaseEscrow } from "./ledger.service.js";
 import { recordOrderEvent } from "./order-events.service.js";
-import { notifyOrderEvent, broadcastConversation } from "../chat/ws.service.js";
-import { createNotification } from "../notifications/notifications.service.js";
-import { createSystemMessage, getOrCreateOrderConversation, postOrderSystemMessage } from "../chat/chat.service.js";
+import { getOrCreateOrderConversation } from "../chat/chat.service.js";
+import {
+  createOrderSystemMessage,
+  createSystemMessage
+} from "../chat/system-messages.service.js";
+import { enqueueDomainEvent } from "../outbox/outbox.service.js";
 
 const router = Router();
 
@@ -40,7 +43,7 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = createOrderSchema.parse(req.body);
 
-    const { order, conversationId, systemMessage } = await inTx(async (client) => {
+    const { order, conversationId } = await inTx(async (client) => {
       const productResult = await client.query(
         `select p.id, p.seller_id, p.price_cents, p.currency, p.stock, p.status, u.is_banned
          from products p
@@ -85,26 +88,32 @@ router.post(
         client
       );
 
-      return { order: createdOrder, conversationId: newConversationId, systemMessage: message };
-    });
+      await recordOrderEvent(
+        {
+          orderId: createdOrder.id,
+          actorId: req.user.id,
+          type: "created",
+          templateKey: "orderEvents.created"
+        },
+        client
+      );
+      await enqueueDomainEvent(client, {
+        eventKey: `order.created:${createdOrder.id}`,
+        eventType: "order.created",
+        aggregateType: "order",
+        aggregateId: createdOrder.id,
+        payload: {
+          orderId: createdOrder.id,
+          buyerId: createdOrder.buyer_id,
+          sellerId: createdOrder.seller_id,
+          productId: createdOrder.product_id,
+          conversationId: newConversationId,
+          systemMessageIds: [message.id]
+        }
+      });
 
-    broadcastConversation(conversationId, { type: "message", message: systemMessage });
-    await createNotification({
-      userId: order.seller_id,
-      type: "order_created",
-      templateKey: "notifications.orderCreated",
-      conversationId,
-      orderId: order.id,
-      productId: order.product_id
+      return { order: createdOrder, conversationId: newConversationId };
     });
-    await recordOrderEvent({
-      orderId: order.id,
-      actorId: req.user.id,
-      type: "created",
-      templateKey: "orderEvents.created"
-    });
-    await cacheDelPattern(`orders:${req.user.id}:*`);
-    await cacheDelPattern(`orders:${order.seller_id}:*`);
 
     res.status(201).json({ order, conversationId });
   })
@@ -202,33 +211,51 @@ router.post(
   requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
-    const result = await pool.query(
-      `update orders
-       set status = 'in_progress', updated_at = now()
-       where id = $1 and seller_id = $2 and status = 'paid'
-       returning *`,
-      [id, req.user.id]
-    );
-    if (!result.rows[0]) throw badRequest("Only the seller can start a paid order");
-    await cacheDelPattern(`order:${id}:*`);
-    await cacheDelPattern(`orders:${result.rows[0].buyer_id}:*`);
-    await cacheDelPattern(`orders:${req.user.id}:*`);
-    notifyOrderEvent(result.rows[0].buyer_id, { type: "order_started", orderId: id });
-    await createNotification({
-      userId: result.rows[0].buyer_id,
-      type: "order_started",
-      templateKey: "notifications.orderStarted",
-      orderId: id,
-      productId: result.rows[0].product_id
+    const order = await inTx(async (client) => {
+      const result = await client.query(
+        `update orders
+         set status = 'in_progress', updated_at = now()
+         where id = $1 and seller_id = $2 and status = 'paid'
+         returning *`,
+        [id, req.user.id]
+      );
+      const updatedOrder = result.rows[0];
+      if (!updatedOrder) {
+        throw badRequest("Only the seller can start a paid order");
+      }
+      await recordOrderEvent(
+        {
+          orderId: id,
+          actorId: req.user.id,
+          type: "started",
+          templateKey: "orderEvents.started"
+        },
+        client
+      );
+      const message = await createOrderSystemMessage(
+        {
+          orderId: id,
+          type: "seller_started",
+          bodyKey: "system.sellerStarted"
+        },
+        client
+      );
+      await enqueueDomainEvent(client, {
+        eventKey: `order.started:${id}`,
+        eventType: "order.started",
+        aggregateType: "order",
+        aggregateId: id,
+        payload: {
+          orderId: id,
+          buyerId: updatedOrder.buyer_id,
+          sellerId: updatedOrder.seller_id,
+          productId: updatedOrder.product_id,
+          systemMessageIds: message ? [message.id] : []
+        }
+      });
+      return updatedOrder;
     });
-    await recordOrderEvent({
-      orderId: id,
-      actorId: req.user.id,
-      type: "started",
-      templateKey: "orderEvents.started"
-    });
-    await postOrderSystemMessage(id, "seller_started", "system.sellerStarted");
-    res.json({ order: result.rows[0] });
+    res.json({ order });
   })
 );
 
@@ -239,37 +266,55 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const input = deliverSchema.parse(req.body);
-    const result = await pool.query(
-      `update orders
-       set status = 'delivered',
-           delivery_note = $3,
-           delivered_at = now(),
-           auto_release_at = now() + make_interval(hours => $4::int),
-           updated_at = now()
-       where id = $1 and seller_id = $2 and status in ('paid', 'in_progress')
-       returning *`,
-      [id, req.user.id, input.deliveryNote, env.AUTO_RELEASE_HOURS]
-    );
-    if (!result.rows[0]) throw badRequest("Only the seller can deliver an active escrowed order");
-    await cacheDelPattern(`order:${id}:*`);
-    await cacheDelPattern(`orders:${result.rows[0].buyer_id}:*`);
-    await cacheDelPattern(`orders:${req.user.id}:*`);
-    notifyOrderEvent(result.rows[0].buyer_id, { type: "order_delivered", orderId: id });
-    await createNotification({
-      userId: result.rows[0].buyer_id,
-      type: "order_delivered",
-      templateKey: "notifications.orderDelivered",
-      orderId: id,
-      productId: result.rows[0].product_id
+    const order = await inTx(async (client) => {
+      const result = await client.query(
+        `update orders
+         set status = 'delivered',
+             delivery_note = $3,
+             delivered_at = now(),
+             auto_release_at = now() + make_interval(hours => $4::int),
+             updated_at = now()
+         where id = $1 and seller_id = $2 and status in ('paid', 'in_progress')
+         returning *`,
+        [id, req.user.id, input.deliveryNote, env.AUTO_RELEASE_HOURS]
+      );
+      const updatedOrder = result.rows[0];
+      if (!updatedOrder) {
+        throw badRequest("Only the seller can deliver an active escrowed order");
+      }
+      await recordOrderEvent(
+        {
+          orderId: id,
+          actorId: req.user.id,
+          type: "delivered",
+          templateKey: "orderEvents.delivered"
+        },
+        client
+      );
+      const message = await createOrderSystemMessage(
+        {
+          orderId: id,
+          type: "delivery_sent",
+          bodyKey: "system.deliverySent"
+        },
+        client
+      );
+      await enqueueDomainEvent(client, {
+        eventKey: `order.delivered:${id}`,
+        eventType: "order.delivered",
+        aggregateType: "order",
+        aggregateId: id,
+        payload: {
+          orderId: id,
+          buyerId: updatedOrder.buyer_id,
+          sellerId: updatedOrder.seller_id,
+          productId: updatedOrder.product_id,
+          systemMessageIds: message ? [message.id] : []
+        }
+      });
+      return updatedOrder;
     });
-    await recordOrderEvent({
-      orderId: id,
-      actorId: req.user.id,
-      type: "delivered",
-      templateKey: "orderEvents.delivered"
-    });
-    await postOrderSystemMessage(id, "delivery_sent", "system.deliverySent");
-    res.json({ order: result.rows[0] });
+    res.json({ order });
   })
 );
 
@@ -285,21 +330,30 @@ router.post(
     if (order.buyer_id !== req.user.id) throw forbidden("Only the buyer can confirm delivery");
     if (order.status !== "delivered") throw badRequest("Only delivered orders can be confirmed");
 
-    const updated = await releaseEscrow(id);
-    notifyOrderEvent(order.seller_id, { type: "order_completed", orderId: id });
-    await createNotification({
-      userId: order.seller_id,
-      type: "order_completed",
-      templateKey: "notifications.orderCompleted",
-      orderId: id
-    });
-    await recordOrderEvent({
-      orderId: id,
+    const updated = await releaseEscrow(id, {
+      source: "buyer_confirmed",
       actorId: req.user.id,
-      type: "completed",
-      templateKey: "orderEvents.completed"
+      afterUpdate: async (client) => {
+        await recordOrderEvent(
+          {
+            orderId: id,
+            actorId: req.user.id,
+            type: "completed",
+            templateKey: "orderEvents.completed"
+          },
+          client
+        );
+        const message = await createOrderSystemMessage(
+          {
+            orderId: id,
+            type: "escrow_released",
+            bodyKey: "system.escrowReleased"
+          },
+          client
+        );
+        return { systemMessageIds: message ? [message.id] : [] };
+      }
     });
-    await postOrderSystemMessage(id, "escrow_released", "system.escrowReleased");
     res.json({ order: updated });
   })
 );
@@ -311,33 +365,52 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const input = reviewSchema.parse(req.body);
-    const orderResult = await pool.query(`select * from orders where id = $1`, [id]);
-    const order = orderResult.rows[0];
-    if (!order) throw notFound("Order not found");
-    if (order.buyer_id !== req.user.id) throw forbidden("Only the buyer can review this order");
-    if (order.status !== "completed") throw badRequest("Reviews are allowed only after completed orders");
+    const review = await inTx(async (client) => {
+      const orderResult = await client.query(
+        `select * from orders where id = $1 for update`,
+        [id]
+      );
+      const order = orderResult.rows[0];
+      if (!order) throw notFound("Order not found");
+      if (order.buyer_id !== req.user.id) {
+        throw forbidden("Only the buyer can review this order");
+      }
+      if (order.status !== "completed") {
+        throw badRequest("Reviews are allowed only after completed orders");
+      }
 
-    const result = await pool.query(
-      `insert into reviews(order_id, seller_id, buyer_id, rating, comment)
-       values ($1, $2, $3, $4, $5)
-       returning *`,
-      [id, order.seller_id, order.buyer_id, input.rating, input.comment ?? null]
-    );
-    await createNotification({
-      userId: order.seller_id,
-      type: "review_created",
-      templateKey: "notifications.reviewCreated",
-      params: { rating: input.rating },
-      orderId: id
+      const result = await client.query(
+        `insert into reviews(order_id, seller_id, buyer_id, rating, comment)
+         values ($1, $2, $3, $4, $5)
+         returning *`,
+        [id, order.seller_id, order.buyer_id, input.rating, input.comment ?? null]
+      );
+      const createdReview = result.rows[0];
+      await recordOrderEvent(
+        {
+          orderId: id,
+          actorId: req.user.id,
+          type: "review_created",
+          templateKey: "orderEvents.reviewCreated",
+          params: { rating: input.rating }
+        },
+        client
+      );
+      await enqueueDomainEvent(client, {
+        eventKey: `review.created:${createdReview.id}`,
+        eventType: "review.created",
+        aggregateType: "review",
+        aggregateId: createdReview.id,
+        payload: {
+          reviewId: createdReview.id,
+          orderId: id,
+          sellerId: order.seller_id,
+          rating: input.rating
+        }
+      });
+      return createdReview;
     });
-    await recordOrderEvent({
-      orderId: id,
-      actorId: req.user.id,
-      type: "review_created",
-      templateKey: "orderEvents.reviewCreated",
-      params: { rating: input.rating }
-    });
-    res.status(201).json({ review: result.rows[0] });
+    res.status(201).json({ review });
   })
 );
 

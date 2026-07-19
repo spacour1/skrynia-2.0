@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
 import { pool } from "../../db/pool.js";
+import { env } from "../../config/env.js";
+import { logger } from "../../common/logger.js";
 import { defaultLocale } from "../../i18n/config.js";
 import { t, type TranslateParams } from "../../i18n/t.js";
 import { notifyOrderEvent } from "../chat/ws.service.js";
@@ -37,7 +40,37 @@ export type NotificationInput = {
   skipTelegram?: boolean;
 };
 
-export async function createNotification(input: NotificationInput) {
+type NotificationOptions = {
+  eventKey?: string;
+  requireDeliveryQueue?: boolean;
+};
+
+function deliveryJobId(eventKey: string) {
+  return `notification-${createHash("sha256").update(eventKey).digest("hex")}`;
+}
+
+async function withDeliveryTimeout<T>(promise: Promise<T>): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("Notification delivery queue timed out")),
+          env.OUTBOX_DELIVERY_TIMEOUT_MS
+        );
+        timeout.unref();
+      })
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+export async function createNotification(
+  input: NotificationInput,
+  options: NotificationOptions = {}
+) {
   const titleKey = input.titleKey ?? (input.templateKey ? `${input.templateKey}.title` : null);
   const bodyKey = input.bodyKey ?? (input.templateKey ? `${input.templateKey}.body` : null);
   const params = input.params ?? {};
@@ -48,12 +81,16 @@ export async function createNotification(input: NotificationInput) {
   const fallbackBody = input.body ?? (bodyKey ? t(defaultLocale, bodyKey, params) : null);
 
   const result = await pool.query(
-    `insert into notifications(user_id, type, title, body, title_key, body_key, params, order_id, product_id, conversation_id)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `insert into notifications(
+       user_id, type, title, body, title_key, body_key, params,
+       order_id, product_id, conversation_id, event_key
+     )
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     on conflict (event_key) where event_key is not null do nothing
      returning id, user_id as "userId", type, title, body,
                title_key as "titleKey", body_key as "bodyKey", params,
                order_id as "orderId", product_id as "productId", conversation_id as "conversationId",
-               read_at as "readAt", created_at as "createdAt"`,
+               event_key as "eventKey", read_at as "readAt", created_at as "createdAt"`,
     [
       input.userId,
       input.type,
@@ -64,26 +101,73 @@ export async function createNotification(input: NotificationInput) {
       JSON.stringify(params),
       input.orderId ?? null,
       input.productId ?? null,
-      input.conversationId ?? null
+      input.conversationId ?? null,
+      options.eventKey ?? null
     ]
   );
-  notifyOrderEvent(input.userId, { type: "notification", notification: result.rows[0] });
+  const created = Boolean(result.rows[0]);
+  let notification = result.rows[0];
+  if (!notification && options.eventKey) {
+    const existing = await pool.query(
+      `select id, user_id as "userId", type, title, body,
+              title_key as "titleKey", body_key as "bodyKey", params,
+              order_id as "orderId", product_id as "productId", conversation_id as "conversationId",
+              event_key as "eventKey", read_at as "readAt", created_at as "createdAt"
+       from notifications
+       where event_key = $1`,
+      [options.eventKey]
+    );
+    notification = existing.rows[0];
+  }
+  if (!notification) throw new Error("Notification could not be created or reloaded");
+
+  if (created) {
+    notifyOrderEvent(input.userId, { type: "notification", notification });
+  }
   // Email/Telegram delivery renders the keys in the recipient's preferred_locale
   // inside the job worker (the recipient may use a different language than the actor).
-  await enqueueJob("notification_delivery", {
-    userId: input.userId,
-    subject: fallbackTitle,
-    body: fallbackBody ?? undefined,
-    titleKey: titleKey ?? undefined,
-    bodyKey: bodyKey ?? undefined,
-    params,
-    notificationType: input.type,
-    orderId: input.orderId,
-    conversationId: input.conversationId,
-    email: input.emailOverride,
-    skipTelegram: input.skipTelegram
-  });
-  return result.rows[0];
+  const enqueueDelivery = () =>
+    withDeliveryTimeout(
+      enqueueJob(
+        "notification_delivery",
+        {
+          userId: input.userId,
+          subject: fallbackTitle,
+          body: fallbackBody ?? undefined,
+          titleKey: titleKey ?? undefined,
+          bodyKey: bodyKey ?? undefined,
+          params,
+          notificationType: input.type,
+          orderId: input.orderId,
+          conversationId: input.conversationId,
+          email: input.emailOverride,
+          skipTelegram: input.skipTelegram
+        },
+        options.eventKey ? { jobId: deliveryJobId(options.eventKey) } : {}
+      )
+    );
+
+  if (options.requireDeliveryQueue) {
+    const job = await enqueueDelivery();
+    if (!job) throw new Error("Notification delivery queue is unavailable");
+  } else {
+    void enqueueDelivery()
+      .then((job) => {
+        if (!job) {
+          logger.warn(
+            { notificationId: notification.id, type: input.type },
+            "notification_delivery_not_enqueued"
+          );
+        }
+      })
+      .catch((error) => {
+        logger.error(
+          { error, notificationId: notification.id, type: input.type },
+          "notification_delivery_enqueue_failed"
+        );
+      });
+  }
+  return notification;
 }
 
 /** Fans a notification out to every admin (or moderator, if included in `roles`). */

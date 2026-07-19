@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
-import { pool } from "../../db/pool.js";
+import { inTx, pool } from "../../db/pool.js";
 import { asyncHandler, badRequest, notFound } from "../../common/errors.js";
 import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
@@ -14,6 +15,8 @@ import {
   loadProductCacheContext,
   type ProductCacheContext
 } from "../marketplace/marketplace-cache.service.js";
+import { enqueueDomainEvent } from "../outbox/outbox.service.js";
+import { retryFailedOutboxEvents } from "../outbox/outbox.worker.js";
 
 const router = Router();
 const adminOnly = requireRole("admin");
@@ -79,9 +82,44 @@ router.get(
   adminOnly,
   asyncHandler(async (_req: AuthedRequest, res) => {
     const queue = getJobQueue();
-    if (!queue) return res.json({ enabled: false, counts: {} });
-    const counts = await queue.getJobCounts("waiting", "active", "delayed", "completed", "failed");
-    res.json({ enabled: true, counts });
+    const [counts, outbox] = await Promise.all([
+      queue
+        ? queue.getJobCounts(
+            "waiting",
+            "active",
+            "delayed",
+            "completed",
+            "failed"
+          )
+        : Promise.resolve({}),
+      pool.query<{ status: string; count: number }>(
+        `select status, count(*)::int as count
+         from domain_outbox
+         group by status`
+      )
+    ]);
+    res.json({
+      enabled: Boolean(queue),
+      counts,
+      outbox: Object.fromEntries(
+        outbox.rows.map((row) => [row.status, row.count])
+      )
+    });
+  })
+);
+
+router.post(
+  "/outbox/retry",
+  adminOnly,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const input = z
+      .object({
+        eventIds: z.array(z.string().uuid()).max(500).optional(),
+        limit: z.coerce.number().int().min(1).max(500).optional()
+      })
+      .parse(req.body);
+    const retriedEventIds = await retryFailedOutboxEvents(input);
+    res.json({ retriedEventIds, count: retriedEventIds.length });
   })
 );
 
@@ -131,29 +169,54 @@ router.patch(
         isRecommended: z.boolean().optional()
       })
       .parse(req.body);
-    const result = await pool.query<
-      ProductCacheContext & {
-        id: string;
-        title: string;
-        status: string;
-        isHot: boolean;
-        isRecommended: boolean;
+    const { listing, blockedTransition } = await inTx(async (client) => {
+      const existing = await client.query<{ status: string }>(
+        `select status from products where id = $1 for update`,
+        [id]
+      );
+      if (!existing.rows[0]) throw notFound("Listing not found");
+
+      const result = await client.query<
+        ProductCacheContext & {
+          id: string;
+          title: string;
+          status: string;
+          isHot: boolean;
+          isRecommended: boolean;
+        }
+      >(
+        `update products
+         set status = coalesce($2, status),
+             is_hot = coalesce($3, is_hot),
+             is_recommended = coalesce($4, is_recommended),
+             updated_at = now()
+         where id = $1
+         returning id, id as "productId", seller_id as "sellerId", category_id as "categoryId",
+                   game_id as "gameId", section_id as "sectionId",
+                   title, status, is_hot as "isHot", is_recommended as "isRecommended"`,
+        [id, body.status ?? null, body.isHot ?? null, body.isRecommended ?? null]
+      );
+      const updatedListing = result.rows[0];
+      const wasBlocked =
+        body.status === "blocked" && existing.rows[0].status !== "blocked";
+      if (wasBlocked) {
+        await enqueueDomainEvent(client, {
+          eventKey: `product.blocked:${id}:${randomUUID()}`,
+          eventType: "product.blocked",
+          aggregateType: "product",
+          aggregateId: id,
+          payload: {
+            productId: updatedListing.productId,
+            sellerId: updatedListing.sellerId,
+            categoryId: updatedListing.categoryId ?? null,
+            gameId: updatedListing.gameId ?? null,
+            sectionId: updatedListing.sectionId ?? null
+          }
+        });
       }
-    >(
-      `update products
-       set status = coalesce($2, status),
-           is_hot = coalesce($3, is_hot),
-           is_recommended = coalesce($4, is_recommended),
-           updated_at = now()
-       where id = $1
-       returning id, id as "productId", seller_id as "sellerId", category_id as "categoryId",
-                 game_id as "gameId", section_id as "sectionId",
-                 title, status, is_hot as "isHot", is_recommended as "isRecommended"`,
-      [id, body.status ?? null, body.isHot ?? null, body.isRecommended ?? null]
-    );
-    const listing = result.rows[0];
-    if (!listing) throw notFound("Listing not found");
-    await invalidateProductCaches(listing);
+      return { listing: updatedListing, blockedTransition: wasBlocked };
+    });
+    if (!blockedTransition) await invalidateProductCaches(listing);
     const {
       productId: _productId,
       sellerId: _sellerId,

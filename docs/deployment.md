@@ -89,12 +89,14 @@ Add to `fly.toml`:
 
 The backend runs both the HTTP API and the BullMQ job worker in the same process by default. For production at scale, split them:
 
-| Replica type | `JOB_WORKER_ENABLED` | Replicas |
-|---|---|---|
-| API | `false` | 2–N (horizontal scale) |
-| Worker | `true` | 1 (exactly one; multiple workers cause double-processing) |
+| Replica type | `JOB_WORKER_ENABLED` | `OUTBOX_WORKER_ENABLED` | Replicas |
+|---|---|---|---|
+| API | `false` | `false` | 2–N (horizontal scale) |
+| Worker | `true` | `true` | 1 |
 
-Set `JOB_WORKER_ENABLED=false` on API replicas and run one separate worker replica with `JOB_WORKER_ENABLED=true`.
+Set both worker flags to `false` on API replicas and run one separate worker replica with
+both flags set to `true`. The transactional outbox itself is safe to scale horizontally
+because workers claim rows through `FOR UPDATE SKIP LOCKED`.
 
 ### Required backend env vars (production)
 
@@ -195,7 +197,7 @@ S3_SECRET_ACCESS_KEY=<iam-secret>
 - [ ] `REDIS_URL` is set and reachable
 - [ ] `STORAGE_DRIVER=s3` + S3 credentials set (for multi-replica)
 - [ ] At least one payment provider configured (LiqPay, Monobank, WayForPay, or manual)
-- [ ] `JOB_WORKER_ENABLED=false` on API replicas; one worker replica has it `=true`
+- [ ] Both worker flags are `false` on API replicas and `true` on the worker replica
 - [ ] `FRONTEND_URL` set to the exact origin (no trailing slash)
 - [ ] `SENTRY_DSN` set on backend; `NEXT_PUBLIC_SENTRY_DSN` set on frontend build
 - [ ] `ENABLE_TEST_PAYMENTS` is `false` (or unset)

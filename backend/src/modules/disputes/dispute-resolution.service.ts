@@ -4,6 +4,9 @@ import { inTx, pool } from "../../db/pool.js";
 import { conflict, notFound } from "../../common/errors.js";
 import { logger } from "../../common/logger.js";
 import { refundEscrow, releaseEscrow } from "../orders/ledger.service.js";
+import { recordOrderEvent } from "../orders/order-events.service.js";
+import { createOrderSystemMessage } from "../chat/system-messages.service.js";
+import { enqueueDomainEvent } from "../outbox/outbox.service.js";
 
 export type DisputeResolutionDecision = "refund" | "release";
 
@@ -236,7 +239,55 @@ async function finalizeIfApplied(
                  $4::uuid as seller_id`,
       [disputeId, row.order_status, row.buyer_id, row.seller_id]
     );
-    return { row: updated.rows[0], newlyResolved: true };
+    const resolved = updated.rows[0];
+    await recordOrderEvent(
+      {
+        orderId: resolved.order_id,
+        actorId: resolved.admin_id,
+        type: "dispute_resolved",
+        templateKey: "orderEvents.disputeResolved",
+        // The original claim note is preserved across retries and recovery.
+        body: resolved.admin_note ?? undefined,
+        metadata: { decision, operationId }
+      },
+      client
+    );
+    const resolutionMessage = await createOrderSystemMessage(
+      {
+        orderId: resolved.order_id,
+        type: "dispute_resolved",
+        bodyKey: "system.disputeResolved",
+        params: { note: resolved.admin_note ?? "" },
+        metadata: { decision, operationId }
+      },
+      client
+    );
+    const outcomeMessage = await createOrderSystemMessage(
+      {
+        orderId: resolved.order_id,
+        type: decision === "refund" ? "refunded" : "escrow_released",
+        bodyKey:
+          decision === "refund" ? "system.refunded" : "system.fundsReleased"
+      },
+      client
+    );
+    await enqueueDomainEvent(client, {
+      eventKey: `dispute.resolved:${disputeId}:${operationId}`,
+      eventType: "dispute.resolved",
+      aggregateType: "dispute",
+      aggregateId: disputeId,
+      payload: {
+        disputeId,
+        orderId: resolved.order_id,
+        buyerId: resolved.buyer_id,
+        sellerId: resolved.seller_id,
+        decision,
+        systemMessageIds: [resolutionMessage?.id, outcomeMessage?.id].filter(
+          (id): id is string => Boolean(id)
+        )
+      }
+    });
+    return { row: resolved, newlyResolved: true };
   });
 }
 
@@ -289,7 +340,10 @@ export async function resolveDisputeResolution(input: {
       order =
         input.decision === "refund"
           ? await refundEscrow(claim.row.order_id, claim.row.admin_id ?? input.adminId)
-          : await releaseEscrow(claim.row.order_id, claim.row.admin_id ?? input.adminId);
+          : await releaseEscrow(claim.row.order_id, {
+              adminId: claim.row.admin_id ?? input.adminId,
+              source: "dispute"
+            });
       escrowExecuted = true;
     } catch (error) {
       const applied = await finalizeIfApplied(input.disputeId, input.decision, operationId);

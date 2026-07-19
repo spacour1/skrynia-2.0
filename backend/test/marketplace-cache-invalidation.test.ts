@@ -6,6 +6,7 @@ import { cacheGet, getRedis } from "../src/common/redis.js";
 import { pool } from "../src/db/pool.js";
 import { issueSession } from "../src/modules/auth/session.service.js";
 import { lockEscrow, releaseEscrow } from "../src/modules/orders/ledger.service.js";
+import { processOutboxBatch } from "../src/modules/outbox/outbox.worker.js";
 import {
   closeDb,
   createOrder,
@@ -14,6 +15,15 @@ import {
 } from "./fixtures.js";
 
 const app = createApp();
+
+async function drainOutbox() {
+  while (true) {
+    const result = await processOutboxBatch({
+      workerId: "marketplace-cache-test"
+    });
+    if (result.claimed === 0) return;
+  }
+}
 
 beforeEach(resetDb);
 afterAll(async () => {
@@ -84,7 +94,7 @@ function categoryCount(response: request.Response, categoryId: string) {
 }
 
 describe("marketplace cache invalidation", () => {
-  it("hides a cached product immediately after admin block while preserving owner preview", async () => {
+  it("hides a cached product after durable admin-block delivery while preserving owner preview", async () => {
     const seller = await verifiedSellerClient();
     const admin = await adminClient();
     const productId = await createListing(seller, await anyCategoryId());
@@ -95,6 +105,7 @@ describe("marketplace cache invalidation", () => {
 
     const blocked = await admin.patch(`/admin/listings/${productId}`).send({ status: "blocked" });
     expect(blocked.status).toBe(200);
+    await drainOutbox();
     expect(await cacheGet(`marketplace:product:${productId}`)).toBeNull();
 
     expect((await request(app).get(`/marketplace/products/${productId}`)).status).toBe(404);
@@ -117,6 +128,7 @@ describe("marketplace cache invalidation", () => {
 
     const banned = await admin.patch(`/admin/users/${seller.userId}`).send({ isBanned: true });
     expect(banned.status).toBe(200);
+    await drainOutbox();
     expect((await request(app).get(`/marketplace/products/${productId}`)).status).toBe(404);
     expect((await request(app).get(listPath)).body.products).toHaveLength(0);
     expect(categoryCount(await request(app).get("/marketplace/categories"), categoryId)).toBe(0);
@@ -143,6 +155,7 @@ describe("marketplace cache invalidation", () => {
     expect(categoryCount(await request(app).get("/marketplace/categories"), categoryId)).toBe(1);
 
     expect((await admin.patch(`/admin/listings/${firstId}`).send({ status: "blocked" })).status).toBe(200);
+    await drainOutbox();
     expect(categoryCount(await request(app).get("/marketplace/categories"), categoryId)).toBe(0);
   });
 
@@ -184,6 +197,7 @@ describe("marketplace cache invalidation", () => {
 
     await pool.query(`update orders set status = 'delivered' where id = $1`, [orderId]);
     await releaseEscrow(orderId);
+    await drainOutbox();
     const afterRelease = await request(app).get(`/marketplace/products/${productId}`);
     expect(afterRelease.body.product.salesCount).toBe(1);
   });

@@ -4,6 +4,7 @@ import { env } from "./config/env.js";
 import { createApp } from "./app.js";
 import { attachWebSocketServer } from "./modules/chat/ws.service.js";
 import { startJobWorker } from "./modules/jobs/queue.js";
+import { startOutboxWorker } from "./modules/outbox/outbox.worker.js";
 import { initErrorTracking } from "./common/middleware/request-context.js";
 import { logger } from "./common/logger.js";
 import { migrateLegacyTwoFactorSecrets } from "./modules/auth/twofa.service.js";
@@ -26,6 +27,7 @@ async function startServer() {
 
   attachWebSocketServer(server);
   startJobWorker();
+  startOutboxWorker();
   server.listen(env.PORT, () => {
     logger.info({ port: env.PORT }, "api_listening");
   });

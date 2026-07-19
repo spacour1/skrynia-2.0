@@ -4,7 +4,9 @@ import { logger } from "../../common/logger.js";
 import { jobProcessedTotal } from "../../common/metrics.js";
 import { pool } from "../../db/pool.js";
 import { releaseEscrow } from "../orders/ledger.service.js";
+import { recordOrderEvent } from "../orders/order-events.service.js";
 import { notifyOrderEvent } from "../chat/ws.service.js";
+import { createOrderSystemMessage } from "../chat/system-messages.service.js";
 import { createReconciliationSnapshot } from "../admin/reconciliation.service.js";
 import { createNotification, notifyAdmins } from "../notifications/notifications.service.js";
 import { getNotificationPreferences } from "../notifications/preferences.service.js";
@@ -44,28 +46,36 @@ export type MarketplaceJobPayload = {
   skipTelegram?: boolean;
 };
 
-let connection: ConnectionOptions | null = null;
+let queueConnection: ConnectionOptions | null = null;
+let workerConnection: ConnectionOptions | null = null;
 let queue: Queue<MarketplaceJobPayload, unknown, string> | null = null;
 let worker: Worker<MarketplaceJobPayload, unknown, string> | null = null;
 
-function getConnection() {
+function buildConnection(maxRetriesPerRequest: number | null): ConnectionOptions | null {
   if (!env.REDIS_URL) return null;
-  if (!connection) {
-    const url = new URL(env.REDIS_URL);
-    connection = {
-      host: url.hostname,
-      port: Number(url.port || 6379),
-      username: url.username || undefined,
-      password: url.password || undefined,
-      db: Number(url.pathname.replace("/", "") || 0),
-      maxRetriesPerRequest: null
-    };
-  }
-  return connection;
+  const url = new URL(env.REDIS_URL);
+  return {
+    host: url.hostname,
+    port: Number(url.port || 6379),
+    username: url.username || undefined,
+    password: url.password || undefined,
+    db: Number(url.pathname.replace("/", "") || 0),
+    maxRetriesPerRequest
+  };
+}
+
+function getQueueConnection() {
+  queueConnection ??= buildConnection(1);
+  return queueConnection;
+}
+
+function getWorkerConnection() {
+  workerConnection ??= buildConnection(null);
+  return workerConnection;
 }
 
 export function getJobQueue() {
-  const redis = getConnection();
+  const redis = getQueueConnection();
   if (!redis) return null;
   if (!queue) {
     queue = new Queue<MarketplaceJobPayload, unknown, string>("marketplace", {
@@ -114,19 +124,28 @@ async function processEscrowRelease(orderId?: string) {
 
   for (const order of due.rows) {
     try {
-      await releaseEscrow(order.id);
-      notifyOrderEvent(order.buyer_id, { type: "order_auto_completed", orderId: order.id });
-      notifyOrderEvent(order.seller_id, { type: "order_auto_completed", orderId: order.id });
-      await Promise.all(
-        [order.buyer_id, order.seller_id].map((userId) =>
-          createNotification({
-            userId,
-            type: "order_auto_released",
-            templateKey: "notifications.orderAutoReleased",
-            orderId: order.id
-          })
-        )
-      );
+      await releaseEscrow(order.id, {
+        source: "auto",
+        afterUpdate: async (client) => {
+          await recordOrderEvent(
+            {
+              orderId: order.id,
+              type: "auto_released",
+              templateKey: "orderEvents.autoReleased"
+            },
+            client
+          );
+          const message = await createOrderSystemMessage(
+            {
+              orderId: order.id,
+              type: "escrow_released",
+              bodyKey: "system.fundsReleased"
+            },
+            client
+          );
+          return { systemMessageIds: message ? [message.id] : [] };
+        }
+      });
     } catch (err) {
       // Log and continue — a single bad order (e.g. seed data without matching escrow)
       // must not crash the whole sweep or cause BullMQ to retry and spam logs.
@@ -305,7 +324,7 @@ async function processReconciliationDaily() {
 
 export function startJobWorker() {
   if (!env.JOB_WORKER_ENABLED || worker) return;
-  const redis = getConnection();
+  const redis = getWorkerConnection();
   if (!redis) return;
 
   worker = new Worker<MarketplaceJobPayload, unknown, string>(

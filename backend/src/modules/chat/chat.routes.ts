@@ -5,7 +5,6 @@ import { asyncHandler, badRequest, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import type { AuthedRequest } from "../../common/types.js";
-import { broadcastConversation } from "./ws.service.js";
 import {
   assertConversationAccess,
   getExistingProductConversation,
@@ -156,7 +155,6 @@ router.post(
       body: input.body,
       attachmentUrl: input.attachmentUrl
     });
-    broadcastConversation(conversationId, { type: "message", message });
     res.status(201).json({ message });
   })
 );

@@ -7,9 +7,9 @@ import { requireEmailVerified } from "../../common/middleware/require-email-veri
 import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { recordOrderEvent } from "../orders/order-events.service.js";
-import { notifyOrderEvent } from "../chat/ws.service.js";
-import { createNotification, notifyAdmins } from "../notifications/notifications.service.js";
-import { getMessages, postOrderSystemMessage } from "../chat/chat.service.js";
+import { getMessages } from "../chat/chat.service.js";
+import { createOrderSystemMessage } from "../chat/system-messages.service.js";
+import { enqueueDomainEvent } from "../outbox/outbox.service.js";
 import {
   createDisputeMessage,
   getOrderDispute,
@@ -72,7 +72,7 @@ router.post(
     // Order lock, status flip, and dispute creation/check are one transaction. There is no
     // window where the order says 'disputed' but no dispute row exists, and two concurrent
     // opens (or an open racing a confirm/deliver transition) serialize on the row lock.
-    const { row, dispute, repeated, messageSuggested } = await inTx(async (client) => {
+    const { dispute, repeated, messageSuggested } = await inTx(async (client) => {
       const order = await client.query(`select * from orders where id = $1 for update`, [orderId]);
       const orderRow = order.rows[0];
       if (!orderRow) throw notFound("Order not found");
@@ -91,7 +91,6 @@ router.post(
         const existingDispute = existing.rows[0];
         if (!existingDispute) throw badRequest("Dispute state is inconsistent");
         return {
-          row: orderRow,
           dispute: existingDispute,
           repeated: true,
           messageSuggested:
@@ -107,9 +106,43 @@ router.post(
          returning *`,
         [orderId, req.user.id, input.reason]
       );
+      const createdDispute = inserted.rows[0];
+      await recordOrderEvent(
+        {
+          orderId,
+          actorId: req.user.id,
+          type: "disputed",
+          templateKey: "orderEvents.disputed",
+          // The dispute reason is user-generated content - stored raw, never translated.
+          body: input.reason
+        },
+        client
+      );
+      const message = await createOrderSystemMessage(
+        {
+          orderId,
+          type: "dispute_opened",
+          bodyKey: "system.disputeOpened",
+          params: { reason: input.reason }
+        },
+        client
+      );
+      await enqueueDomainEvent(client, {
+        eventKey: `dispute.opened:${createdDispute.id}`,
+        eventType: "dispute.opened",
+        aggregateType: "dispute",
+        aggregateId: createdDispute.id,
+        payload: {
+          disputeId: createdDispute.id,
+          orderId,
+          buyerId: orderRow.buyer_id,
+          sellerId: orderRow.seller_id,
+          productId: orderRow.product_id,
+          systemMessageIds: message ? [message.id] : []
+        }
+      });
       return {
-        row: orderRow,
-        dispute: inserted.rows[0],
+        dispute: createdDispute,
         repeated: false,
         messageSuggested: false
       };
@@ -123,28 +156,6 @@ router.post(
       });
     }
 
-    notifyOrderEvent(row.buyer_id, { type: "order_disputed", orderId });
-    notifyOrderEvent(row.seller_id, { type: "order_disputed", orderId });
-    await Promise.all(
-      [row.buyer_id, row.seller_id].map((userId: string) =>
-        createNotification({
-          userId,
-          type: "order_disputed",
-          templateKey: "notifications.orderDisputed",
-          orderId
-        })
-      )
-    );
-    await notifyAdmins({ type: "dispute_new_admin", templateKey: "notifications.disputeNewAdmin", orderId });
-    await recordOrderEvent({
-      orderId,
-      actorId: req.user.id,
-      type: "disputed",
-      templateKey: "orderEvents.disputed",
-      // The dispute reason is user-generated content — stored raw, never translated.
-      body: input.reason
-    });
-    await postOrderSystemMessage(orderId, "dispute_opened", "system.disputeOpened", { reason: input.reason });
     res.status(201).json({ dispute: participantDisputeDto(dispute) });
   })
 );
@@ -263,39 +274,6 @@ router.post(
     });
     const row = result.dispute;
 
-    if (result.newlyResolved) {
-      notifyOrderEvent(row.buyer_id, { type: "dispute_resolved", orderId: row.order_id, decision: input.decision });
-      notifyOrderEvent(row.seller_id, { type: "dispute_resolved", orderId: row.order_id, decision: input.decision });
-      await Promise.all(
-        [row.buyer_id, row.seller_id].map((userId: string) =>
-          createNotification({
-            userId,
-            type: "dispute_resolved",
-            titleKey: "notifications.disputeResolved.title",
-            bodyKey: input.decision === "refund" ? "notifications.disputeResolved.bodyRefund" : "notifications.disputeResolved.bodyRelease",
-            orderId: row.order_id
-          })
-        )
-      );
-      await recordOrderEvent({
-        orderId: row.order_id,
-        actorId: row.admin_id,
-        type: "dispute_resolved",
-        templateKey: "orderEvents.disputeResolved",
-        // The original claim note is preserved across retries and recovery.
-        body: row.admin_note ?? undefined,
-        metadata: { decision: input.decision, operationId: result.operationId }
-      });
-      await postOrderSystemMessage(row.order_id, "dispute_resolved", "system.disputeResolved", { note: row.admin_note ?? "" }, {
-        decision: input.decision,
-        operationId: result.operationId
-      });
-      await postOrderSystemMessage(
-        row.order_id,
-        input.decision === "refund" ? "refunded" : "escrow_released",
-        input.decision === "refund" ? "system.refunded" : "system.fundsReleased"
-      );
-    }
     res.json({
       dispute: row,
       order: result.order,

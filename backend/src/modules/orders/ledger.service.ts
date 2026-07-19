@@ -13,6 +13,7 @@ import {
   invalidateProductCaches,
   type ProductCacheContext
 } from "../marketplace/marketplace-cache.service.js";
+import { enqueueDomainEvent } from "../outbox/outbox.service.js";
 
 type OrderRow = {
   id: string;
@@ -31,6 +32,16 @@ type ProductEscrowRow = ProductCacheContext & {
   status: string;
   delivery_type: string;
   delivery_template: string | null;
+};
+
+export type ReleaseEscrowOptions = {
+  adminId?: string;
+  source?: "buyer_confirmed" | "auto" | "dispute" | "service";
+  actorId?: string;
+  afterUpdate?: (
+    client: DbClient,
+    order: OrderRow
+  ) => Promise<{ systemMessageIds?: string[] } | void>;
 };
 
 export async function ensureWallet(client: DbClient, userId: string, currency: string) {
@@ -162,8 +173,17 @@ export async function lockEscrow(
   return result.order;
 }
 
-export async function releaseEscrow(orderId: string, adminId?: string) {
-  const result = await inSerializableTx(async (client) => {
+export async function releaseEscrow(
+  orderId: string,
+  adminIdOrOptions?: string | ReleaseEscrowOptions
+) {
+  const options: ReleaseEscrowOptions =
+    typeof adminIdOrOptions === "string"
+      ? { adminId: adminIdOrOptions, source: "dispute" }
+      : (adminIdOrOptions ?? {});
+  const source = options.source ?? (options.adminId ? "dispute" : "service");
+
+  return inSerializableTx(async (client) => {
     const orderResult = await client.query<OrderRow>(`select * from orders where id = $1 for update`, [orderId]);
     const order = orderResult.rows[0];
     if (!order) throw notFound("Order not found");
@@ -210,7 +230,7 @@ export async function releaseEscrow(orderId: string, adminId?: string) {
         netCents,
         feeCents,
         order.currency,
-        { adminId: adminId ?? null }
+        { adminId: options.adminId ?? null }
       ]
     );
     await recordEscrowReleaseLedger({
@@ -220,7 +240,7 @@ export async function releaseEscrow(orderId: string, adminId?: string) {
       amountCents: Number(order.amount_cents),
       feeCents: Number(feeCents),
       currency: order.currency,
-      adminId: adminId ?? null
+      adminId: options.adminId ?? null
     });
 
     const updated = await client.query(
@@ -240,14 +260,27 @@ export async function releaseEscrow(orderId: string, adminId?: string) {
       [order.product_id, order.quantity]
     );
 
-    await cacheDel(`user:${order.seller_id}:wallet`);
-    await cacheDelPattern(`order:${order.id}:*`);
-    await cacheDelPattern(`orders:${order.buyer_id}:*`);
-    await cacheDelPattern(`orders:${order.seller_id}:*`);
-    return { order: updated.rows[0], productContext: productResult.rows[0] };
+    const transition = await options.afterUpdate?.(
+      client,
+      updated.rows[0] as OrderRow
+    );
+    await enqueueDomainEvent(client, {
+      eventKey: `order.completed:${order.id}`,
+      eventType: "order.completed",
+      aggregateType: "order",
+      aggregateId: order.id,
+      payload: {
+        orderId: order.id,
+        buyerId: order.buyer_id,
+        sellerId: order.seller_id,
+        productId: productResult.rows[0].productId,
+        source,
+        actorId: options.actorId ?? null,
+        systemMessageIds: transition?.systemMessageIds ?? []
+      }
+    });
+    return updated.rows[0];
   });
-  await invalidateProductCaches(result.productContext);
-  return result.order;
 }
 
 export async function refundEscrow(orderId: string, adminId?: string) {

@@ -93,8 +93,12 @@ export async function revokeSession(jti: string | undefined, userId?: string) {
  * changes, password reset, and admin bans). A workflow that uses `exceptJti` must also
  * preserve a usable refresh token for that session.
  */
-export async function revokeAllUserSessions(userId: string, options: { exceptJti?: string } = {}) {
+export async function revokeAllUserSessions(
+  userId: string,
+  options: { exceptJti?: string; strict?: boolean } = {}
+) {
   const redis = getRedis();
+  let redisError: unknown;
   if (redis) {
     try {
       const [jtis, hashes] = await Promise.all([
@@ -111,6 +115,7 @@ export async function revokeAllUserSessions(userId: string, options: { exceptJti
       await redis.del(userSessionsKey(userId), userRefreshKey(userId));
       if (options.exceptJti) await redis.sadd(userSessionsKey(userId), options.exceptJti);
     } catch (error) {
+      redisError = error;
       logger.error({ error, userId }, "revoke_all_user_sessions_failed");
     }
   }
@@ -122,4 +127,5 @@ export async function revokeAllUserSessions(userId: string, options: { exceptJti
     userId,
     exceptSessionId: options.exceptJti
   });
+  if (options.strict && redisError) throw redisError;
 }

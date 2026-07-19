@@ -27,6 +27,22 @@ export const jobProcessedTotal = new client.Counter({
   labelNames: ["queue", "name", "result"] as const
 });
 
+export const outboxEventsTotal = new client.Counter({
+  name: "marketplace_outbox_events_total",
+  help: "Domain outbox processing attempts by event type and result",
+  labelNames: ["event_type", "result"] as const
+});
+
+export const outboxOldestPendingAgeSeconds = new client.Gauge({
+  name: "marketplace_outbox_oldest_pending_age_seconds",
+  help: "Age in seconds of the oldest pending or processing outbox event"
+});
+
+export const outboxPendingEvents = new client.Gauge({
+  name: "marketplace_outbox_pending_events",
+  help: "Number of pending or processing domain outbox events"
+});
+
 export const wsConnectionsActive = new client.Gauge({
   name: "marketplace_ws_connections_active",
   help: "Currently open WebSocket connections"

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { pool } from "../src/db/pool.js";
 
 export async function resetDb() {
-  await pool.query("truncate table users cascade");
+  await pool.query("truncate table domain_outbox, users cascade");
   await pool.query("update platform_wallets set revenue_cents = 0");
 }
 

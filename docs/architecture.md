@@ -135,6 +135,22 @@ Worker runs in the same backend process when `JOB_WORKER_ENABLED=true`. Job name
 | `email_notification` | Enqueued by `notifications.service.ts` | Sends email via Resend + Telegram DM |
 | `reconciliation_daily` | Cron 03:00 UTC | Snapshots ledger, alerts admins on mismatch |
 
+## Transactional domain outbox
+
+Business transactions enqueue durable rows in `domain_outbox`; they do not wait for
+Redis, WebSocket, email, Telegram, or BullMQ. The PostgreSQL worker claims batches with
+`FOR UPDATE SKIP LOCKED`, processes them concurrently, retries with exponential backoff,
+and moves exhausted events to `failed`.
+
+`event_key` is unique for producer idempotency. Notifications also carry a unique
+`event_key`, and their BullMQ delivery uses a stable hashed job ID, so retrying an event
+does not create a second notification. Failed events can be reset through
+`POST /admin/outbox/retry`.
+
+The worker runs when `OUTBOX_WORKER_ENABLED=true`. Multiple replicas are safe; a heartbeat
+keeps a live claim from being reclaimed, while stale claims become available after
+`OUTBOX_LOCK_TIMEOUT_MS`.
+
 ## Environment variables
 
 Required in all environments:
@@ -148,6 +164,7 @@ Optional but needed for full functionality:
 - `TELEGRAM_WEBHOOK_SECRET` — webhook signature verification
 - `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` + `TWILIO_VERIFY_SERVICE_SID` — phone OTP
 - `SENTRY_DSN` — error tracking
+- `OUTBOX_WORKER_ENABLED` — durable side-effect worker (defaults to `JOB_WORKER_ENABLED`)
 
 Payment providers (at least one required in production):
 - `LIQPAY_PUBLIC_KEY` + `LIQPAY_PRIVATE_KEY`
@@ -164,6 +181,8 @@ Tuning:
 - `AUTO_RELEASE_HOURS` — escrow auto-release timeout, default `72`
 - `ACCESS_TOKEN_TTL_MIN` — default `15`
 - `REFRESH_TOKEN_TTL_DAYS` — default `90`
+- `OUTBOX_BATCH_SIZE`, `OUTBOX_CONCURRENCY`, `OUTBOX_POLL_INTERVAL_MS` — outbox throughput
+- `OUTBOX_MAX_ATTEMPTS`, `OUTBOX_BASE_BACKOFF_MS`, `OUTBOX_LOCK_TIMEOUT_MS` — retry and claim policy
 
 ## WebSocket
 

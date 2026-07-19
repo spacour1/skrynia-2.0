@@ -473,10 +473,6 @@ export function attachWebSocketServer(server: http.Server) {
               clientMessageId: msg.clientMessageId,
               message: saved
             });
-            broadcastConversation(msg.conversationId, {
-              type: "message",
-              message: saved
-            });
           } catch (sendError) {
             const code = sendError instanceof ApiError ? sendError.code : undefined;
             const message =

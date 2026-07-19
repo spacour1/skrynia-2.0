@@ -636,3 +636,97 @@ Planned commit: `fix(users): expose safe public profiles and correct seller stat
 - The minimum sample size is intentionally fixed at three terminal orders.
 - `favoriteCount` counts product-favorite relationships across the seller's non-deleted
   products, not unique users and not seller-profile favorites.
+
+## Stage 9: transactional domain outbox
+
+Status: complete.
+
+Planned commit: `feat(reliability): add transactional domain outbox`
+
+### Confirmed defects
+
+- Order, review, dispute, chat, listing-moderation, and user-moderation routes committed
+  business state before starting notifications, WebSocket broadcasts, queue jobs, cache
+  invalidation, or session revocation. A process crash or dependency outage in that gap
+  could permanently lose the side effect.
+- Several request handlers awaited Redis or BullMQ after a successful PostgreSQL commit,
+  so a temporary infrastructure failure could turn committed work into an HTTP error.
+- Retrying a notification had no durable event identity shared by PostgreSQL and BullMQ,
+  allowing duplicate notification rows or delivery jobs.
+- A single in-process retry path could not safely distribute work across worker replicas
+  or recover a row claimed by a worker that crashed.
+
+### Implementation
+
+- Added `domain_outbox` with a unique event key, aggregate identity, JSON payload,
+  pending/processing/processed/failed states, attempt count, availability and lock
+  timestamps, processing owner, last error, and lifecycle timestamps. Database checks
+  enforce complete lock and processed-state bundles.
+- Added indexes for ready-event scans, aggregate lookup, and creation time. Notifications
+  now have a nullable, partially unique `event_key` for durable delivery deduplication.
+- Added `enqueueDomainEvent(client, event)`. It accepts only a transaction client and is
+  called inside the transaction that changes the corresponding aggregate.
+- Added a polling worker that claims batches with `FOR UPDATE SKIP LOCKED`, processes them
+  with bounded parallelism, refreshes active locks, recovers stale claims, records the
+  final error, and applies exponential backoff up to a configurable maximum attempt count.
+- Failed events can be explicitly returned to the pending state through the admin retry
+  endpoint. Admin job diagnostics include outbox status totals.
+- Added typed and payload-validated handlers for order creation/start/delivery/completion,
+  review creation, dispute opening/resolution, message creation, product blocking, and
+  user ban/warning/mute events.
+- Migrated domain writes so timeline records and system chat messages are committed in the
+  original transaction where applicable. Notifications, local realtime signals, BullMQ
+  delivery, cache invalidation, and session revocation run from the durable outbox event.
+- Notification delivery jobs use a stable SHA-256 BullMQ job ID derived from the event
+  key. An outbox event is not marked processed unless its required queue handoff succeeds.
+- Outbox cache invalidation and session revocation use strict Redis mutations, so a failed
+  command keeps the event retryable. Existing request paths retain their best-effort cache
+  behavior.
+- Non-outbox notification delivery is now fire-and-forget after its database row is
+  persisted. Redis, email, Telegram, WebSocket, or BullMQ availability no longer changes
+  the HTTP result of the already committed business operation.
+- Added outbox processed/failed counters, pending count, and oldest-pending-event age
+  metrics, plus worker enablement, polling, batch, concurrency, retry, lock, and delivery
+  timeout configuration in both example environments and Compose.
+
+### Regression coverage
+
+1. Rolling back the business transaction also rolls back its outbox row.
+2. An order request succeeds and commits while the injected side-effect dependency is
+   unavailable; its event remains pending and is delivered after recovery.
+3. Reprocessing the same event does not create a second notification or BullMQ identity.
+4. Two worker replicas concurrently drain one event set without processing duplicates.
+5. Batch processing respects configured parallelism.
+6. Failures increment attempts, retain the last error, use exponential availability
+   delays, enter `failed` at the limit, and can be manually retried.
+7. Pending count and oldest-event-age metrics reflect the durable queue.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `cd backend && npm run build` | PASS |
+| Targeted outbox/cache/notification run | PASS, 24/24 |
+| `cd backend && npm test` | PASS, 202/202 in 20/20 files |
+| Clean database migration smoke | PASS, all 33 migrations |
+| Required outbox indexes on clean database | PASS, all present |
+| Outbox reliability tests on clean database | PASS, 6/6 |
+| `cd frontend && npm run typecheck` | PASS |
+| `cd frontend && npm test` | PASS, 6/6 |
+| `cd frontend && npm run i18n:check` | PASS, 0 errors and 25 baseline warnings |
+| `cd frontend && npm run build` | PASS, with existing Sentry/OpenTelemetry warnings |
+| `docker compose config --quiet` | PASS |
+
+### Remaining constraints
+
+- Realtime delivery currently targets sockets attached to the process that handles the
+  event. A dedicated worker has no local sockets, and an API replica cannot reach sockets
+  on another replica. Stage 11 must distribute these signals through Redis Pub/Sub.
+- Notification rows and BullMQ jobs are deduplicated. A local WebSocket broadcast remains
+  at-least-once: a crash after broadcast but before marking the event processed may emit
+  it again.
+- Legacy notification producers that have not moved to a domain event persist the
+  in-app notification but do not yet have a durable retry for a failed BullMQ handoff.
+- Outbox age gauges are refreshed by an enabled outbox worker. Deployments that disable
+  every worker retain durable rows but do not update those gauges until a worker starts.

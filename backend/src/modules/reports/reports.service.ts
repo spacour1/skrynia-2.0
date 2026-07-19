@@ -1,4 +1,5 @@
 import { badRequest, notFound } from "../../common/errors.js";
+import type { DbClient } from "../../db/pool.js";
 import { pool } from "../../db/pool.js";
 import { assertConversationAccess } from "../chat/chat.service.js";
 import { notifyAdmins } from "../notifications/notifications.service.js";
@@ -37,18 +38,22 @@ export const MESSAGE_REPORT_REASONS = [
 
 const HIGH_PRIORITY_MESSAGE_REASONS = new Set(["scam", "off_platform_deal", "personal_data", "prohibited_content"]);
 
-export async function recordModerationAction(input: {
-  moderatorId: string;
-  actionType: ModerationActionType;
-  targetUserId?: string;
-  targetMessageId?: string;
-  targetConversationId?: string;
-  reason?: string;
-  metadata?: Record<string, unknown>;
-}) {
-  await pool.query(
+export async function recordModerationAction(
+  input: {
+    moderatorId: string;
+    actionType: ModerationActionType;
+    targetUserId?: string;
+    targetMessageId?: string;
+    targetConversationId?: string;
+    reason?: string;
+    metadata?: Record<string, unknown>;
+  },
+  client: DbClient = pool
+) {
+  const result = await client.query<{ id: string }>(
     `insert into moderation_actions(moderator_id, target_user_id, target_message_id, target_conversation_id, action_type, reason, metadata)
-     values ($1, $2, $3, $4, $5, $6, $7)`,
+     values ($1, $2, $3, $4, $5, $6, $7)
+     returning id`,
     [
       input.moderatorId,
       input.targetUserId ?? null,
@@ -59,6 +64,7 @@ export async function recordModerationAction(input: {
       input.metadata ?? {}
     ]
   );
+  return result.rows[0];
 }
 
 export async function createUserReport(

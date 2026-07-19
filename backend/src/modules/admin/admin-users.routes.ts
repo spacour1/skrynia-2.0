@@ -8,6 +8,10 @@ import { disconnectUser } from "../chat/ws.service.js";
 import { revokeAllUserSessions } from "../auth/session.service.js";
 import { recordModerationAction } from "../reports/reports.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
+import {
+  invalidateProductCacheBatch,
+  loadSellerProductCacheContexts
+} from "../marketplace/marketplace-cache.service.js";
 
 const router = Router();
 const adminOnly = requireRole("admin");
@@ -73,6 +77,12 @@ router.patch(
       // any live websocket connections regardless of which session token they used.
       await revokeAllUserSessions(id);
       disconnectUser(id);
+    }
+    if (body.isBanned !== undefined) {
+      // Fetch every affected product dimension in one query, then invalidate all detail
+      // keys in batches and sweep shared namespaces once for the entire seller.
+      const contexts = await loadSellerProductCacheContexts(id);
+      await invalidateProductCacheBatch(contexts, { sellerIds: [id] });
     }
     res.json({ user: result.rows[0] });
   })

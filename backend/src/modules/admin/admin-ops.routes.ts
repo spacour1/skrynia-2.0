@@ -5,11 +5,15 @@ import { asyncHandler, badRequest, notFound } from "../../common/errors.js";
 import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { enqueueJob, getJobQueue } from "../jobs/queue.js";
-import { cacheDel, cacheDelPattern } from "../../common/redis.js";
 import { lockEscrow } from "../orders/ledger.service.js";
 import { announceOrderPaid } from "../payments/payments.routes.js";
 import { paymentAttemptsTotal } from "../../common/metrics.js";
 import { logger } from "../../common/logger.js";
+import {
+  invalidateProductCaches,
+  loadProductCacheContext,
+  type ProductCacheContext
+} from "../marketplace/marketplace-cache.service.js";
 
 const router = Router();
 const adminOnly = requireRole("admin");
@@ -44,8 +48,8 @@ router.patch(
       [id, status]
     );
     if (!result.rows[0]) throw notFound("Media not found");
-    await cacheDel(`marketplace:product:${result.rows[0].productId}`);
-    await cacheDelPattern("marketplace:products:*");
+    const context = await loadProductCacheContext(result.rows[0].productId);
+    if (context) await invalidateProductCaches(context);
     res.json({ ok: true });
   })
 );
@@ -127,18 +131,38 @@ router.patch(
         isRecommended: z.boolean().optional()
       })
       .parse(req.body);
-    const result = await pool.query(
+    const result = await pool.query<
+      ProductCacheContext & {
+        id: string;
+        title: string;
+        status: string;
+        isHot: boolean;
+        isRecommended: boolean;
+      }
+    >(
       `update products
        set status = coalesce($2, status),
            is_hot = coalesce($3, is_hot),
            is_recommended = coalesce($4, is_recommended),
            updated_at = now()
        where id = $1
-       returning id, title, status, is_hot as "isHot", is_recommended as "isRecommended"`,
+       returning id, id as "productId", seller_id as "sellerId", category_id as "categoryId",
+                 game_id as "gameId", section_id as "sectionId",
+                 title, status, is_hot as "isHot", is_recommended as "isRecommended"`,
       [id, body.status ?? null, body.isHot ?? null, body.isRecommended ?? null]
     );
-    if (!result.rows[0]) throw notFound("Listing not found");
-    res.json({ listing: result.rows[0] });
+    const listing = result.rows[0];
+    if (!listing) throw notFound("Listing not found");
+    await invalidateProductCaches(listing);
+    const {
+      productId: _productId,
+      sellerId: _sellerId,
+      categoryId: _categoryId,
+      gameId: _gameId,
+      sectionId: _sectionId,
+      ...publicListing
+    } = listing;
+    res.json({ listing: publicListing });
   })
 );
 

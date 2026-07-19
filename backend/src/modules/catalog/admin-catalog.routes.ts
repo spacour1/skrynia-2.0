@@ -1,10 +1,15 @@
 import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../../common/errors.js";
-import { cacheDel } from "../../common/redis.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
+import {
+  invalidateCatalogCaches,
+  invalidateProductCacheBatch,
+  loadGameProductCacheContexts,
+  loadSectionProductCacheContexts
+} from "../marketplace/marketplace-cache.service.js";
 import {
   createCatalogGroup,
   createCatalogItem,
@@ -31,6 +36,16 @@ const router = Router();
 router.use(authenticate, requireRole("admin"));
 
 const STATUS_VALUES = ["draft", "active", "hidden", "archived"] as const;
+
+async function invalidateItemCaches(itemId: string) {
+  const contexts = await loadGameProductCacheContexts(itemId);
+  await invalidateProductCacheBatch(contexts, { gameIds: [itemId] });
+}
+
+async function invalidateSectionCaches(sectionId: string) {
+  const contexts = await loadSectionProductCacheContexts(sectionId);
+  await invalidateProductCacheBatch(contexts, { sectionIds: [sectionId] });
+}
 
 const groupSchema = z.object({
   name: z.string().min(1).max(200),
@@ -95,6 +110,7 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = groupSchema.parse(req.body);
     const group = await createCatalogGroup(input, req.user.id);
+    await invalidateCatalogCaches();
     res.status(201).json({ group });
   })
 );
@@ -105,6 +121,7 @@ router.patch(
     const id = z.string().uuid().parse(req.params.id);
     const input = groupSchema.partial().parse(req.body);
     const group = await updateCatalogGroup(id, input, req.user.id);
+    await invalidateCatalogCaches();
     res.json({ group });
   })
 );
@@ -114,6 +131,7 @@ router.delete(
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const result = await deleteCatalogGroup(id, req.user.id);
+    await invalidateCatalogCaches();
     res.json(result);
   })
 );
@@ -125,7 +143,7 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = itemSchema.parse(req.body);
     const item = await createCatalogItem(input, req.user.id);
-    await cacheDel("marketplace:games");
+    await invalidateItemCaches(item.id);
     res.status(201).json({ item });
   })
 );
@@ -136,7 +154,7 @@ router.patch(
     const id = z.string().uuid().parse(req.params.id);
     const input = itemSchema.partial().parse(req.body);
     const item = await updateCatalogItem(id, input, req.user.id);
-    await cacheDel("marketplace:games");
+    await invalidateItemCaches(id);
     res.json({ item });
   })
 );
@@ -146,7 +164,7 @@ router.delete(
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const result = await deleteCatalogItem(id, req.user.id);
-    await cacheDel("marketplace:games");
+    await invalidateItemCaches(id);
     res.json(result);
   })
 );
@@ -158,6 +176,7 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = sectionSchema.parse(req.body);
     const section = await createCatalogSection(input, req.user.id);
+    await invalidateSectionCaches(section.id);
     res.status(201).json({ section });
   })
 );
@@ -168,6 +187,7 @@ router.patch(
     const id = z.string().uuid().parse(req.params.id);
     const input = sectionSchema.partial().parse(req.body);
     const section = await updateCatalogSection(id, input, req.user.id);
+    await invalidateSectionCaches(id);
     res.json({ section });
   })
 );
@@ -177,6 +197,7 @@ router.delete(
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const result = await deleteCatalogSection(id, req.user.id);
+    await invalidateSectionCaches(id);
     res.json(result);
   })
 );
@@ -198,6 +219,7 @@ router.post(
     const id = z.string().uuid().parse(req.params.id);
     const input = z.object({ schema: z.unknown() }).parse(req.body);
     const version = await createSchemaVersion(id, input.schema, req.user.id);
+    await invalidateSectionCaches(id);
     res.status(201).json({ version });
   })
 );
@@ -209,6 +231,7 @@ router.patch(
     const schemaId = z.string().uuid().parse(req.params.schemaId);
     const input = z.object({ schema: z.unknown() }).parse(req.body);
     const version = await updateSchemaVersion(id, schemaId, input.schema, req.user.id);
+    await invalidateSectionCaches(id);
     res.json({ version });
   })
 );
@@ -222,6 +245,7 @@ router.post(
     const id = z.string().uuid().parse(req.params.id);
     const schemaId = z.string().uuid().parse(req.params.schemaId);
     const version = await publishSchemaVersion(id, schemaId, req.user.id);
+    await invalidateSectionCaches(id);
     res.json({ version });
   })
 );
@@ -233,6 +257,7 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const section = await publishCatalogSection(id, req.user.id);
+    await invalidateSectionCaches(id);
     res.json({ section });
   })
 );
@@ -242,6 +267,7 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const section = await publishCatalogSection(id, req.user.id);
+    await invalidateSectionCaches(id);
     res.json({ section });
   })
 );
@@ -251,6 +277,7 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const section = await setCatalogSectionStatus(id, "archived", req.user.id);
+    await invalidateSectionCaches(id);
     res.json({ section });
   })
 );
@@ -260,6 +287,7 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const section = await setCatalogSectionStatus(id, "hidden", req.user.id);
+    await invalidateSectionCaches(id);
     res.json({ section });
   })
 );

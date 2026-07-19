@@ -9,6 +9,10 @@ import {
   recordPaymentCaptureLedger,
   recordRefundLedger
 } from "./accounting.service.js";
+import {
+  invalidateProductCaches,
+  type ProductCacheContext
+} from "../marketplace/marketplace-cache.service.js";
 
 type OrderRow = {
   id: string;
@@ -22,7 +26,7 @@ type OrderRow = {
   status: string;
 };
 
-type ProductEscrowRow = {
+type ProductEscrowRow = ProductCacheContext & {
   stock: number;
   status: string;
   delivery_type: string;
@@ -50,7 +54,7 @@ export async function lockEscrow(
   providerName: PaymentProviderName,
   externalReference?: string
 ) {
-  return inSerializableTx(async (client) => {
+  const result = await inSerializableTx(async (client) => {
     const orderResult = await client.query<OrderRow>(`select * from orders where id = $1 for update`, [orderId]);
     const order = orderResult.rows[0];
     if (!order) throw notFound("Order not found");
@@ -58,7 +62,10 @@ export async function lockEscrow(
     if (order.status !== "pending") throw badRequest("Only pending orders can be paid");
 
     const productResult = await client.query<ProductEscrowRow>(
-      `select stock, status, delivery_type, delivery_template from products where id = $1 for update`,
+      `select id as "productId", seller_id as "sellerId", category_id as "categoryId",
+              game_id as "gameId", section_id as "sectionId",
+              stock, status, delivery_type, delivery_template
+       from products where id = $1 for update`,
       [order.product_id]
     );
     const product = productResult.rows[0];
@@ -149,12 +156,14 @@ export async function lockEscrow(
     await cacheDelPattern(`order:${order.id}:*`);
     await cacheDelPattern(`orders:${order.buyer_id}:*`);
     await cacheDelPattern(`orders:${order.seller_id}:*`);
-    return updated.rows[0];
+    return { order: updated.rows[0], productContext: product as ProductCacheContext };
   });
+  await invalidateProductCaches(result.productContext);
+  return result.order;
 }
 
 export async function releaseEscrow(orderId: string, adminId?: string) {
-  return inSerializableTx(async (client) => {
+  const result = await inSerializableTx(async (client) => {
     const orderResult = await client.query<OrderRow>(`select * from orders where id = $1 for update`, [orderId]);
     const order = orderResult.rows[0];
     if (!order) throw notFound("Order not found");
@@ -222,10 +231,12 @@ export async function releaseEscrow(orderId: string, adminId?: string) {
       [order.id]
     );
 
-    await client.query(
+    const productResult = await client.query<ProductCacheContext>(
       `update products
        set sales_count = sales_count + $2, updated_at = now()
-       where id = $1`,
+       where id = $1
+       returning id as "productId", seller_id as "sellerId", category_id as "categoryId",
+                 game_id as "gameId", section_id as "sectionId"`,
       [order.product_id, order.quantity]
     );
 
@@ -233,8 +244,10 @@ export async function releaseEscrow(orderId: string, adminId?: string) {
     await cacheDelPattern(`order:${order.id}:*`);
     await cacheDelPattern(`orders:${order.buyer_id}:*`);
     await cacheDelPattern(`orders:${order.seller_id}:*`);
-    return updated.rows[0];
+    return { order: updated.rows[0], productContext: productResult.rows[0] };
   });
+  await invalidateProductCaches(result.productContext);
+  return result.order;
 }
 
 export async function refundEscrow(orderId: string, adminId?: string) {

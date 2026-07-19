@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
 import { pool } from "../src/db/pool.js";
-import { getRedis, cacheDel } from "../src/common/redis.js";
+import { getRedis } from "../src/common/redis.js";
 import { issueSession } from "../src/modules/auth/session.service.js";
 import { closeDb, createProduct, createUser, resetDb } from "./fixtures.js";
 
@@ -29,7 +29,6 @@ async function setup(status: string, sellerBanned = false) {
   const productId = await createProduct(seller);
   await pool.query(`update products set status = $2 where id = $1`, [productId, status]);
   if (sellerBanned) await pool.query(`update users set is_banned = true where id = $1`, [seller]);
-  await cacheDel(`marketplace:product:${productId}`);
   return { seller, productId };
 }
 

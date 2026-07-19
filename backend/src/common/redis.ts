@@ -63,3 +63,23 @@ export async function cacheDelPattern(pattern: string) {
     // Cache invalidation is best-effort.
   }
 }
+
+export async function cacheDelPrefixes(...prefixes: string[]) {
+  const client = getRedis();
+  const uniquePrefixes = [...new Set(prefixes.filter(Boolean))];
+  if (!client || uniquePrefixes.length === 0) return;
+  try {
+    // One keyspace pass is materially cheaper than one SCAN per product when a seller
+    // with many listings is banned. Marketplace invalidation only uses prefix namespaces,
+    // so filtering the returned batches locally preserves the same semantics as MATCH.
+    const stream = client.scanStream({ count: 250 });
+    for await (const keys of stream) {
+      const matching = (keys as string[]).filter((key) =>
+        uniquePrefixes.some((prefix) => key.startsWith(prefix))
+      );
+      if (matching.length) await client.del(...matching);
+    }
+  } catch {
+    // Cache invalidation is best-effort.
+  }
+}

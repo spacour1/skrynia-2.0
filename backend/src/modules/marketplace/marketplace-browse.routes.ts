@@ -46,9 +46,10 @@ router.get(
     if (rows) return res.json({ categories: rows });
     const result = await pool.query(
       `select c.id, c.slug, c.name, c.description, c.risk_level as "riskLevel",
-              count(p.id)::int as "activeProductCount"
+              count(p.id) filter (where product_seller.is_banned = false)::int as "activeProductCount"
        from categories c
        left join products p on p.category_id = c.id and p.status = 'active'
+       left join users product_seller on product_seller.id = p.seller_id
        group by c.id
        order by c.name`
     );
@@ -69,9 +70,10 @@ router.get(
               g.show_on_homepage as "showOnHomepage", g.is_popular as "isPopular",
               g.is_recommended as "isRecommended", g.homepage_order as "homepageOrder",
               g.created_at as "createdAt",
-              count(distinct p.id)::int as "lotCount"
+              count(distinct p.id) filter (where product_seller.is_banned = false)::int as "lotCount"
        from games g
        left join products p on p.game_id = g.id and p.status = 'active'
+       left join users product_seller on product_seller.id = p.seller_id
        where g.is_active = true
        group by g.id
        order by g.homepage_order asc, g.popularity desc, g.name asc`
@@ -99,10 +101,12 @@ router.get(
     const sections = await pool.query(
       `select gs.id, gs.slug, gs.name, gs.description, gs.sort_order as "sortOrder",
               gs.schema, gs.product_type as "productType", c.slug as "categorySlug", c.name as "categoryName",
-              c.risk_level as "categoryRiskLevel", count(p.id)::int as "lotCount"
+              c.risk_level as "categoryRiskLevel",
+              count(p.id) filter (where product_seller.is_banned = false)::int as "lotCount"
        from game_sections gs
        left join categories c on c.id = gs.category_id
        left join products p on p.section_id = gs.id and p.status = 'active'
+       left join users product_seller on product_seller.id = p.seller_id
        where gs.game_id = $1 and gs.is_active = true
        group by gs.id, c.id
        order by gs.sort_order asc, gs.name asc`,
@@ -120,9 +124,10 @@ router.get(
 
     const games = await pool.query(
       `select g.id, g.slug, g.name, g.publisher, g.icon_url as "iconUrl", g.popularity,
-              count(distinct p.id)::int as "lotCount"
+              count(distinct p.id) filter (where product_seller.is_banned = false)::int as "lotCount"
        from games g
        left join products p on p.game_id = g.id and p.status = 'active'
+       left join users product_seller on product_seller.id = p.seller_id
        where g.is_active = true
          and (g.name ilike $1 or g.slug ilike $1 or coalesce(g.publisher, '') ilike $1
               or exists (select 1 from unnest(g.aliases) alias where alias ilike $1))

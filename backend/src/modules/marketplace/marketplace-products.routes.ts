@@ -4,12 +4,16 @@ import { inTx, pool, type DbClient } from "../../db/pool.js";
 import { asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
-import { cacheDel, cacheDelPattern } from "../../common/redis.js";
 import { moneyToCents } from "../../common/validation.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { resolveActiveSectionChain, validateLotMetadata } from "../catalog/catalog.service.js";
 import { addSellerPresence, attachCardMetadata, buildDynamicUpdate } from "./marketplace.helpers.js";
 import { mediaAggWithStatus } from "./marketplace.sql.js";
+import {
+  invalidateProductCacheBatch,
+  invalidateProductCaches,
+  type ProductCacheContext
+} from "./marketplace-cache.service.js";
 
 const router = Router();
 
@@ -165,8 +169,13 @@ router.post(
       if (input.media?.length) await replaceProductMedia(client, result.rows[0].id, input.media);
       return result.rows[0].id as string;
     });
-    await cacheDelPattern("marketplace:products:*");
-    await cacheDel("marketplace:games");
+    await invalidateProductCaches({
+      productId,
+      sellerId: req.user.id,
+      categoryId: categorization.categoryId,
+      gameId: categorization.gameId,
+      sectionId: categorization.sectionId
+    });
     res.status(201).json({ id: productId });
   })
 );
@@ -185,12 +194,15 @@ router.patch(
     const id = z.string().uuid().parse(req.params.id);
     const input = productPatchSchema.parse(req.body);
 
-    const existing = await pool.query(
-      `select seller_id, section_id as "sectionId", delivery_type as "deliveryType" from products where id = $1 and status != 'deleted'`,
+    const existing = await pool.query<ProductCacheContext & { deliveryType: string }>(
+      `select id as "productId", seller_id as "sellerId", category_id as "categoryId",
+              game_id as "gameId", section_id as "sectionId", delivery_type as "deliveryType"
+       from products where id = $1 and status != 'deleted'`,
       [id]
     );
-    if (!existing.rows[0]) throw notFound("Product not found");
-    if (existing.rows[0].seller_id !== req.user.id && req.user.role !== "admin") throw forbidden();
+    const existingProduct = existing.rows[0];
+    if (!existingProduct) throw notFound("Product not found");
+    if (existingProduct.sellerId !== req.user.id && req.user.role !== "admin") throw forbidden();
 
     // Only re-derive categorization when the caller is actually changing the section;
     // otherwise leave category/game/section untouched rather than trusting a stray categoryId.
@@ -216,12 +228,12 @@ router.patch(
       // cosmetic edits (title/description/price/media) on a lot sitting in an archived
       // section stay allowed and never reach this check.
       const needsActiveChainCheck = input.metadata != null || input.deliveryType !== undefined || input.status === "active";
-      if (needsActiveChainCheck && existing.rows[0].sectionId) {
-        allowedDeliveryTypes = (await resolveActiveSectionChain(existing.rows[0].sectionId)).allowedDeliveryTypes;
+      if (needsActiveChainCheck && existingProduct.sectionId) {
+        allowedDeliveryTypes = (await resolveActiveSectionChain(existingProduct.sectionId)).allowedDeliveryTypes;
       }
     }
     if (allowedDeliveryTypes) {
-      assertDeliveryTypeAllowed(allowedDeliveryTypes, input.deliveryType ?? existing.rows[0].deliveryType);
+      assertDeliveryTypeAllowed(allowedDeliveryTypes, input.deliveryType ?? existingProduct.deliveryType);
     }
 
     const priceCents = input.price === undefined ? undefined : moneyToCents(input.price);
@@ -232,11 +244,11 @@ router.patch(
     // is only updated alongside a metadata re-validation - changing sectionId alone (without
     // resending metadata in the same request) leaves the old metadata/version pair as-is
     // rather than silently pointing schema_version at a schema for a different section.
-    const effectiveSectionId = categorization.sectionId !== undefined ? categorization.sectionId : existing.rows[0].sectionId;
+    const effectiveSectionId = categorization.sectionId !== undefined ? categorization.sectionId : existingProduct.sectionId;
     let validatedMetadata: Record<string, unknown> | null | undefined = input.metadata;
     let schemaVersion: number | undefined;
     if (input.metadata != null) {
-      const validated = await validateLotMetadata(effectiveSectionId, input.metadata);
+      const validated = await validateLotMetadata(effectiveSectionId ?? null, input.metadata);
       validatedMetadata = validated.metadata;
       schemaVersion = validated.schemaVersion ?? undefined;
     }
@@ -262,16 +274,22 @@ router.patch(
       schema_version: schemaVersion,
       status: input.status
     });
-    await inTx(async (client) => {
+    const updatedProduct = await inTx(async (client) => {
+      let context: ProductCacheContext = existingProduct;
       if (sets.length) {
         sets.push("updated_at = now()");
-        await client.query(`update products set ${sets.join(", ")} where id = $1`, values);
+        const updated = await client.query<ProductCacheContext>(
+          `update products set ${sets.join(", ")} where id = $1
+           returning id as "productId", seller_id as "sellerId", category_id as "categoryId",
+                     game_id as "gameId", section_id as "sectionId"`,
+          values
+        );
+        context = updated.rows[0];
       }
       if (input.media !== undefined) await replaceProductMedia(client, id, input.media);
+      return context;
     });
-    await cacheDel(`marketplace:product:${id}`);
-    await cacheDelPattern("marketplace:products:*");
-    await cacheDel("marketplace:games");
+    await invalidateProductCacheBatch([existingProduct, updatedProduct]);
     res.json({ ok: true });
   })
 );
@@ -281,13 +299,17 @@ router.delete(
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
-    const existing = await pool.query(`select seller_id from products where id = $1 and status != 'deleted'`, [id]);
-    if (!existing.rows[0]) throw notFound("Product not found");
-    if (existing.rows[0].seller_id !== req.user.id && req.user.role !== "admin") throw forbidden();
+    const existing = await pool.query<ProductCacheContext>(
+      `select id as "productId", seller_id as "sellerId", category_id as "categoryId",
+              game_id as "gameId", section_id as "sectionId"
+       from products where id = $1 and status != 'deleted'`,
+      [id]
+    );
+    const existingProduct = existing.rows[0];
+    if (!existingProduct) throw notFound("Product not found");
+    if (existingProduct.sellerId !== req.user.id && req.user.role !== "admin") throw forbidden();
     await pool.query(`update products set status = 'deleted', updated_at = now() where id = $1`, [id]);
-    await cacheDel(`marketplace:product:${id}`);
-    await cacheDelPattern("marketplace:products:*");
-    await cacheDel("marketplace:games");
+    await invalidateProductCaches(existingProduct);
     res.status(204).send();
   })
 );

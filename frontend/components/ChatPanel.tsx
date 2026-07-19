@@ -2,11 +2,12 @@
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Flag, FileText, ImageIcon, Loader2, Paperclip, Send, X } from "lucide-react";
-import { apiFetch, ApiError, AUTH_REFRESHED_EVENT } from "@/lib/api";
-import { openAuthedSocket } from "@/lib/ws";
+import { Flag, FileText, ImageIcon, Loader2, Paperclip, RefreshCw, Send, X } from "lucide-react";
+import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
+import { RealtimeMessageError } from "@/lib/realtime-client";
+import { useRealtime, useRealtimeStatus } from "@/components/RealtimeProvider";
 import { EmailNotVerifiedNotice } from "./EmailNotVerifiedNotice";
 import { ReportModal } from "./ReportModal";
 
@@ -17,6 +18,10 @@ type Message = {
   body: string;
   attachmentUrl?: string;
   createdAt: string;
+  conversationId?: string;
+  clientMessageId?: string;
+  deliveryStatus?: "sending" | "sent" | "failed";
+  retryable?: boolean;
   kind?: "user" | "system";
   metadata?: { bodyKey?: string; params?: Record<string, string | number> } | null;
 };
@@ -41,6 +46,8 @@ export function ChatPanel({
   emptyNotice?: string;
 }) {
   const user = useAuth((state) => state.user);
+  const realtime = useRealtime();
+  const realtimeStatus = useRealtimeStatus();
   const { language, t } = useI18n();
   const queryClient = useQueryClient();
   const isCompact = mode ? mode === "compact" : compact;
@@ -51,10 +58,8 @@ export function ChatPanel({
   const [attachmentLabel, setAttachmentLabel] = useState("");
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
-  const [connected, setConnected] = useState(false);
   const [error, setError] = useState("");
   const [emailBlocked, setEmailBlocked] = useState(false);
-  const socket = useRef<WebSocket | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -72,14 +77,25 @@ export function ChatPanel({
   }, [conversationId]);
 
   useEffect(() => {
-    if (history.data?.messages) setMessages(history.data.messages);
-  }, [history.data]);
+    if (!history.data?.messages) return;
+    setMessages((current) => {
+      const pending = current.filter(
+        (message) =>
+          message.conversationId === activeConversationId &&
+          (message.deliveryStatus === "sending" || message.deliveryStatus === "failed")
+      );
+      const serverIds = new Set(history.data.messages.map((message) => message.id));
+      return [
+        ...history.data.messages,
+        ...pending.filter((message) => !serverIds.has(message.id))
+      ];
+    });
+  }, [activeConversationId, history.data]);
 
   useEffect(() => {
-    setMessages([]);
-    if (!activeConversationId) {
-      setConnected(false);
-    }
+    setMessages((current) =>
+      current.filter((message) => message.conversationId === activeConversationId)
+    );
   }, [activeConversationId]);
 
   useEffect(() => {
@@ -88,80 +104,29 @@ export function ChatPanel({
 
   useEffect(() => {
     if (!user || !activeConversationId) return;
-    let cancelled = false;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let attempt = 0;
+    return realtime.joinConversation(activeConversationId);
+  }, [activeConversationId, realtime, user]);
 
-    async function connect() {
-      // Cross-domain WS: authenticate with a fresh one-time ticket per connection attempt
-      // (see lib/ws.ts); same-origin cookie auth remains the fallback.
-      const ws = await openAuthedSocket();
-      if (cancelled) {
-        ws.close();
-        return;
+  useEffect(() => {
+    return realtime.subscribe((payload) => {
+      if (payload.type === "message") {
+        const message = payload.message as Message | undefined;
+        if (!message || message.conversationId !== activeConversationId) return;
+        setMessages((current) =>
+          current.some((item) => item.id === message.id) ? current : [...current, message]
+        );
+        queryClient.invalidateQueries({ queryKey: ["chat-conversations"] });
+        queryClient.invalidateQueries({ queryKey: ["chat-conversations-grouped"] });
       }
-      socket.current = ws;
-
-      ws.addEventListener("open", () => {
-        attempt = 0;
-        setConnected(true);
-        setError("");
-        setEmailBlocked(false);
-        ws.send(JSON.stringify({ type: "join_conversation", conversationId: activeConversationId }));
-      });
-      ws.addEventListener("close", () => {
-        setConnected(false);
-        if (cancelled) return;
-        // The connection may have dropped because the access token expired mid-session.
-        // A WS handshake can't refresh itself, so make a cheap authenticated request first
-        // - apiFetch's own 401 handling silently refreshes it - before retrying the socket.
-        attempt += 1;
-        const delay = Math.min(1000 * 2 ** (attempt - 1), 10_000);
-        retryTimer = setTimeout(async () => {
-          if (cancelled) return;
-          try {
-            await apiFetch("/auth/me");
-          } catch (refreshError) {
-            if (refreshError instanceof ApiError && (refreshError.status === 401 || refreshError.status === 403)) {
-              return; // session is genuinely gone - no point reconnecting
-            }
-          }
-          if (!cancelled) connect();
-        }, delay);
-      });
-      ws.addEventListener("message", (event) => {
-        const payload = JSON.parse(event.data);
-        if (payload.type === "message") {
-          setMessages((current) => (current.some((item) => item.id === payload.message.id) ? current : [...current, payload.message]));
-          queryClient.invalidateQueries({ queryKey: ["chat-conversations"] });
-          queryClient.invalidateQueries({ queryKey: ["chat-conversations-grouped"] });
+      if (payload.type === "error") {
+        if (payload.code === "email_not_verified") {
+          setEmailBlocked(true);
+        } else if (typeof payload.message === "string") {
+          setError(payload.message);
         }
-        if (payload.type === "error") {
-          if (payload.code === "email_not_verified") {
-            setEmailBlocked(true);
-          } else {
-            setError(payload.message ?? "Chat error");
-          }
-        }
-      });
-    }
-
-    connect();
-
-    // A refresh triggered by some *other* request still means the cookie just rotated -
-    // reconnect now instead of waiting for this socket to eventually drop on its own.
-    const onRefreshed = () => {
-      if (!cancelled) socket.current?.close();
-    };
-    window.addEventListener(AUTH_REFRESHED_EVENT, onRefreshed);
-
-    return () => {
-      cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
-      window.removeEventListener(AUTH_REFRESHED_EVENT, onRefreshed);
-      socket.current?.close();
-    };
-  }, [activeConversationId, queryClient, user]);
+      }
+    });
+  }, [activeConversationId, queryClient, realtime]);
 
   async function uploadAttachment(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -191,6 +156,7 @@ export function ChatPanel({
     if (!typed && !attachment) return;
     const body = typed || `Attached file: ${attachmentLabel || "file"}`;
     let targetConversationId = activeConversationId;
+    let pendingClientMessageId: string | undefined;
 
     setSending(true);
     setError("");
@@ -207,15 +173,23 @@ export function ChatPanel({
         onConversationReady?.(targetConversationId);
       }
 
-      if (targetConversationId === activeConversationId && socket.current?.readyState === WebSocket.OPEN) {
-        socket.current.send(JSON.stringify({ type: "message", conversationId: targetConversationId, body, attachmentUrl: attachment || undefined }));
-      } else {
-        const saved = await apiFetch<{ message: Message }>(`/chat/conversations/${targetConversationId}/messages`, {
-          method: "POST",
-          body: JSON.stringify({ body, attachmentUrl: attachment || undefined })
-        });
-        setMessages((current) => [...current, saved.message]);
-      }
+      pendingClientMessageId = crypto.randomUUID();
+      const optimistic: Message = {
+        id: `client:${pendingClientMessageId}`,
+        clientMessageId: pendingClientMessageId,
+        conversationId: targetConversationId,
+        senderId: user?.id ?? null,
+        senderDisplayName: user?.displayName,
+        body,
+        attachmentUrl: attachment || undefined,
+        createdAt: new Date().toISOString(),
+        deliveryStatus: "sending",
+        retryable: true
+      };
+      setMessages((current) => [...current, optimistic]);
+
+      const saved = await deliverMessage(optimistic);
+      markMessageSent(pendingClientMessageId, saved);
       queryClient.invalidateQueries({ queryKey: ["chat-conversations"] });
       queryClient.invalidateQueries({ queryKey: ["chat-conversations-grouped"] });
 
@@ -223,13 +197,96 @@ export function ChatPanel({
       setAttachmentUrl("");
       setAttachmentLabel("");
     } catch (sendError) {
-      if (sendError instanceof ApiError && sendError.status === 403 && sendError.code === "email_not_verified") {
+      if (pendingClientMessageId) {
+        markMessageFailed(pendingClientMessageId, isRetryable(sendError));
+      }
+      if (
+        (sendError instanceof ApiError &&
+          sendError.status === 403 &&
+          sendError.code === "email_not_verified") ||
+        (sendError instanceof RealtimeMessageError &&
+          sendError.code === "email_not_verified")
+      ) {
         setEmailBlocked(true);
       } else {
         setError(sendError instanceof Error ? sendError.message : "Message failed");
       }
     } finally {
       setSending(false);
+    }
+  }
+
+  async function deliverMessage(message: Message): Promise<Message> {
+    const conversation = message.conversationId!;
+    if (
+      conversation === activeConversationId &&
+      realtimeStatus.status === "connected" &&
+      message.clientMessageId
+    ) {
+      return (await realtime.sendMessage({
+        clientMessageId: message.clientMessageId,
+        conversationId: conversation,
+        body: message.body,
+        attachmentUrl: message.attachmentUrl
+      })) as Message;
+    }
+
+    const saved = await apiFetch<{ message: Message }>(
+      `/chat/conversations/${conversation}/messages`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          body: message.body,
+          attachmentUrl: message.attachmentUrl
+        })
+      }
+    );
+    return saved.message;
+  }
+
+  function markMessageSent(clientMessageId: string, saved: Message) {
+    setMessages((current) =>
+      current.map((message) =>
+        message.clientMessageId === clientMessageId
+          ? {
+              ...saved,
+              clientMessageId,
+              deliveryStatus: "sent",
+              retryable: false
+            }
+          : message
+      )
+    );
+  }
+
+  function markMessageFailed(clientMessageId: string, retryable: boolean) {
+    setMessages((current) =>
+      current.map((message) =>
+        message.clientMessageId === clientMessageId
+          ? { ...message, deliveryStatus: "failed", retryable }
+          : message
+      )
+    );
+  }
+
+  async function retryMessage(message: Message) {
+    if (!message.clientMessageId || !message.retryable) return;
+    setError("");
+    setMessages((current) =>
+      current.map((item) =>
+        item.clientMessageId === message.clientMessageId
+          ? { ...item, deliveryStatus: "sending" }
+          : item
+      )
+    );
+    try {
+      const saved = await deliverMessage(message);
+      markMessageSent(message.clientMessageId, saved);
+      queryClient.invalidateQueries({ queryKey: ["chat-conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["chat-conversations-grouped"] });
+    } catch (retryError) {
+      markMessageFailed(message.clientMessageId, isRetryable(retryError));
+      setError(retryError instanceof Error ? retryError.message : "Message failed");
     }
   }
 
@@ -264,6 +321,31 @@ export function ChatPanel({
                 </div>
                 <p className="mt-1 flex items-center gap-2 px-1 text-xs text-muted">
                   {message.senderDisplayName ?? (mine ? "You" : t("messages.participant"))} · {new Date(message.createdAt).toLocaleString(language)}
+                  {mine && message.deliveryStatus ? (
+                    <span
+                      className={
+                        message.deliveryStatus === "failed"
+                          ? "font-bold text-rose-400"
+                          : "inline-flex items-center gap-1"
+                      }
+                    >
+                      {message.deliveryStatus === "sending" ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : null}
+                      {t(`chat.${message.deliveryStatus}`)}
+                    </span>
+                  ) : null}
+                  {mine && message.deliveryStatus === "failed" && message.retryable ? (
+                    <button
+                      type="button"
+                      className="grid h-6 w-6 place-items-center rounded-md text-brand transition hover:bg-brand/10"
+                      aria-label={t("chat.retryMessage")}
+                      title={t("chat.retryMessage")}
+                      onClick={() => void retryMessage(message)}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
                   {!mine ? (
                     <button
                       type="button"
@@ -369,4 +451,10 @@ function AttachmentPreview({ url, mine }: { url: string; mine: boolean }) {
 
 function isImage(url: string) {
   return /\.(png|jpe?g|gif|webp|avif)$/i.test(url.split("?")[0] ?? "");
+}
+
+function isRetryable(error: unknown) {
+  if (error instanceof RealtimeMessageError) return error.retryable;
+  if (error instanceof ApiError) return error.status === 429 || error.status >= 500;
+  return true;
 }

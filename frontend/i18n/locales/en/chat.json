@@ -6,7 +6,11 @@
     "attachmentPlaceholder": "Optional attachment URL",
     "messagePlaceholder": "Write a message",
     "reportMessage": "Report this message",
-    "systemSender": "System"
+    "systemSender": "System",
+    "sending": "Sending",
+    "sent": "Sent",
+    "failed": "Failed",
+    "retryMessage": "Retry message"
   },
   "system": {
     "orderCreated": "Order created. The next step is payment.",

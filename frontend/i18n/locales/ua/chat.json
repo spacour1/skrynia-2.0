@@ -6,7 +6,11 @@
     "attachmentPlaceholder": "Посилання на вкладення, необов'язково",
     "messagePlaceholder": "Напишіть повідомлення",
     "reportMessage": "Поскаржитися на повідомлення",
-    "systemSender": "Система"
+    "systemSender": "Система",
+    "sending": "Надсилається",
+    "sent": "Надіслано",
+    "failed": "Не надіслано",
+    "retryMessage": "Надіслати ще раз"
   },
   "system": {
     "orderCreated": "Замовлення створено. Наступний крок — оплата.",

@@ -7,7 +7,7 @@ import { serviceUnavailable } from "../../common/errors.js";
 import { getRedis } from "../../common/redis.js";
 import { logger } from "../../common/logger.js";
 import type { Role } from "../../common/types.js";
-import { disconnectSession } from "../chat/ws.service.js";
+import { publishSessionSecurityEvent } from "./session-events.service.js";
 
 export function hashRefreshToken(token: string) {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -78,41 +78,48 @@ export async function revokeRefreshToken(token: string | undefined, userId?: str
 export async function revokeSession(jti: string | undefined, userId?: string) {
   if (!jti) return;
   const redis = getRedis();
-  if (redis) {
-    await redis.del(`session:${jti}`);
-    if (userId) await redis.srem(userSessionsKey(userId), jti);
+  try {
+    if (redis) {
+      await redis.del(`session:${jti}`);
+      if (userId) await redis.srem(userSessionsKey(userId), jti);
+    }
+  } finally {
+    publishSessionSecurityEvent({ type: "session.revoked", sessionId: jti });
   }
-  disconnectSession(jti);
 }
 
 /**
- * Revokes every session a user currently has (used for logout-everywhere on password
- * reset/change and admin bans). Pass `exceptJti` to keep the caller's own current session
- * alive - e.g. an authenticated password change shouldn't log out the tab that made it.
+ * Revokes every session a user currently has (used for logout-everywhere, security
+ * changes, password reset, and admin bans). A workflow that uses `exceptJti` must also
+ * preserve a usable refresh token for that session.
  */
 export async function revokeAllUserSessions(userId: string, options: { exceptJti?: string } = {}) {
   const redis = getRedis();
-  if (!redis) return;
+  if (redis) {
+    try {
+      const [jtis, hashes] = await Promise.all([
+        redis.smembers(userSessionsKey(userId)),
+        redis.smembers(userRefreshKey(userId))
+      ]);
 
-  try {
-    const [jtis, hashes] = await Promise.all([
-      redis.smembers(userSessionsKey(userId)),
-      redis.smembers(userRefreshKey(userId))
-    ]);
+      const keysToDelete = [
+        ...jtis.filter((jti) => jti !== options.exceptJti).map((jti) => `session:${jti}`),
+        ...hashes.map((hash) => `refresh:${hash}`)
+      ];
+      if (keysToDelete.length) await redis.del(...keysToDelete);
 
-    const keysToDelete = [
-      ...jtis.filter((jti) => jti !== options.exceptJti).map((jti) => `session:${jti}`),
-      ...hashes.map((hash) => `refresh:${hash}`)
-    ];
-    if (keysToDelete.length) await redis.del(...keysToDelete);
-
-    await redis.del(userSessionsKey(userId), userRefreshKey(userId));
-    if (options.exceptJti) await redis.sadd(userSessionsKey(userId), options.exceptJti);
-
-    for (const jti of jtis) {
-      if (jti !== options.exceptJti) disconnectSession(jti);
+      await redis.del(userSessionsKey(userId), userRefreshKey(userId));
+      if (options.exceptJti) await redis.sadd(userSessionsKey(userId), options.exceptJti);
+    } catch (error) {
+      logger.error({ error, userId }, "revoke_all_user_sessions_failed");
     }
-  } catch (error) {
-    logger.error({ error, userId }, "revoke_all_user_sessions_failed");
   }
+
+  // Local sockets must close even when Redis is unavailable. Stage 11 promotes this
+  // process-local event to Redis Pub/Sub for cross-replica delivery.
+  publishSessionSecurityEvent({
+    type: "user.sessions.revoked",
+    userId,
+    exceptSessionId: options.exceptJti
+  });
 }

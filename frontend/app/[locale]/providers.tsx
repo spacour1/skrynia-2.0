@@ -9,6 +9,7 @@ import { readCachedUser, useAuth } from "@/lib/auth-store";
 import { apiFetch, DISPLAY_CURRENCY_EVENT, setCurrencyRates, type CurrencyRatesResponse } from "@/lib/api";
 import { rememberReturnPath } from "@/lib/return-path";
 import { PostHogProvider } from "@/components/PostHogProvider";
+import { RealtimeProvider } from "@/components/RealtimeProvider";
 
 export function Providers({ children }: { children: ReactNode }) {
   const [client] = useState(() => new QueryClient());
@@ -45,12 +46,14 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={client}>
       <PostHogProvider>
-        <CurrencyRatesLoader />
-        <div key={currencyVersion} className="contents">
-          {children}
-        </div>
-        <LanguageGate />
-        <ToastCenter />
+        <RealtimeProvider>
+          <CurrencyRatesLoader />
+          <div key={currencyVersion} className="contents">
+            {children}
+          </div>
+          <LanguageGate />
+          <ToastCenter />
+        </RealtimeProvider>
       </PostHogProvider>
     </QueryClientProvider>
   );

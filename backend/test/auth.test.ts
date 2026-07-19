@@ -143,6 +143,21 @@ describe("logout", () => {
       .expect(401);
     expect(replay.body.error.code).toBe("refresh_token_invalid");
   });
+
+  it("logout-all revokes every device session", async () => {
+    const first = new AuthedAgent();
+    await first.register();
+    const second = new AuthedAgent();
+    second.email = first.email;
+    second.password = first.password;
+    await second.login();
+
+    await first.post("/auth/logout-all").expect(204);
+
+    await first.get("/auth/me").expect(401);
+    await second.get("/auth/me").expect(401);
+    await second.refresh().then((response) => expect(response.status).toBe(401));
+  });
 });
 
 describe("banned users", () => {

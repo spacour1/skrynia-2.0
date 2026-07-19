@@ -321,3 +321,92 @@ clears only `rl:*` keys between cases.
   ceilings either shared too broadly or derived from an untrusted forwarding header.
 - New sensitive write endpoints must be assigned to a dedicated limiter or removed from
   the general-write exclusion registry in the same change.
+
+## Stage 5: realtime reconnects, acknowledgements, and session revocation
+
+Status: complete.
+
+Planned commit: `fix(realtime): add typed reconnects message acknowledgements and revocation`
+
+### Confirmed defects
+
+- The ticket helper silently swallowed every ticket-endpoint error and attempted a cookie
+  handshake even when a cross-domain production deployment could not send that cookie.
+- `ChatPanel` and `ToastCenter` each owned a socket and reconnect loop, creating duplicate
+  connections and inconsistent retry behavior.
+- WebSocket sends cleared the form before the server confirmed that a message was saved.
+- Password, role, ban, logout, and other security changes did not share a process-local
+  socket-revocation contract.
+- Outbound WebSocket buffers and per-connection conversation rooms were unbounded.
+
+### Implementation
+
+- Added `WebSocketTicketError` with status, code, retryability, and optional Retry-After
+  milliseconds. Authentication and other 4xx failures stop reconnecting, 429 uses the
+  server delay, and transient failures use capped exponential backoff.
+- Restricted cookie fallback to development, a same-origin WebSocket deployment, or the
+  explicit `NEXT_PUBLIC_WS_COOKIE_FALLBACK=true` build setting.
+- Added one `RealtimeClient` and `RealtimeProvider` per tab. It owns ticket acquisition,
+  reconnect state, visibility/network handling, auth refresh, room reference counts,
+  event subscribers, pending messages, and logout cleanup.
+- Migrated chat and toast consumers to the provider. Chat-room broadcasts no longer
+  duplicate the canonical recipient notification toast.
+- Added UUID `clientMessageId` sends and `message_ack`/`message_error` responses. The chat
+  keeps optimistic rows in `sending`, changes them to `sent` only after an ACK or HTTP
+  response, and exposes `failed` plus retry when delivery is uncertain.
+- Added process-local `session.revoked`, `user.sessions.revoked`, and `user.banned` events.
+  Password reset/change, logout/logout-all, 2FA security changes, bans, and role changes
+  close affected sockets. Authenticated security changes rotate the caller to a new
+  session after old sockets close.
+- Added an exposed `X-Session-Rotated` response signal and cross-tab frontend refresh
+  notification so the newly issued session reconnects without a page reload.
+- Added `WS_MAX_BUFFERED_BYTES`, a slow-client close path and metric, plus
+  `WS_MAX_ROOMS_PER_CONNECTION` with explicit join/leave handling.
+- No schema migration or financial, provider, ledger, payout, wallet, fee, or accounting
+  change was required.
+
+### Regression coverage
+
+Frontend unit coverage verifies:
+
+1. A 401 ticket error stops reconnecting.
+2. A 429 uses the exact Retry-After delay.
+3. Repeated 503 failures wait 1 second, then 2 seconds.
+4. Repeated starts and multiple subscribers still create one connection.
+5. ACK changes delivery from `sending` to `sent`.
+6. Disconnect before ACK changes delivery to `failed` and retryable.
+
+Backend integration coverage verifies:
+
+1. The ACK echoes `clientMessageId` and contains the row durably saved in PostgreSQL.
+2. The configured room ceiling rejects the next join and a leave frees one slot.
+3. Password change closes the old socket while the newly issued session still connects.
+4. A client above the outbound-buffer limit closes without another send or process error.
+5. Logout-all invalidates access and refresh state on every device.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `cd backend && npm run build` | PASS |
+| Targeted WebSocket run | PASS, 12/12 |
+| `cd backend && npm test` | PASS, 185/185 in 18/18 files |
+| Clean database migration smoke | PASS, all 30 migrations |
+| Schema/WebSocket tests on clean database | PASS, 18/18 |
+| `cd frontend && npm run typecheck` | PASS |
+| `cd frontend && npm test` | PASS, 6/6 |
+| `cd frontend && npm run i18n:check` | PASS, 0 errors and 25 baseline warnings |
+| `cd frontend && npm run build` | PASS, with existing Sentry/OpenTelemetry warnings |
+| `docker compose config --quiet` with required secrets | PASS |
+
+### Remaining constraints
+
+- Revocation events are process-local in this stage. Multi-replica deployments still need
+  sticky sessions until Stage 11 distributes these events with Redis Pub/Sub.
+- `clientMessageId` correlates an ACK but is not yet a persistent deduplication key. Stage
+  10 adds the column and unique partial index so retry after a lost ACK cannot duplicate a
+  saved message.
+- Reverse proxies must preserve `X-Session-Rotated`, and production deployments should
+  leave cross-origin cookie fallback disabled unless the cookie domain is intentionally
+  configured for that WebSocket origin.

@@ -86,6 +86,8 @@ const schema = z.object({
   AUTHENTICATED_WRITE_RATE_LIMIT_PER_IP: z.coerce.number().int().min(1).optional(),
   WS_TICKET_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(30),
   WS_TICKET_RATE_LIMIT_PER_IP: z.coerce.number().int().min(1).default(120),
+  WS_MAX_BUFFERED_BYTES: z.coerce.number().int().min(1024).default(1024 * 1024),
+  WS_MAX_ROOMS_PER_CONNECTION: z.coerce.number().int().min(1).max(1000).default(50),
   PHONE_OTP_RATE_LIMIT_PER_15MIN: z.coerce.number().int().min(1).default(10),
   PHONE_OTP_RATE_LIMIT_PER_IP_15MIN: z.coerce.number().int().min(1).default(30),
   EMAIL_VERIFICATION_RATE_LIMIT_PER_15MIN: z.coerce.number().int().min(1).default(10),

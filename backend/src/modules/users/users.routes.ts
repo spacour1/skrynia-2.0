@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { pool } from "../../db/pool.js";
@@ -56,6 +56,12 @@ const changePasswordSchema = z.object({
     .refine((value) => /[0-9]/.test(value), "Password must contain a number")
     .refine((value) => /[^A-Za-z0-9]/.test(value), "Password must contain a special character")
 });
+
+async function rotateSecuritySession(req: AuthedRequest, res: Response) {
+  await revokeAllUserSessions(req.user.id);
+  const session = await issueSession(req.user.id, req.user.role);
+  setAuthCookies(res, session);
+}
 
 router.get(
   "/me",
@@ -175,9 +181,7 @@ router.post(
     // later when its access token expired). Instead the caller immediately gets a brand
     // new access+refresh+csrf session in this response: other devices are out, this tab
     // stays seamlessly signed in.
-    await revokeAllUserSessions(req.user.id);
-    const session = await issueSession(req.user.id, req.user.role);
-    setAuthCookies(res, session);
+    await rotateSecuritySession(req, res);
     await createNotification({
       userId: req.user.id,
       type: "password_changed",
@@ -328,6 +332,7 @@ router.post(
       input.code,
       twoFactorAuditContext(req)
     );
+    await rotateSecuritySession(req, res);
     res.json({ backupCodes });
   })
 );
@@ -343,6 +348,7 @@ router.post(
       reauthentication,
       twoFactorAuditContext(req)
     );
+    await rotateSecuritySession(req, res);
     res.json({ ok: true });
   })
 );
@@ -358,6 +364,7 @@ router.post(
       reauthentication,
       twoFactorAuditContext(req)
     );
+    await rotateSecuritySession(req, res);
     res.json({ backupCodes });
   })
 );

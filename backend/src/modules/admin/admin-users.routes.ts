@@ -4,8 +4,8 @@ import { pool } from "../../db/pool.js";
 import { asyncHandler, notFound } from "../../common/errors.js";
 import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
-import { disconnectUser } from "../chat/ws.service.js";
 import { revokeAllUserSessions } from "../auth/session.service.js";
+import { publishSessionSecurityEvent } from "../auth/session-events.service.js";
 import { recordModerationAction } from "../reports/reports.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
 import {
@@ -72,11 +72,12 @@ router.patch(
     );
     if (!result.rows[0]) throw notFound("User not found");
     if (body.isBanned) {
-      // Belt-and-suspenders: revoke the Redis-tracked sessions/refresh tokens immediately
-      // (rather than waiting for the next authenticate() call to notice is_banned) and close
-      // any live websocket connections regardless of which session token they used.
+      publishSessionSecurityEvent({ type: "user.banned", userId: id });
+    }
+    if (body.isBanned || body.role !== undefined) {
+      // Ban and privilege changes invalidate every existing token immediately. The local
+      // event closes this process's sockets; Stage 11 distributes it across replicas.
       await revokeAllUserSessions(id);
-      disconnectUser(id);
     }
     if (body.isBanned !== undefined) {
       // Fetch every affected product dimension in one query, then invalidate all detail

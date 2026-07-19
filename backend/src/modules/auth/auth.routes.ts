@@ -14,7 +14,6 @@ import {
 } from "../../common/middleware/security.js";
 import { REFRESH_COOKIE, setAuthCookies, clearAuthCookies } from "../../common/cookies.js";
 import type { AuthedRequest } from "../../common/types.js";
-import { disconnectUser } from "../chat/ws.service.js";
 import { verifyTelegramAuth } from "./telegram.service.js";
 import {
   hashRefreshToken,
@@ -267,6 +266,16 @@ router.post(
 );
 
 router.post(
+  "/logout-all",
+  authenticate,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    await revokeAllUserSessions(req.user.id);
+    clearAuthCookies(res);
+    res.status(204).send();
+  })
+);
+
+router.post(
   "/verify-email/request",
   authenticate,
   emailVerificationRateLimit,
@@ -350,7 +359,6 @@ router.post(
     // The password changed via an out-of-band email link, not from inside any active
     // session - every existing session (this device or any other) must re-authenticate.
     await revokeAllUserSessions(userId);
-    disconnectUser(userId);
     res.json({ status: "reset" });
   })
 );

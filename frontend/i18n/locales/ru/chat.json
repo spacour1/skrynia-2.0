@@ -6,7 +6,11 @@
     "attachmentPlaceholder": "Ссылка на вложение, необязательно",
     "messagePlaceholder": "Напишите сообщение",
     "reportMessage": "Пожаловаться на сообщение",
-    "systemSender": "Система"
+    "systemSender": "Система",
+    "sending": "Отправляется",
+    "sent": "Отправлено",
+    "failed": "Не отправлено",
+    "retryMessage": "Отправить ещё раз"
   },
   "system": {
     "orderCreated": "Заказ создан. Следующий шаг — оплата.",

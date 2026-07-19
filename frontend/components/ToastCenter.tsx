@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@/lib/navigation";
 import { Bell, CheckCircle2, Heart, MessageCircle, ReceiptText, X } from "lucide-react";
-import { openAuthedSocket } from "@/lib/ws";
 import { useAuth } from "@/lib/auth-store";
 import { APP_TOAST_EVENT, type AppToastPayload } from "@/lib/toast-events";
+import { useRealtime } from "@/components/RealtimeProvider";
 
 type WsNotification = {
   id?: string;
@@ -35,76 +35,47 @@ const TOAST_TTL_MS = 8000;
 
 export function ToastCenter() {
   const user = useAuth((state) => state.user);
-  const hydrated = useAuth((state) => state.hydrated);
+  const realtime = useRealtime();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const socketRef = useRef<WebSocket | null>(null);
-  const reconnectTimerRef = useRef<number | null>(null);
   const seenRef = useRef<Set<string>>(new Set());
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   useEffect(() => {
-    if (!hydrated || !user) {
-      socketRef.current?.close();
-      socketRef.current = null;
+    if (!user) {
       setToasts([]);
       return;
     }
 
-    let closedByEffect = false;
+    return realtime.subscribe((payload) => {
+      if (payload.type === "connected" || payload.type === "joined_order") return;
+      // Chat delivery also creates a recipient notification. The shared socket sees both
+      // while a conversation is open, so use the notification as the single toast source.
+      if (payload.type === "message") return;
 
-    async function connect() {
-      // Cross-domain WS: authenticate with a fresh one-time ticket per connection attempt
-      // (see lib/ws.ts); same-origin cookie auth remains the fallback.
-      const ws = await openAuthedSocket();
-      if (closedByEffect) {
-        ws.close();
+      if (payload.type === "presence") {
+        queryClient.invalidateQueries({ queryKey: ["game-products"] });
+        queryClient.invalidateQueries({ queryKey: ["products"] });
+        queryClient.invalidateQueries({ queryKey: ["seller"] });
+        queryClient.invalidateQueries({ queryKey: ["seller-favorites"] });
+        queryClient.invalidateQueries({ queryKey: ["game-page"] });
         return;
       }
-      socketRef.current = ws;
 
-      ws.addEventListener("message", (event) => {
-        const payload = safeParse(event.data);
-        if (!payload || payload.type === "connected" || payload.type === "joined_order") return;
-
-        if (payload.type === "presence") {
-          queryClient.invalidateQueries({ queryKey: ["game-products"] });
-          queryClient.invalidateQueries({ queryKey: ["products"] });
-          queryClient.invalidateQueries({ queryKey: ["seller"] });
-          queryClient.invalidateQueries({ queryKey: ["seller-favorites"] });
-          queryClient.invalidateQueries({ queryKey: ["game-page"] });
-          return;
-        }
-
-        const toast = toastFromPayload(payload);
-        if (!toast) return;
-        pushToast(toast);
-        queryClient.invalidateQueries({ queryKey: ["notifications"] });
-        if (toast.orderId) {
-          queryClient.invalidateQueries({ queryKey: ["orders"] });
-          queryClient.invalidateQueries({ queryKey: ["order", toast.orderId] });
-        }
-        if (toast.conversationId) {
-          queryClient.invalidateQueries({ queryKey: ["chat-conversations"] });
-          queryClient.invalidateQueries({ queryKey: ["chat-conversations-grouped"] });
-        }
-      });
-
-      ws.addEventListener("close", () => {
-        if (closedByEffect) return;
-        reconnectTimerRef.current = window.setTimeout(connect, 3000);
-      });
-    }
-
-    connect();
-
-    return () => {
-      closedByEffect = true;
-      if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
-      socketRef.current?.close();
-      socketRef.current = null;
-    };
-  }, [hydrated, queryClient, user]);
+      const toast = toastFromPayload(payload);
+      if (!toast) return;
+      pushToast(toast);
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      if (toast.orderId) {
+        queryClient.invalidateQueries({ queryKey: ["orders"] });
+        queryClient.invalidateQueries({ queryKey: ["order", toast.orderId] });
+      }
+      if (toast.conversationId) {
+        queryClient.invalidateQueries({ queryKey: ["chat-conversations"] });
+        queryClient.invalidateQueries({ queryKey: ["chat-conversations-grouped"] });
+      }
+    });
+  }, [queryClient, realtime, user]);
 
   useEffect(() => {
     if (!toasts.length) return;
@@ -286,14 +257,6 @@ function eventBody(type: string) {
     dispute_resolved: "Решение администратора применено к заказу."
   };
   return bodies[type];
-}
-
-function safeParse(value: string) {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
 }
 
 function normalizeMojibake(value: string) {

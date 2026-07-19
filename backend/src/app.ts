@@ -49,7 +49,13 @@ export function createApp() {
       crossOriginResourcePolicy: { policy: "cross-origin" }
     })
   );
-  app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
+  app.use(
+    cors({
+      origin: env.FRONTEND_URL,
+      credentials: true,
+      exposedHeaders: ["Retry-After", "X-Session-Rotated"]
+    })
+  );
   app.use(cookieParser());
   app.use(express.json({ limit: "1mb" }));
   app.use(requestContext);

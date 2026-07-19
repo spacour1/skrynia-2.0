@@ -1,14 +1,21 @@
 import type http from "node:http";
 import jwt from "jsonwebtoken";
 import { WebSocketServer, WebSocket } from "ws";
+import { z } from "zod";
 import { env } from "../../config/env.js";
 import { pool } from "../../db/pool.js";
 import { getRedis } from "../../common/redis.js";
 import { logger } from "../../common/logger.js";
 import { ACCESS_COOKIE } from "../../common/cookies.js";
 import { ApiError } from "../../common/errors.js";
-import { wsConnectionsActive, wsConnectionFailuresTotal, wsMessagesTotal } from "../../common/metrics.js";
+import {
+  wsConnectionsActive,
+  wsConnectionFailuresTotal,
+  wsMessagesTotal,
+  wsSlowClientsTotal
+} from "../../common/metrics.js";
 import { consumeWsTicket } from "../auth/ws-ticket.service.js";
+import { onSessionSecurityEvent } from "../auth/session-events.service.js";
 import { sendMessage } from "./chat.service.js";
 
 function readCookie(header: string | undefined, name: string): string | undefined {
@@ -132,9 +139,33 @@ function isOriginAllowed(req: http.IncomingMessage): boolean {
 
 const MAX_CONNECTIONS_PER_USER = 12;
 
-function sendJson(client: WebSocket, payload: unknown) {
-  if (client.readyState === WebSocket.OPEN) {
+export const WS_CLOSE_SESSION_REVOKED = 4001;
+export const WS_CLOSE_USER_BANNED = 4003;
+export const WS_CLOSE_SLOW_CLIENT = 4008;
+
+export function sendJson(client: WebSocket, payload: unknown) {
+  if (client.readyState !== WebSocket.OPEN) return false;
+  if (client.bufferedAmount > env.WS_MAX_BUFFERED_BYTES) {
+    wsSlowClientsTotal.inc();
+    try {
+      client.close(WS_CLOSE_SLOW_CLIENT, "Slow client");
+    } catch (error) {
+      logger.warn({ error }, "ws_slow_client_close_failed");
+    }
+    return false;
+  }
+
+  try {
     client.send(JSON.stringify(payload));
+    return true;
+  } catch (error) {
+    logger.warn({ error }, "ws_send_failed");
+    try {
+      client.close(1011, "Send failed");
+    } catch {
+      // The transport is already unusable; the close listener will clean maps if possible.
+    }
+    return false;
   }
 }
 
@@ -154,6 +185,14 @@ function joinConversation(client: Client, conversationId: string) {
   clientsByConversation.set(conversationId, room);
 }
 
+function leaveConversation(client: Client, conversationId: string) {
+  client.rooms?.delete(conversationId);
+  const room = clientsByConversation.get(conversationId);
+  if (!room) return;
+  room.delete(client);
+  if (room.size === 0) clientsByConversation.delete(conversationId);
+}
+
 function leaveAll(client: Client) {
   if (client.userId) {
     const clients = clientsByUser.get(client.userId);
@@ -169,22 +208,50 @@ function leaveAll(client: Client) {
       if (sameSession.size === 0) clientsByJti.delete(client.jti);
     }
   }
-  for (const room of client.rooms ?? []) {
-    clientsByConversation.get(room)?.delete(client);
-  }
+  for (const room of Array.from(client.rooms ?? [])) leaveConversation(client, room);
 }
 
 export function disconnectSession(jti: string) {
   const clients = clientsByJti.get(jti);
   if (!clients) return;
-  for (const client of Array.from(clients)) client.close(1008, "Session revoked");
+  for (const client of Array.from(clients)) {
+    if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
+      client.close(WS_CLOSE_SESSION_REVOKED, "Session revoked");
+    }
+  }
 }
 
-export function disconnectUser(userId: string) {
+export function disconnectUser(userId: string, exceptSessionId?: string) {
   const clients = clientsByUser.get(userId);
   if (!clients) return;
-  for (const client of Array.from(clients)) client.close(1008, "Account banned");
+  for (const client of Array.from(clients)) {
+    if (
+      client.jti !== exceptSessionId &&
+      (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING)
+    ) {
+      client.close(WS_CLOSE_SESSION_REVOKED, "Sessions revoked");
+    }
+  }
 }
+
+onSessionSecurityEvent((event) => {
+  if (event.type === "session.revoked") {
+    disconnectSession(event.sessionId);
+    return;
+  }
+  if (event.type === "user.sessions.revoked") {
+    disconnectUser(event.userId, event.exceptSessionId);
+    return;
+  }
+
+  const clients = clientsByUser.get(event.userId);
+  if (!clients) return;
+  for (const client of Array.from(clients)) {
+    if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
+      client.close(WS_CLOSE_USER_BANNED, "Account banned");
+    }
+  }
+});
 
 function isSpam(client: Client) {
   const now = Date.now();
@@ -222,6 +289,37 @@ export function isUserOnline(userId: string) {
 //   2. Redis pub/sub: publish chat/order events to a channel; all replicas subscribe and
 //      fan out to their own connected clients. Needed if sticky sessions are not feasible.
 const HEARTBEAT_INTERVAL_MS = 30_000;
+
+const incomingMessageSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("join_conversation"),
+    conversationId: z.string().uuid()
+  }),
+  z.object({
+    type: z.literal("leave_conversation"),
+    conversationId: z.string().uuid()
+  }),
+  z.object({
+    type: z.literal("message"),
+    clientMessageId: z.string().uuid(),
+    conversationId: z.string().uuid(),
+    body: z.string().trim().min(1).max(3000),
+    attachmentId: z.null().optional(),
+    attachmentUrl: z.string().url().max(2048).optional()
+  })
+]);
+
+function sendMessageError(
+  client: Client,
+  clientMessageId: string,
+  input: { code?: string; message: string; retryable: boolean }
+) {
+  sendJson(client, {
+    type: "message_error",
+    clientMessageId,
+    ...input
+  });
+}
 
 export function attachWebSocketServer(server: http.Server) {
   const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 64 * 1024 });
@@ -268,53 +366,140 @@ export function attachWebSocketServer(server: http.Server) {
       wsConnectionsActive.inc();
       sendJson(client, { type: "connected" });
 
-      client.on("message", async (raw) => {
-        try {
-          const msg = JSON.parse(raw.toString()) as {
-            type: "join_conversation" | "message";
-            conversationId?: string;
-            body?: string;
-            attachmentUrl?: string;
-          };
+      client.on("message", (raw) => {
+        void (async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(raw.toString());
+          } catch {
+            wsMessagesTotal.labels("malformed").inc();
+            sendJson(client, { type: "error", message: "Malformed websocket message" });
+            return;
+          }
 
-          wsMessagesTotal.labels(msg.type ?? "unknown").inc();
+          const validated = incomingMessageSchema.safeParse(parsed);
+          if (!validated.success) {
+            wsMessagesTotal.labels("invalid").inc();
+            const candidate = parsed as { type?: unknown; clientMessageId?: unknown };
+            if (
+              candidate?.type === "message" &&
+              typeof candidate.clientMessageId === "string"
+            ) {
+              sendMessageError(client, candidate.clientMessageId, {
+                code: "invalid_message",
+                message: "Invalid message",
+                retryable: false
+              });
+            } else {
+              sendJson(client, { type: "error", message: "Malformed websocket message" });
+            }
+            return;
+          }
+
+          const msg = validated.data;
+          wsMessagesTotal.labels(msg.type).inc();
+
           if (msg.type === "join_conversation") {
-            if (!msg.conversationId || !(await canAccessConversation(msg.conversationId, client.userId!))) {
-              return sendJson(client, { type: "error", message: "Cannot join conversation" });
+            if (client.rooms?.has(msg.conversationId)) {
+              sendJson(client, {
+                type: "joined_conversation",
+                conversationId: msg.conversationId
+              });
+              return;
+            }
+            if (!(await canAccessConversation(msg.conversationId, client.userId!))) {
+              sendJson(client, {
+                type: "error",
+                code: "conversation_forbidden",
+                message: "Cannot join conversation"
+              });
+              return;
+            }
+            // Re-check after the asynchronous access query so concurrent join messages
+            // cannot race past the per-connection room ceiling.
+            if ((client.rooms?.size ?? 0) >= env.WS_MAX_ROOMS_PER_CONNECTION) {
+              sendJson(client, {
+                type: "error",
+                code: "room_limit",
+                message: "Conversation room limit reached"
+              });
+              return;
             }
             joinConversation(client, msg.conversationId);
-            return sendJson(client, { type: "joined_conversation", conversationId: msg.conversationId });
+            sendJson(client, {
+              type: "joined_conversation",
+              conversationId: msg.conversationId
+            });
+            return;
           }
 
-          if (msg.type === "message") {
-            if (!client.emailVerified) {
-              return sendJson(client, {
-                type: "error",
-                code: "email_not_verified",
-                message: "Please verify your email to send messages"
-              });
-            }
-            if (isSpam(client)) return sendJson(client, { type: "error", message: "Slow down" });
-            if (!msg.conversationId) {
-              return sendJson(client, { type: "error", message: "Invalid message" });
-            }
-            try {
-              const saved = await sendMessage({
-                conversationId: msg.conversationId,
-                senderId: client.userId!,
-                body: msg.body ?? "",
-                attachmentUrl: msg.attachmentUrl
-              });
-              broadcastConversation(msg.conversationId, { type: "message", message: saved });
-            } catch (sendError) {
-              const code = sendError instanceof ApiError ? sendError.code : undefined;
-              const message = sendError instanceof ApiError ? sendError.message : "Cannot message this conversation";
-              sendJson(client, { type: "error", code, message });
-            }
+          if (msg.type === "leave_conversation") {
+            leaveConversation(client, msg.conversationId);
+            sendJson(client, {
+              type: "left_conversation",
+              conversationId: msg.conversationId
+            });
+            return;
           }
-        } catch {
-          sendJson(client, { type: "error", message: "Malformed websocket message" });
-        }
+
+          if (!client.emailVerified) {
+            sendMessageError(client, msg.clientMessageId, {
+              code: "email_not_verified",
+              message: "Please verify your email to send messages",
+              retryable: false
+            });
+            return;
+          }
+          if (isSpam(client)) {
+            sendMessageError(client, msg.clientMessageId, {
+              code: "message_rate_limited",
+              message: "Slow down",
+              retryable: true
+            });
+            return;
+          }
+
+          try {
+            const saved = await sendMessage({
+              conversationId: msg.conversationId,
+              senderId: client.userId!,
+              body: msg.body,
+              attachmentUrl: msg.attachmentUrl
+            });
+            // ACK is queued before the room broadcast so the sender can replace its
+            // optimistic row before receiving the normal conversation event.
+            sendJson(client, {
+              type: "message_ack",
+              clientMessageId: msg.clientMessageId,
+              message: saved
+            });
+            broadcastConversation(msg.conversationId, {
+              type: "message",
+              message: saved
+            });
+          } catch (sendError) {
+            const code = sendError instanceof ApiError ? sendError.code : undefined;
+            const message =
+              sendError instanceof ApiError
+                ? sendError.message
+                : "Cannot message this conversation";
+            sendMessageError(client, msg.clientMessageId, {
+              code,
+              message,
+              retryable:
+                !(sendError instanceof ApiError) ||
+                sendError.status === 429 ||
+                sendError.status >= 500
+            });
+          }
+        })().catch((error) => {
+          logger.error({ error, userId: client.userId }, "ws_message_handler_failed");
+          sendJson(client, {
+            type: "error",
+            code: "internal_error",
+            message: "Could not process websocket message"
+          });
+        });
       });
 
       client.on("close", () => {

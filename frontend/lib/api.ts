@@ -400,10 +400,27 @@ function recentlyRefreshedElsewhere() {
 /** Fired on a successful silent refresh, so long-lived connections (the chat WebSocket) that don't go through apiFetch can notice their access-token cookie just changed and reconnect proactively instead of waiting to be dropped. */
 export const AUTH_REFRESHED_EVENT = "auth-refreshed";
 
+export function onAuthenticationRefreshed(handler: () => void): () => void {
+  const channel = getAuthChannel();
+  const channelListener = (event: MessageEvent) => {
+    if ((event.data as { type?: string } | undefined)?.type === "session-refreshed") {
+      handler();
+    }
+  };
+  const windowListener = () => handler();
+  channel?.addEventListener("message", channelListener);
+  window.addEventListener(AUTH_REFRESHED_EVENT, windowListener);
+  return () => {
+    channel?.removeEventListener("message", channelListener);
+    window.removeEventListener(AUTH_REFRESHED_EVENT, windowListener);
+  };
+}
+
 function markRefreshed() {
   if (typeof window !== "undefined") {
     window.localStorage.setItem(RECENT_REFRESH_KEY, String(Date.now()));
     window.dispatchEvent(new CustomEvent(AUTH_REFRESHED_EVENT));
+    getAuthChannel()?.postMessage({ type: "session-refreshed" });
   }
 }
 
@@ -485,6 +502,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, isRet
     );
   }
 
+  if (response.headers.get("X-Session-Rotated") === "true") markRefreshed();
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }

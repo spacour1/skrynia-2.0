@@ -55,6 +55,8 @@ services:
       AUTHENTICATED_WRITE_RATE_LIMIT_PER_IP: ${AUTHENTICATED_WRITE_RATE_LIMIT_PER_IP:-300}
       WS_TICKET_RATE_LIMIT_PER_MIN: ${WS_TICKET_RATE_LIMIT_PER_MIN:-30}
       WS_TICKET_RATE_LIMIT_PER_IP: ${WS_TICKET_RATE_LIMIT_PER_IP:-120}
+      WS_MAX_BUFFERED_BYTES: ${WS_MAX_BUFFERED_BYTES:-1048576}
+      WS_MAX_ROOMS_PER_CONNECTION: ${WS_MAX_ROOMS_PER_CONNECTION:-50}
       PHONE_OTP_RATE_LIMIT_PER_15MIN: ${PHONE_OTP_RATE_LIMIT_PER_15MIN:-10}
       PHONE_OTP_RATE_LIMIT_PER_IP_15MIN: ${PHONE_OTP_RATE_LIMIT_PER_IP_15MIN:-30}
       EMAIL_VERIFICATION_RATE_LIMIT_PER_15MIN: ${EMAIL_VERIFICATION_RATE_LIMIT_PER_15MIN:-10}
@@ -154,12 +156,14 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://backend:4000}
         NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:4000/ws}
+        NEXT_PUBLIC_WS_COOKIE_FALLBACK: ${NEXT_PUBLIC_WS_COOKIE_FALLBACK:-false}
     environment:
       # Resolved by the Next.js server itself (inside this container) to proxy /api/* —
       # must be the backend's address on the docker network, not the host-facing
       # localhost:4000, or every API call 500s.
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://backend:4000}
       NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:4000/ws}
+      NEXT_PUBLIC_WS_COOKIE_FALLBACK: ${NEXT_PUBLIC_WS_COOKIE_FALLBACK:-false}
     ports:
       - "3000:3000"
     depends_on:

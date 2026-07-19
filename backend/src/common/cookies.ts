@@ -36,6 +36,7 @@ export function setAuthCookies(res: Response, input: { accessToken: string; refr
   res.cookie(ACCESS_COOKIE, input.accessToken, accessCookieOptions());
   res.cookie(REFRESH_COOKIE, input.refreshToken, refreshCookieOptions());
   res.cookie(CSRF_COOKIE, input.csrfToken, csrfCookieOptions());
+  res.setHeader("X-Session-Rotated", "true");
 }
 
 export function clearAuthCookies(res: Response) {

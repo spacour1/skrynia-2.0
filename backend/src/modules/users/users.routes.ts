@@ -277,7 +277,13 @@ router.post(
     const ok = await bcrypt.compare(input.currentPassword, hash);
     if (!ok) throw badRequest("Current password is incorrect");
     const nextHash = await bcrypt.hash(input.newPassword, 12);
-    await pool.query(`update users set password_hash = $2, updated_at = now() where id = $1`, [req.user.id, nextHash]);
+    // One UPDATE = one implicit transaction: the new password and the session-version
+    // bump land together, so old sessions die with the change even if the Redis
+    // revocation in rotateSecuritySession fails.
+    await pool.query(
+      `update users set password_hash = $2, session_version = session_version + 1, updated_at = now() where id = $1`,
+      [req.user.id, nextHash]
+    );
     // Kill every session on a password change - including this one's refresh token, which
     // exceptJti used to leave dangling-revoked (the tab then silently logged out ~15 min
     // later when its access token expired). Instead the caller immediately gets a brand

@@ -12,7 +12,19 @@ import type { AuthUser, AuthedRequest } from "../types.js";
 type JwtPayload = {
   sub: string;
   jti: string;
+  /** Session version the token was issued under; absent on pre-rollout tokens (treated as 1). */
+  sv?: number;
 };
+
+type AuthUserRow = AuthUser & { sessionVersion: number };
+
+const AUTH_USER_SELECT = `
+  select id, email, display_name as "displayName", role, is_banned as "isBanned",
+         session_version as "sessionVersion",
+         (email_verified_at is not null or telegram_id is not null) as "emailVerified",
+         (phone_verified_at is not null) as "phoneVerified"
+  from users
+  where id = $1`;
 
 // Redis only backs the immediate-revocation check (logout/ban kill a session before its JWT
 // naturally expires). A connection blip there must never look like "this user is logged out" -
@@ -41,18 +53,17 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
       throw new ApiError(401, "Session expired", "unauthorized");
     }
 
-    const result = await pool.query<AuthUser>(
-      `select id, email, display_name as "displayName", role, is_banned as "isBanned",
-              (email_verified_at is not null or telegram_id is not null) as "emailVerified",
-              (phone_verified_at is not null) as "phoneVerified"
-       from users
-       where id = $1`,
-      [payload.sub]
-    );
-    const user = result.rows[0];
-    if (!user) throw new ApiError(401, "Invalid access token", "unauthorized");
-    if (user.isBanned) throw new ApiError(403, "Account is banned", "account_banned");
+    const result = await pool.query<AuthUserRow>(AUTH_USER_SELECT, [payload.sub]);
+    const row = result.rows[0];
+    if (!row) throw new ApiError(401, "Invalid access token", "unauthorized");
+    if (row.isBanned) throw new ApiError(403, "Account is banned", "account_banned");
+    // The DB-backed epoch check: a security-sensitive change bumped the version, so
+    // every token issued before it is dead regardless of Redis availability.
+    if ((payload.sv ?? 1) !== row.sessionVersion) {
+      throw new ApiError(401, "Session expired", "unauthorized");
+    }
 
+    const { sessionVersion: _sessionVersion, ...user } = row;
     req.user = user;
     req.sessionId = payload.jti;
     req.rateLimitUserId = user.id;
@@ -82,16 +93,10 @@ export const authenticateOptional: RequestHandler = async (req, _res, next) => {
     const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
     if (await isSessionRevoked(payload.jti)) return next();
 
-    const result = await pool.query<AuthUser>(
-      `select id, email, display_name as "displayName", role, is_banned as "isBanned",
-              (email_verified_at is not null or telegram_id is not null) as "emailVerified",
-              (phone_verified_at is not null) as "phoneVerified"
-       from users
-       where id = $1`,
-      [payload.sub]
-    );
-    const user = result.rows[0];
-    if (user && !user.isBanned) {
+    const result = await pool.query<AuthUserRow>(AUTH_USER_SELECT, [payload.sub]);
+    const row = result.rows[0];
+    if (row && !row.isBanned && (payload.sv ?? 1) === row.sessionVersion) {
+      const { sessionVersion: _sessionVersion, ...user } = row;
       req.user = user;
       req.sessionId = payload.jti;
       req.rateLimitUserId = user.id;

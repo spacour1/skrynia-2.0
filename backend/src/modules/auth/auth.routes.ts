@@ -16,9 +16,11 @@ import { REFRESH_COOKIE, setAuthCookies, clearAuthCookies } from "../../common/c
 import type { AuthedRequest } from "../../common/types.js";
 import { verifyTelegramAuth } from "./telegram.service.js";
 import {
+  bumpSessionVersion,
   hashRefreshToken,
   issueSession,
   issueTwoFactorPendingToken,
+  parseRefreshRecord,
   revokeAllUserSessions,
   revokeRefreshToken,
   revokeSession,
@@ -220,9 +222,9 @@ router.post(
     if (!redis) throw serviceUnavailable("Sessions are unavailable right now, try again shortly");
 
     const tokenHash = hashRefreshToken(refreshToken);
-    let userId: string | null;
+    let rawRecord: string | null;
     try {
-      userId = await redis.get(`refresh:${tokenHash}`);
+      rawRecord = await redis.get(`refresh:${tokenHash}`);
     } catch (error) {
       // A connection blip is not the same thing as "this token is invalid" - don't clear
       // cookies or sign the user out over it, just ask the client to retry shortly.
@@ -230,16 +232,18 @@ router.post(
       throw serviceUnavailable("Sessions are unavailable right now, try again shortly");
     }
 
-    if (!userId) {
+    const record = rawRecord ? parseRefreshRecord(rawRecord) : null;
+    if (!record) {
       clearAuthCookies(res);
       throw new ApiError(401, "Refresh token is invalid or expired", "refresh_token_invalid");
     }
 
     const result = await pool.query(
       `select id, email, display_name as "displayName", role, is_banned as "isBanned",
+              session_version as "sessionVersion",
               (email_verified_at is not null or telegram_id is not null) as "emailVerified"
        from users where id = $1`,
-      [userId]
+      [record.userId]
     );
     const user = result.rows[0];
     if (!user) {
@@ -250,6 +254,13 @@ router.post(
       clearAuthCookies(res);
       throw forbidden("Account is banned");
     }
+    // A security-sensitive change bumped the epoch after this refresh session was
+    // issued - the token is dead even if Redis missed the revocation.
+    if (record.sessionVersion !== user.sessionVersion) {
+      clearAuthCookies(res);
+      throw new ApiError(401, "Refresh token is invalid or expired", "refresh_token_invalid");
+    }
+    delete user.sessionVersion;
 
     // Issue the replacement session *before* revoking the one being redeemed: if anything
     // below fails, the caller's existing refresh token must remain usable rather than
@@ -289,6 +300,9 @@ router.post(
   "/logout-all",
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
+    // Explicit "log out every device": bump the DB epoch first so the revocation
+    // holds even when Redis is unreachable, then clear Redis state best-effort.
+    await bumpSessionVersion(pool, req.user.id);
     await revokeAllUserSessions(req.user.id);
     clearAuthCookies(res);
     res.status(204).send();
@@ -375,9 +389,16 @@ router.post(
     const input = passwordResetSchema.parse(req.body);
     const userId = await consumePasswordResetToken(input.token);
     const passwordHash = await bcrypt.hash(input.password, 12);
-    await pool.query(`update users set password_hash = $2, updated_at = now() where id = $1`, [userId, passwordHash]);
+    // The password change and the session-version bump commit together: every
+    // previously issued access/refresh session is dead the instant the new password
+    // exists, even if the Redis revocation below fails.
+    await pool.query(
+      `update users set password_hash = $2, session_version = session_version + 1, updated_at = now() where id = $1`,
+      [userId, passwordHash]
+    );
     // The password changed via an out-of-band email link, not from inside any active
     // session - every existing session (this device or any other) must re-authenticate.
+    // Redis revocation remains the immediate kill switch (WS close, refresh delete).
     await revokeAllUserSessions(userId);
     res.json({ status: "reset" });
   })

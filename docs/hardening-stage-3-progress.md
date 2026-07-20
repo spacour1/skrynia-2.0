@@ -127,3 +127,58 @@ the global error handler — that part needed no change.)
 | `cd backend && npm run lint` | PASS |
 | `npx vitest run test/registration-atomicity.test.ts` | PASS, 7/7 |
 | `npx vitest run test/auth.test.ts test/email-verification.test.ts` | PASS, 24/24 |
+
+## Stage 3: versioned session revocation
+
+Status: complete.
+
+Commit: `fix(auth): enforce versioned session revocation`
+
+### Confirmed defect
+
+Session revocation lived only in Redis (`session:{jti}`, `refresh:{hash}` plus
+per-user sets). Password change/reset, 2FA changes, and bans reported success even if
+the Redis deletion failed (`revokeAllUserSessions` logs and continues), leaving old
+access and refresh sessions fully usable. `issueSession` also ran six independent
+Redis commands, so a mid-issue failure could leave partial session state.
+
+### Implementation
+
+- Migration `1783291100000_add-session-version.sql`: `users.session_version integer
+  not null default 1`.
+- `issueSession` reads the user's current version, embeds `sv` in the access JWT,
+  stores the refresh record as JSON `{"u":userId,"v":version}`, and executes all six
+  Redis commands in one MULTI (failure → 503, no partial session).
+- `authenticate`/`authenticateOptional` compare the token's `sv` (missing claim = 1,
+  the migration default, so pre-rollout sessions stay valid until the first bump)
+  against `users.session_version` in the SELECT they already make per request.
+- `/auth/refresh` parses the record (legacy plain-string = version 1) and rejects a
+  version mismatch with 401 + cookie clear.
+- `bumpSessionVersion(client, userId)` runs in the same transaction/statement as each
+  security-state change: password change (single UPDATE), password reset (single
+  UPDATE), logout-all, 2FA enable/replace confirm, 2FA disable, backup-code
+  regeneration (which always rotated all sessions), admin ban and role change.
+- Redis revocation and the realtime session-revoked events remain the immediate kill
+  switch (WS close, refresh delete); the DB epoch is the guarantee.
+
+### Regression coverage (`backend/test/session-versioning.test.ts`, 7 tests)
+
+Each "revocation lost" scenario re-creates the old session's Redis keys after the
+security change, simulating a Redis failure, and the session must still die:
+
+1. Password change: other session rejected (access + refresh), caller rotated.
+2. Password reset: all sessions dead, old password rejected, new password works.
+3. Logout-all: restored Redis state cannot revive a session; fresh login works.
+4. Admin ban: banned user's session rejected durably.
+5. 2FA enable and disable bump the version.
+6. Legacy access token without `sv` is valid until the first bump, then dead.
+7. Legacy plain-string refresh record works as version 1 and dies after a bump.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| Migration on test DB | PASS (37 total) |
+| `npx vitest run test/session-versioning.test.ts` | PASS, 7/7 |
+| `cd backend && npm test` | PASS, 254/254 in 26 files |

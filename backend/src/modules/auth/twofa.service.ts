@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { inTx, pool, type DbClient } from "../../db/pool.js";
 import { badRequest } from "../../common/errors.js";
 import { buildOtpauthUri, generateTotpSecret, verifyTotpCode } from "./totp.service.js";
+import { bumpSessionVersion } from "./session.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
 import {
   decryptTwoFactorSecret,
@@ -367,6 +368,9 @@ export async function confirmTwoFactor(
        where id = $1`,
       [userId]
     );
+    // Enabling or replacing the authenticator invalidates every previously issued
+    // session in the same transaction; the route immediately rotates the caller.
+    await bumpSessionVersion(client, userId);
     await recordSecurityAudit(client, userId, "two_factor_enabled", auditContext);
     return { expired: false as const, backupCodes };
   });
@@ -398,6 +402,9 @@ export async function regenerateTwoFactorBackupCodes(
     }
 
     const backupCodes = await createBackupCodes(client, userId);
+    // The route has always rotated every session after a backup-code reset; the bump
+    // makes that revocation durable instead of Redis-only.
+    await bumpSessionVersion(client, userId);
     await recordSecurityAudit(
       client,
       userId,
@@ -427,6 +434,9 @@ export async function disableTwoFactor(
        where id = $1`,
       [userId]
     );
+    // Disabling 2FA weakens the account - every session issued under the stronger
+    // state dies with this transaction.
+    await bumpSessionVersion(client, userId);
     await recordSecurityAudit(client, userId, "two_factor_disabled", auditContext);
   });
 

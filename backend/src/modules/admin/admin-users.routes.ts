@@ -5,7 +5,7 @@ import { inTx, pool } from "../../db/pool.js";
 import { asyncHandler, notFound } from "../../common/errors.js";
 import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
-import { revokeAllUserSessions } from "../auth/session.service.js";
+import { bumpSessionVersion, revokeAllUserSessions } from "../auth/session.service.js";
 import { recordModerationAction } from "../reports/reports.service.js";
 import {
   invalidateProductCacheBatch,
@@ -62,8 +62,8 @@ router.patch(
       })
       .parse(req.body);
     const { user, bannedTransition } = await inTx(async (client) => {
-      const existing = await client.query<{ isBanned: boolean }>(
-        `select is_banned as "isBanned" from users where id = $1 for update`,
+      const existing = await client.query<{ isBanned: boolean; role: string }>(
+        `select is_banned as "isBanned", role from users where id = $1 for update`,
         [id]
       );
       if (!existing.rows[0]) throw notFound("User not found");
@@ -78,6 +78,13 @@ router.patch(
       );
       const becameBanned =
         body.isBanned === true && !existing.rows[0].isBanned;
+      const roleChanged = body.role !== undefined && body.role !== existing.rows[0].role;
+      // A ban or privilege change invalidates every session in the same transaction -
+      // the role is embedded in access tokens, so old tokens must die at the DB level
+      // even if the Redis revocation below cannot run.
+      if (becameBanned || roleChanged) {
+        await bumpSessionVersion(client, id);
+      }
       if (becameBanned) {
         await enqueueDomainEvent(client, {
           eventKey: `user.banned:${id}:${randomUUID()}`,

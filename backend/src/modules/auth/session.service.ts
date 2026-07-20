@@ -3,7 +3,8 @@ import jwt from "jsonwebtoken";
 import type { Secret, SignOptions } from "jsonwebtoken";
 import { nanoid } from "nanoid";
 import { env } from "../../config/env.js";
-import { serviceUnavailable } from "../../common/errors.js";
+import { pool, type DbClient } from "../../db/pool.js";
+import { serviceUnavailable, unauthorized } from "../../common/errors.js";
 import { getRedis } from "../../common/redis.js";
 import { logger } from "../../common/logger.js";
 import type { Role } from "../../common/types.js";
@@ -21,11 +22,55 @@ function userRefreshKey(userId: string) {
   return `user_refresh:${userId}`;
 }
 
+/**
+ * Increments the user's session invalidation epoch. Must run on the same client (and
+ * therefore in the same transaction) as the security-state change it protects -
+ * password change/reset, 2FA disable/replacement, ban, logout-all - so old sessions
+ * become invalid exactly when the change commits, whether or not Redis is reachable.
+ */
+export async function bumpSessionVersion(client: DbClient, userId: string): Promise<number> {
+  const result = await client.query<{ sessionVersion: number }>(
+    `update users set session_version = session_version + 1, updated_at = now()
+     where id = $1
+     returning session_version as "sessionVersion"`,
+    [userId]
+  );
+  if (!result.rows[0]) throw unauthorized("Account is unavailable");
+  return result.rows[0].sessionVersion;
+}
+
+type RefreshRecord = { userId: string; sessionVersion: number };
+
+/**
+ * Refresh records are JSON `{"u":...,"v":...}`. Records written before the
+ * session-version rollout hold a plain user id; they are treated as version 1 - the
+ * migration default every existing user starts at - so they stay valid exactly until
+ * the user's first security-sensitive change bumps the version.
+ */
+export function parseRefreshRecord(value: string): RefreshRecord | null {
+  try {
+    const parsed = JSON.parse(value) as { u?: unknown; v?: unknown };
+    if (typeof parsed === "object" && parsed !== null && typeof parsed.u === "string") {
+      return { userId: parsed.u, sessionVersion: typeof parsed.v === "number" ? parsed.v : 1 };
+    }
+  } catch {
+    // Legacy plain-string record.
+  }
+  return value ? { userId: value, sessionVersion: 1 } : null;
+}
+
 export async function issueSession(userId: string, role: Role) {
+  const versionResult = await pool.query<{ sessionVersion: number }>(
+    `select session_version as "sessionVersion" from users where id = $1`,
+    [userId]
+  );
+  const sessionVersion = versionResult.rows[0]?.sessionVersion;
+  if (sessionVersion === undefined) throw unauthorized("Account is unavailable");
+
   const jti = nanoid();
   const csrfToken = nanoid(32);
   const accessOptions: SignOptions = { expiresIn: `${env.ACCESS_TOKEN_TTL_MIN}m` as SignOptions["expiresIn"] };
-  const accessToken = jwt.sign({ sub: userId, role, jti }, env.JWT_SECRET as Secret, accessOptions);
+  const accessToken = jwt.sign({ sub: userId, role, jti, sv: sessionVersion }, env.JWT_SECRET as Secret, accessOptions);
 
   const refreshToken = crypto.randomBytes(32).toString("base64url");
   const refreshTtlSeconds = env.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60;
@@ -34,17 +79,24 @@ export async function issueSession(userId: string, role: Role) {
   const redis = getRedis();
   if (!redis) throw serviceUnavailable("Sessions are unavailable right now, try again shortly");
 
-  await redis.set(`session:${jti}`, userId, "EX", env.ACCESS_TOKEN_TTL_MIN * 60);
-  await redis.set(`refresh:${refreshHash}`, userId, "EX", refreshTtlSeconds);
+  // One MULTI so a connection failure mid-issue cannot leave a partially created
+  // session (e.g. a live refresh record whose jti is untracked and unenumerable).
+  // The per-user sets exist purely so revokeAllUserSessions can find every
+  // outstanding session - the keys addressed by jti/hash cannot be listed by user.
+  const results = await redis
+    .multi()
+    .set(`session:${jti}`, userId, "EX", env.ACCESS_TOKEN_TTL_MIN * 60)
+    .set(`refresh:${refreshHash}`, JSON.stringify({ u: userId, v: sessionVersion }), "EX", refreshTtlSeconds)
+    .sadd(userSessionsKey(userId), jti)
+    .expire(userSessionsKey(userId), refreshTtlSeconds)
+    .sadd(userRefreshKey(userId), refreshHash)
+    .expire(userRefreshKey(userId), refreshTtlSeconds)
+    .exec();
+  if (!results || results.some(([error]) => error)) {
+    throw serviceUnavailable("Sessions are unavailable right now, try again shortly");
+  }
 
-  // Tracked per-user purely so revokeAllUserSessions can find every outstanding session -
-  // the keys above (addressed by jti/hash) have no other way to be enumerated by user.
-  await redis.sadd(userSessionsKey(userId), jti);
-  await redis.expire(userSessionsKey(userId), refreshTtlSeconds);
-  await redis.sadd(userRefreshKey(userId), refreshHash);
-  await redis.expire(userRefreshKey(userId), refreshTtlSeconds);
-
-  return { accessToken, refreshToken, csrfToken, jti };
+  return { accessToken, refreshToken, csrfToken, jti, sessionVersion };
 }
 
 const TWO_FACTOR_PENDING_TTL_MIN = 5;

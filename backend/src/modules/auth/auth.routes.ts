@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import { Router } from "express";
 import { z } from "zod";
 import { env } from "../../config/env.js";
-import { pool } from "../../db/pool.js";
+import { inTx, pool } from "../../db/pool.js";
 import { ApiError, asyncHandler, badRequest, forbidden, serviceUnavailable } from "../../common/errors.js";
 import { getRedis } from "../../common/redis.js";
 import { authenticate } from "../../common/middleware/auth.js";
@@ -73,15 +73,27 @@ router.post(
     const input = registerSchema.parse(req.body);
     const passwordHash = await bcrypt.hash(input.password, 12);
 
-    const result = await pool.query(
-      `insert into users(email, password_hash, display_name, role)
-       values ($1, $2, $3, $4)
-       returning id, email, display_name as "displayName", role,
-                 (email_verified_at is not null or telegram_id is not null) as "emailVerified"`,
-      [input.email.toLowerCase(), passwordHash, input.displayName, "user"]
-    );
-    const user = result.rows[0];
-    await pool.query(`insert into wallets(user_id, currency) values ($1, 'UAH') on conflict (user_id, currency) do nothing`, [user.id]);
+    // The account and its mandatory child rows commit or roll back together — a failure
+    // after the user insert must not leave a wallet-less account behind. A duplicate
+    // email surfaces as a 23505 on users_email_key, which the global error handler maps
+    // to a 409; no pre-SELECT is needed. The session and the verification email are
+    // deliberately outside the transaction: no external calls inside a DB transaction,
+    // and no session for an account that did not fully commit.
+    const user = await inTx(async (client) => {
+      const result = await client.query(
+        `insert into users(email, password_hash, display_name, role)
+         values ($1, $2, $3, $4)
+         returning id, email, display_name as "displayName", role,
+                   (email_verified_at is not null or telegram_id is not null) as "emailVerified"`,
+        [input.email.toLowerCase(), passwordHash, input.displayName, "user"]
+      );
+      const created = result.rows[0];
+      await client.query(
+        `insert into wallets(user_id, currency) values ($1, 'UAH') on conflict (user_id, currency) do nothing`,
+        [created.id]
+      );
+      return created;
+    });
 
     const session = await issueSession(user.id, user.role);
     setAuthCookies(res, session);
@@ -174,16 +186,24 @@ router.post(
     const displayName = input.username ?? input.first_name ?? telegramId;
     const email = `tg_${telegramId}@telegram.local`;
 
-    const result = await pool.query(
-      `insert into users(email, display_name, role, telegram_id)
-       values ($1, $2, 'user', $3)
-       on conflict (telegram_id) do update set display_name = excluded.display_name
-       returning id, email, display_name as "displayName", role,
-                 (email_verified_at is not null or telegram_id is not null) as "emailVerified"`,
-      [email, displayName, telegramId]
-    );
-    const user = result.rows[0];
-    await pool.query(`insert into wallets(user_id, currency) values ($1, 'UAH') on conflict (user_id, currency) do nothing`, [user.id]);
+    // Upsert-by-telegram_id and the mandatory wallet commit atomically, mirroring email
+    // registration; the session is only issued for a fully committed account.
+    const user = await inTx(async (client) => {
+      const result = await client.query(
+        `insert into users(email, display_name, role, telegram_id)
+         values ($1, $2, 'user', $3)
+         on conflict (telegram_id) do update set display_name = excluded.display_name
+         returning id, email, display_name as "displayName", role,
+                   (email_verified_at is not null or telegram_id is not null) as "emailVerified"`,
+        [email, displayName, telegramId]
+      );
+      const created = result.rows[0];
+      await client.query(
+        `insert into wallets(user_id, currency) values ($1, 'UAH') on conflict (user_id, currency) do nothing`,
+        [created.id]
+      );
+      return created;
+    });
     const session = await issueSession(user.id, user.role);
     setAuthCookies(res, session);
     res.json({ user });

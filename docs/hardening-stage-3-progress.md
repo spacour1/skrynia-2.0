@@ -83,3 +83,47 @@ Commit: `fix(domain): reconcile marketplace lifecycle invariants`
 | `cd backend && npm test` | PASS, 240/240 in 24 files |
 | Clean-database migration smoke (marketplace_smoke, all 36) | PASS |
 | `cd frontend && npm run typecheck` | PASS |
+
+## Stage 2: atomic account creation
+
+Status: complete.
+
+Commit: `fix(auth): make account creation atomic`
+
+### Confirmed defect
+
+Email and Telegram registration ran the user insert, the mandatory wallet insert, and
+session issuance as independent operations on the pool. A failure after the user
+insert left a committed account without a wallet, and the caller received an error for
+an account that in fact existed. (Duplicate email was already mapped 23505 → 409 by
+the global error handler — that part needed no change.)
+
+### Implementation
+
+- Both registration paths now create the user and its wallet in one `inTx`
+  transaction; the row is returned from the transaction and the session is issued only
+  after commit.
+- The verification email and other side effects stay outside the transaction
+  (fire-and-forget), so notification failures cannot roll back a committed account and
+  no external call runs inside a DB transaction.
+- No pre-SELECT for duplicates: the unique constraint plus the existing 23505 → 409
+  mapping remains the concurrency-safe contract.
+
+### Regression coverage (`backend/test/registration-atomicity.test.ts`, 7 tests)
+
+1. Registration creates user + wallet together and sets session cookies.
+2. An injected wallet-insert failure (DB trigger) rolls back the user and issues no
+   session cookie.
+3. Duplicate email → 409, one account, no session.
+4. Unsendable verification email does not affect the committed account.
+5. Telegram: new account creates user + wallet atomically.
+6. Telegram: injected wallet failure rolls back the new user.
+7. Repeated Telegram login reuses the account (no duplicates).
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `npx vitest run test/registration-atomicity.test.ts` | PASS, 7/7 |
+| `npx vitest run test/auth.test.ts test/email-verification.test.ts` | PASS, 24/24 |

@@ -84,7 +84,10 @@ export async function revokeSession(jti: string | undefined, userId?: string) {
       if (userId) await redis.srem(userSessionsKey(userId), jti);
     }
   } finally {
-    publishSessionSecurityEvent({ type: "session.revoked", sessionId: jti });
+    await publishSessionSecurityEvent({
+      type: "session.revoked",
+      sessionId: jti
+    });
   }
 }
 
@@ -95,7 +98,11 @@ export async function revokeSession(jti: string | undefined, userId?: string) {
  */
 export async function revokeAllUserSessions(
   userId: string,
-  options: { exceptJti?: string; strict?: boolean } = {}
+  options: {
+    exceptJti?: string;
+    strict?: boolean;
+    publishEvent?: boolean;
+  } = {}
 ) {
   const redis = getRedis();
   let redisError: unknown;
@@ -120,12 +127,21 @@ export async function revokeAllUserSessions(
     }
   }
 
-  // Local sockets must close even when Redis is unavailable. Stage 11 promotes this
-  // process-local event to Redis Pub/Sub for cross-replica delivery.
-  publishSessionSecurityEvent({
-    type: "user.sessions.revoked",
-    userId,
-    exceptSessionId: options.exceptJti
-  });
+  let realtimeError: unknown;
+  if (options.publishEvent !== false) {
+    try {
+      await publishSessionSecurityEvent(
+        {
+          type: "user.sessions.revoked",
+          userId,
+          exceptSessionId: options.exceptJti
+        },
+        { strict: options.strict }
+      );
+    } catch (error) {
+      realtimeError = error;
+    }
+  }
   if (options.strict && redisError) throw redisError;
+  if (options.strict && realtimeError) throw realtimeError;
 }

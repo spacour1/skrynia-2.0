@@ -800,3 +800,72 @@ Planned commit: `feat(core): add idempotency for orders messages and reviews`
 - Request-level idempotency is currently implemented for order creation. Other mutating
   endpoints still need explicit contracts before using the generic transaction helper.
 - Review equality is exact after schema parsing, including comment whitespace.
+
+## Stage 11: distributed realtime and global presence
+
+Status: complete.
+
+Planned commit: `feat(realtime): distribute websocket events through redis`
+
+### Confirmed defects
+
+- WebSocket user and conversation maps were process-local, so an event produced on one
+  API or worker replica could not reach a client connected to another.
+- Session revocation and user-ban events closed sockets only in the producing process.
+- Presence treated the absence of a local socket as offline, even when the user was
+  connected elsewhere, and could not distinguish a Redis outage from a real offline user.
+- The liveness endpoint had no readiness signal for a degraded realtime dependency.
+
+### Implementation
+
+- Added a validated realtime envelope with UUID, type, user/conversation/session scope,
+  target, payload, source instance, and timestamp.
+- Every process uses a dedicated Redis subscriber connection. Events are delivered
+  locally once, published once, ignored by their source replica on receipt, and never
+  republished. Malformed JSON and invalid envelopes are ignored safely.
+- Routed order notifications, conversation broadcasts, session revocation, logout-all,
+  role/security rotation, and user bans through the global bus.
+- Outbox-backed notifications and broadcasts require a successful Redis publication.
+  Redis failure leaves the durable event pending for retry, while non-durable callers
+  keep local-only best-effort delivery.
+- Added global presence with per-connection TTL records and user sorted sets containing
+  connection, user, instance, heartbeat, and expiry state. Graceful disconnect removes
+  the record; crashed-replica state disappears by TTL.
+- Presence reads return `true`, `false`, or `null`. Public seller, product, and chat DTOs
+  preserve `null`, and the frontend displays an unavailable status instead of offline.
+- Added `GET /health/ready`, realtime/presence environment settings, Compose defaults,
+  and validation that the heartbeat remains below half the TTL.
+
+### Regression coverage
+
+1. Replica A publishes an event and a simulated client on replica B receives it once.
+2. A ban produced on replica A closes the simulated socket on replica B.
+3. Malformed channel messages are ignored and are not republished.
+4. Presence registered on replica B is visible from replica A.
+5. A stale connection disappears after its TTL.
+6. Without Redis, local delivery succeeds, strict publication fails for retry, and
+   presence is `null` rather than false.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `cd backend && npm run build` | PASS |
+| Distributed realtime tests | PASS, 4/4 |
+| Realtime/auth/chat/outbox/catalog targeted run | PASS, 47/47 |
+| `cd backend && npm test` | PASS, 210/210 in 22/22 files |
+| `cd frontend && npm run typecheck` | PASS |
+| `cd frontend && npm test` | PASS, 6/6 |
+| `cd frontend && npm run i18n:check` | PASS, 0 errors and 25 baseline warnings |
+| `cd frontend && npm run build` | PASS, with existing Sentry/OpenTelemetry warnings |
+| `docker compose config --quiet` | PASS |
+
+### Remaining constraints
+
+- Redis Pub/Sub is intentionally ephemeral. Events produced outside the transactional
+  outbox are best effort and are not replayed after a subscriber disconnect.
+- Outbox delivery is at least once. A local socket can receive a duplicate when Redis
+  fails after local delivery and the durable event is retried.
+- Marketplace responses cache seller presence with their existing 30/60-second payload
+  TTL, so catalog indicators are less immediate than chat presence.

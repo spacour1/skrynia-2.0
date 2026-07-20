@@ -3,10 +3,25 @@ import { isUserOnline } from "../chat/ws.service.js";
 import type { CatalogSchema } from "../catalog/catalog.validation.js";
 
 export function addSellerPresence<T extends { sellerId?: string }>(rows: T[]) {
-  return rows.map((row) => ({
-    ...row,
-    sellerOnline: row.sellerId ? isUserOnline(row.sellerId) : false
-  }));
+  const sellerIds = Array.from(
+    new Set(
+      rows
+        .map((row) => row.sellerId)
+        .filter((sellerId): sellerId is string => Boolean(sellerId))
+    )
+  );
+  return Promise.all(
+    sellerIds.map(async (sellerId) => [
+      sellerId,
+      await isUserOnline(sellerId)
+    ] as const)
+  ).then((presence) => {
+    const bySeller = new Map(presence);
+    return rows.map((row) => ({
+      ...row,
+      sellerOnline: row.sellerId ? (bySeller.get(row.sellerId) ?? null) : false
+    }));
+  });
 }
 
 /**

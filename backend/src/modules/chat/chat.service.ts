@@ -54,7 +54,7 @@ export type GroupedConversation = {
   peerUserId: string;
   peerDisplayName: string;
   peerAvatarUrl: string | null;
-  isOnline: boolean;
+  isOnline: boolean | null;
   totalUnreadCount: number;
   lastMessageAt: string | null;
   lastMessageBody: string | null;
@@ -463,16 +463,19 @@ export async function getGroupedUserConversations(userId: string, role: string):
 
     const type = rowContextType(row);
     const lastMessageAt = (row.lastMessageAt ?? row.createdAt ?? null) as string | null;
-    const group: GroupedConversation = groups.get(peerUserId) ?? {
-      peerUserId,
-      peerDisplayName: peerDisplayName ?? "Participant",
-      peerAvatarUrl: peerAvatarUrl ?? null,
-      isOnline: isUserOnline(peerUserId),
-      totalUnreadCount: 0,
-      lastMessageAt: null,
-      lastMessageBody: null,
-      contexts: []
-    };
+    let group = groups.get(peerUserId);
+    if (!group) {
+      group = {
+        peerUserId,
+        peerDisplayName: peerDisplayName ?? "Participant",
+        peerAvatarUrl: peerAvatarUrl ?? null,
+        isOnline: await isUserOnline(peerUserId),
+        totalUnreadCount: 0,
+        lastMessageAt: null,
+        lastMessageBody: null,
+        contexts: []
+      };
+    }
 
     group.totalUnreadCount += Number(row.unreadCount ?? 0);
     const nextLastMessageAt = newestTimestamp(group.lastMessageAt, lastMessageAt);

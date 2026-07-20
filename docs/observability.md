@@ -150,15 +150,18 @@ NEXT_PUBLIC_POSTHOG_HOST=https://eu.i.posthog.com   # EU cloud; US: https://app.
 
 ## Health check
 
-The backend exposes `GET /health` (no auth) returning `{"ok":true}`. Use this for:
+The backend exposes two unauthenticated probes:
 
-- Docker / Kubernetes liveness probes
-- Railway / Fly.io health checks
-- Uptime monitoring (e.g. Better Uptime, Freshping)
+- `GET /health` returns `{"ok":true}` for process liveness.
+- `GET /health/ready` returns `200` only when Redis publishing and subscription are ready.
+  During degradation it returns `503` and reports Redis, subscriber, and presence state.
 
 Example probe config for Railway:
 
 ```
-Health Check Path: /health
+Health Check Path: /health/ready
 Health Check Timeout: 5s
 ```
+
+Use `/health` for Kubernetes liveness and `/health/ready` for readiness. This keeps Redis
+outages visible without restarting an otherwise healthy process.

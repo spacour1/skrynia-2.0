@@ -458,7 +458,7 @@ function OfferRow({
         >
           <span className={`relative grid h-12 w-12 shrink-0 place-items-center rounded-full bg-gradient-to-br ${avatar} text-sm font-black text-white`}>
             {product.sellerDisplayName.slice(0, 1).toUpperCase()}
-            <span className={`absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-card ${product.sellerOnline ? "bg-emerald-400" : "bg-muted/50"}`} />
+            <span className={`absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-card ${product.sellerOnline === true ? "bg-emerald-400" : product.sellerOnline === false ? "bg-muted/50" : "bg-action/70"}`} />
           </span>
           <span className="min-w-0">
             <span className="block truncate text-sm font-black text-ink">{product.sellerDisplayName}</span>

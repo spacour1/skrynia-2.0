@@ -98,6 +98,11 @@ Set both worker flags to `false` on API replicas and run one separate worker rep
 both flags set to `true`. The transactional outbox itself is safe to scale horizontally
 because workers claim rows through `FOR UPDATE SKIP LOCKED`.
 
+Every API replica subscribes to `REALTIME_CHANNEL`; the worker publishes durable realtime
+events from the outbox. Let the application generate `REALTIME_INSTANCE_ID`, or set a
+different value on every process. Reusing one instance ID across replicas causes them to
+mistake remote events for their own.
+
 ### Required backend env vars (production)
 
 ```
@@ -140,6 +145,8 @@ Redis is required in production for:
 | Session revocation | JWT expiry only (revoked tokens remain valid until TTL) |
 | BullMQ job queue | Jobs silently dropped; escrow auto-release, reconciliation, notifications do not run |
 | Application cache | Every request hits PostgreSQL directly |
+| Realtime Pub/Sub | Only sockets on the producing process receive best-effort events |
+| Global presence | API returns `null` (unknown), never a false offline result |
 
 Use managed Redis: Railway Redis, Upstash, Redis Cloud, or AWS ElastiCache.
 
@@ -148,7 +155,10 @@ REDIS_URL=redis://:password@host:6379
 # TLS: rediss://host:6380
 ```
 
-The `getRedis()` helper in `backend/src/common/redis.ts` uses `lazyConnect: true` and swallows connection errors — the server starts without Redis in dev, but production without Redis is unsupported and will silently degrade.
+The process stays alive during a Redis outage and local WebSocket delivery still works.
+`GET /health/ready` returns `503` with realtime, subscriber, Redis, and presence state,
+while `GET /health` remains the liveness probe. Outbox-backed realtime events stay
+retryable until Redis accepts their publication.
 
 ---
 

@@ -35,6 +35,7 @@ import telegramWebhookRoutes from "./modules/notifications/telegram-webhook.rout
 import currencyRoutes from "./modules/currencies/currencies.routes.js";
 import catalogRoutes from "./modules/catalog/catalog.routes.js";
 import adminCatalogRoutes from "./modules/catalog/admin-catalog.routes.js";
+import { getRealtimeReadiness } from "./modules/realtime/realtime-runtime.js";
 
 export function createApp(options: { requestLogger?: RequestLogger } = {}) {
   const app = express();
@@ -67,6 +68,10 @@ export function createApp(options: { requestLogger?: RequestLogger } = {}) {
   app.use("/uploads", express.static(path.resolve(env.LOCAL_UPLOAD_DIR)));
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
+  app.get("/health/ready", (_req, res) => {
+    const readiness = getRealtimeReadiness();
+    res.status(readiness.ok ? 200 : 503).json(readiness);
+  });
   app.get("/metrics", metricsAuth, async (_req, res) => {
     res.setHeader("content-type", "text/plain; version=0.0.4");
     res.send(await metricsText());

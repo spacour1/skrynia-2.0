@@ -175,7 +175,7 @@ Required in all environments:
 - `JWT_SECRET` — min 24 chars (must not be the dev default in production)
 
 Optional but needed for full functionality:
-- `REDIS_URL` — BullMQ + session storage (sessions degraded without Redis)
+- `REDIS_URL` — BullMQ, sessions, distributed realtime, global presence, and cache
 - `RESEND_API_KEY` + `EMAIL_FROM` — email delivery
 - `TELEGRAM_BOT_TOKEN` + `TELEGRAM_BOT_USERNAME` — notification bot
 - `TELEGRAM_WEBHOOK_SECRET` — webhook signature verification
@@ -200,10 +200,30 @@ Tuning:
 - `REFRESH_TOKEN_TTL_DAYS` — default `90`
 - `OUTBOX_BATCH_SIZE`, `OUTBOX_CONCURRENCY`, `OUTBOX_POLL_INTERVAL_MS` — outbox throughput
 - `OUTBOX_MAX_ATTEMPTS`, `OUTBOX_BASE_BACKOFF_MS`, `OUTBOX_LOCK_TIMEOUT_MS` — retry and claim policy
+- `REALTIME_CHANNEL`, `REALTIME_INSTANCE_ID` - Pub/Sub channel and optional unique replica ID
+- `PRESENCE_TTL_MS`, `PRESENCE_HEARTBEAT_MS` - global presence expiry and refresh cadence
 
 ## WebSocket
 
-Single WS endpoint at `/ws`. After connection, clients send `{ type: "auth", token: "..." }` (CSRF token). Server routes messages to conversation rooms. `broadcastConversation(conversationId, message)` sends to all room members. Used for real-time chat and system messages.
+The `/ws` endpoint authenticates with a one-time ticket or same-origin access cookie.
+Connections join authorized conversation rooms and retain process-local socket maps for
+fast fan-out.
+
+Every process also owns a dedicated Redis subscriber. User, conversation, and session
+events use a validated envelope with an event ID, target scope/ID, source instance, and
+timestamp. A producer delivers locally and publishes once; subscribers ignore their own
+source instance, never republish, reject malformed envelopes, and fan out only to local
+sockets. Order/chat events and session revocation therefore cross replica boundaries.
+
+Presence stores one TTL record per connection plus an expiry-sorted user index. Heartbeats
+carry the user, connection, instance, last-seen, and expiry data. A lookup removes stale
+members and returns `true`, `false`, or `null`; `null` means Redis could not establish a
+global answer and must not be presented as offline.
+
+When Redis is unavailable, local socket delivery continues. Realtime operations emitted
+from the transactional outbox fail strictly and leave the durable event retryable;
+non-durable producers degrade to local-only delivery. `GET /health/ready` reports this
+state separately from the always-live `GET /health`.
 
 ## Roles and permissions
 

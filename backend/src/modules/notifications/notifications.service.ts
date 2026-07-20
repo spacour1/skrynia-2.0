@@ -43,6 +43,7 @@ export type NotificationInput = {
 type NotificationOptions = {
   eventKey?: string;
   requireDeliveryQueue?: boolean;
+  requireRealtimeDelivery?: boolean;
 };
 
 function deliveryJobId(eventKey: string) {
@@ -121,8 +122,12 @@ export async function createNotification(
   }
   if (!notification) throw new Error("Notification could not be created or reloaded");
 
-  if (created) {
-    notifyOrderEvent(input.userId, { type: "notification", notification });
+  if (created || options.requireRealtimeDelivery) {
+    await notifyOrderEvent(
+      input.userId,
+      { type: "notification", notification },
+      { strict: options.requireRealtimeDelivery }
+    );
   }
   // Email/Telegram delivery renders the keys in the recipient's preferred_locale
   // inside the job worker (the recipient may use a different language than the actor).

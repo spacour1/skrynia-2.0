@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type http from "node:http";
 import jwt from "jsonwebtoken";
 import { WebSocketServer, WebSocket } from "ws";
@@ -15,7 +16,17 @@ import {
   wsSlowClientsTotal
 } from "../../common/metrics.js";
 import { consumeWsTicket } from "../auth/ws-ticket.service.js";
-import { onSessionSecurityEvent } from "../auth/session-events.service.js";
+import {
+  onSessionSecurityEvent,
+  publishSessionSecurityEvent
+} from "../auth/session-events.service.js";
+import {
+  getPresenceService,
+  onRealtimeEvent,
+  publishRealtimeEvent,
+  startRealtimeServices,
+  stopRealtimeServices
+} from "../realtime/realtime-runtime.js";
 import { sendMessageIdempotently } from "./chat.service.js";
 
 function readCookie(header: string | undefined, name: string): string | undefined {
@@ -31,6 +42,7 @@ function readCookie(header: string | undefined, name: string): string | undefine
 type Client = WebSocket & {
   userId?: string;
   jti?: string;
+  connectionId?: string;
   emailVerified?: boolean;
   rooms?: Set<string>;
   sentAt?: number[];
@@ -211,7 +223,7 @@ function leaveAll(client: Client) {
   for (const room of Array.from(client.rooms ?? [])) leaveConversation(client, room);
 }
 
-export function disconnectSession(jti: string) {
+function disconnectSessionLocally(jti: string) {
   const clients = clientsByJti.get(jti);
   if (!clients) return;
   for (const client of Array.from(clients)) {
@@ -221,7 +233,11 @@ export function disconnectSession(jti: string) {
   }
 }
 
-export function disconnectUser(userId: string, exceptSessionId?: string) {
+function disconnectUserLocally(
+  userId: string,
+  exceptSessionId?: string,
+  banned = false
+) {
   const clients = clientsByUser.get(userId);
   if (!clients) return;
   for (const client of Array.from(clients)) {
@@ -229,28 +245,39 @@ export function disconnectUser(userId: string, exceptSessionId?: string) {
       client.jti !== exceptSessionId &&
       (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING)
     ) {
-      client.close(WS_CLOSE_SESSION_REVOKED, "Sessions revoked");
+      client.close(
+        banned ? WS_CLOSE_USER_BANNED : WS_CLOSE_SESSION_REVOKED,
+        banned ? "Account banned" : "Sessions revoked"
+      );
     }
   }
 }
 
+export function disconnectSession(jti: string) {
+  return publishSessionSecurityEvent({
+    type: "session.revoked",
+    sessionId: jti
+  });
+}
+
+export function disconnectUser(userId: string, exceptSessionId?: string) {
+  return publishSessionSecurityEvent({
+    type: "user.sessions.revoked",
+    userId,
+    exceptSessionId
+  });
+}
+
 onSessionSecurityEvent((event) => {
   if (event.type === "session.revoked") {
-    disconnectSession(event.sessionId);
+    disconnectSessionLocally(event.sessionId);
     return;
   }
   if (event.type === "user.sessions.revoked") {
-    disconnectUser(event.userId, event.exceptSessionId);
+    disconnectUserLocally(event.userId, event.exceptSessionId);
     return;
   }
-
-  const clients = clientsByUser.get(event.userId);
-  if (!clients) return;
-  for (const client of Array.from(clients)) {
-    if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
-      client.close(WS_CLOSE_USER_BANNED, "Account banned");
-    }
-  }
+  disconnectUserLocally(event.userId, undefined, true);
 });
 
 function isSpam(client: Client) {
@@ -261,33 +288,77 @@ function isSpam(client: Client) {
   return false;
 }
 
-export function notifyOrderEvent(userId: string, payload: unknown) {
-  const clients = clientsByUser.get(userId);
-  if (!clients) return;
-  for (const client of clients) sendJson(client, payload);
+function realtimeType(payload: unknown, fallback: string) {
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "type" in payload &&
+    typeof (payload as { type?: unknown }).type === "string"
+  ) {
+    return (payload as { type: string }).type;
+  }
+  return fallback;
 }
 
-export function broadcastConversation(conversationId: string, payload: unknown) {
-  const clients = clientsByConversation.get(conversationId);
-  if (!clients) return;
-  for (const client of clients) sendJson(client, payload);
+export function notifyOrderEvent(
+  userId: string,
+  payload: unknown,
+  options: { strict?: boolean } = {}
+) {
+  return publishRealtimeEvent(
+    {
+      type: realtimeType(payload, "user.event"),
+      scope: "user",
+      targetId: userId,
+      payload
+    },
+    options
+  );
 }
+
+export function broadcastConversation(
+  conversationId: string,
+  payload: unknown,
+  options: { strict?: boolean } = {}
+) {
+  return publishRealtimeEvent(
+    {
+      type: realtimeType(payload, "conversation.event"),
+      scope: "conversation",
+      targetId: conversationId,
+      payload
+    },
+    options
+  );
+}
+
+function deliverRealtimeEventLocally(event: {
+  scope: "user" | "conversation" | "session";
+  targetId: string;
+  payload: unknown;
+}) {
+  if (event.scope === "user") {
+    const clients = clientsByUser.get(event.targetId);
+    if (!clients) return;
+    for (const client of clients) sendJson(client, event.payload);
+    return;
+  }
+  if (event.scope !== "conversation") return;
+  const clients = clientsByConversation.get(event.targetId);
+  if (!clients) return;
+  for (const client of clients) sendJson(client, event.payload);
+}
+
+onRealtimeEvent(deliverRealtimeEventLocally);
 
 export function isUserOnline(userId: string) {
-  return (clientsByUser.get(userId)?.size ?? 0) > 0;
+  return getPresenceService().isUserOnline(userId);
 }
 
 // Presence broadcast intentionally omitted: broadcasting to every connected user on
 // each connect/disconnect is O(N) — at 5k connections this generates 5k sends per event.
 // For per-conversation presence, emit to conversation room members only (future work).
 
-// NOTE: This WS server uses in-memory connection maps (clientsByUser, etc.).
-// For multi-replica deployments, WS events only reach clients on the same replica.
-// Strategy options:
-//   1. Sticky sessions (recommended for Stage 1): configure the load balancer to pin
-//      each user to one replica by cookie or IP. Local rooms work correctly within one replica.
-//   2. Redis pub/sub: publish chat/order events to a channel; all replicas subscribe and
-//      fan out to their own connected clients. Needed if sticky sessions are not feasible.
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
 const incomingMessageSchema = z.discriminatedUnion("type", [
@@ -322,6 +393,9 @@ function sendMessageError(
 }
 
 export function attachWebSocketServer(server: http.Server) {
+  void startRealtimeServices().catch((error) => {
+    logger.warn({ error }, "realtime_services_start_failed_degraded");
+  });
   const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 64 * 1024 });
 
   // Server-side heartbeat: ping every 30 s; terminate clients that miss a pong.
@@ -338,7 +412,10 @@ export function attachWebSocketServer(server: http.Server) {
     }
   }, HEARTBEAT_INTERVAL_MS);
 
-  wss.on("close", () => clearInterval(heartbeat));
+  wss.on("close", () => {
+    clearInterval(heartbeat);
+    void stopRealtimeServices();
+  });
 
   wss.on("connection", async (client: Client, req) => {
     client.isAlive = true;
@@ -353,6 +430,7 @@ export function attachWebSocketServer(server: http.Server) {
       }
       client.userId = userId;
       client.jti = jti;
+      client.connectionId = randomUUID();
       client.emailVerified = emailVerified;
       client.rooms = new Set();
       const sameSession = clientsByJti.get(jti) ?? new Set<Client>();
@@ -362,6 +440,7 @@ export function attachWebSocketServer(server: http.Server) {
       const userClients = clientsByUser.get(client.userId) ?? new Set<Client>();
       userClients.add(client);
       clientsByUser.set(client.userId, userClients);
+      void getPresenceService().register(userId, client.connectionId);
 
       wsConnectionsActive.inc();
       sendJson(client, { type: "connected" });
@@ -503,6 +582,9 @@ export function attachWebSocketServer(server: http.Server) {
       client.on("close", () => {
         wsConnectionsActive.dec();
         leaveAll(client);
+        if (client.connectionId) {
+          void getPresenceService().unregister(client.connectionId);
+        }
       });
     } catch (err) {
       const reason = err instanceof Error ? err.message : "unknown";

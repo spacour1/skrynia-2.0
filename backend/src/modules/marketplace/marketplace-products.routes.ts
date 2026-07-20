@@ -63,7 +63,9 @@ router.get(
        order by p.created_at desc`,
       [req.user.id]
     );
-    res.json({ products: await attachCardMetadata(addSellerPresence(result.rows)) });
+    res.json({
+      products: await attachCardMetadata(await addSellerPresence(result.rows))
+    });
   })
 );
 

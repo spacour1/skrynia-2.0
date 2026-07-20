@@ -33,7 +33,9 @@ router.get(
        order by max(own_favorite.created_at) desc`,
       [req.user.id]
     );
-    res.json({ products: await attachCardMetadata(addSellerPresence(result.rows)) });
+    res.json({
+      products: await attachCardMetadata(await addSellerPresence(result.rows))
+    });
   })
 );
 

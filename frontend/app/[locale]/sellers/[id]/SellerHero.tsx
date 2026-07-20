@@ -48,7 +48,7 @@ export function SellerHero({
 }: {
   displayName: string;
   avatarUrl?: string | null;
-  online?: boolean;
+  online?: boolean | null;
   createdAt: string;
   bannerUrl?: string;
   rating: number;
@@ -199,8 +199,12 @@ export function SellerHero({
                 •
               </span>
               <span className="inline-flex items-center gap-1.5">
-                {online ? <span className="h-2 w-2 rounded-full bg-emerald-400" /> : <Clock className="h-3.5 w-3.5" />}
-                {online ? t("seller.online") : t("seller.offline")}
+                {online === true ? <span className="h-2 w-2 rounded-full bg-emerald-400" /> : <Clock className="h-3.5 w-3.5" />}
+                {online == null
+                  ? t("seller.presenceUnknown")
+                  : online
+                    ? t("seller.online")
+                    : t("seller.offline")}
               </span>
             </div>
           </div>

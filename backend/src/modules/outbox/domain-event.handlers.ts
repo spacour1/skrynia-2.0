@@ -103,7 +103,8 @@ async function createOutboxNotification(
 ) {
   return createNotification(input, {
     eventKey: notificationEventKey(event, input.userId, input.type),
-    requireDeliveryQueue: true
+    requireDeliveryQueue: true,
+    requireRealtimeDelivery: true
   });
 }
 
@@ -166,7 +167,11 @@ async function broadcastStoredMessages(messageIds: string[]) {
   for (const messageId of messageIds) {
     const message = await loadMessage(messageId);
     if (message) {
-      broadcastConversation(message.conversationId, { type: "message", message });
+      await broadcastConversation(
+        message.conversationId,
+        { type: "message", message },
+        { strict: true }
+      );
     }
   }
 }
@@ -195,10 +200,14 @@ async function handleOrderStarted(event: DomainOutboxEvent) {
     productId: payload.productId
   });
   await invalidateOrderCaches(payload);
-  notifyOrderEvent(payload.buyerId, {
-    type: "order_started",
-    orderId: payload.orderId
-  });
+  await notifyOrderEvent(
+    payload.buyerId,
+    {
+      type: "order_started",
+      orderId: payload.orderId
+    },
+    { strict: true }
+  );
   await broadcastStoredMessages(payload.systemMessageIds);
 }
 
@@ -212,10 +221,14 @@ async function handleOrderDelivered(event: DomainOutboxEvent) {
     productId: payload.productId
   });
   await invalidateOrderCaches(payload);
-  notifyOrderEvent(payload.buyerId, {
-    type: "order_delivered",
-    orderId: payload.orderId
-  });
+  await notifyOrderEvent(
+    payload.buyerId,
+    {
+      type: "order_delivered",
+      orderId: payload.orderId
+    },
+    { strict: true }
+  );
   await broadcastStoredMessages(payload.systemMessageIds);
 }
 
@@ -233,14 +246,24 @@ async function handleOrderCompleted(event: DomainOutboxEvent) {
         })
       )
     );
-    notifyOrderEvent(payload.buyerId, {
-      type: "order_auto_completed",
-      orderId: payload.orderId
-    });
-    notifyOrderEvent(payload.sellerId, {
-      type: "order_auto_completed",
-      orderId: payload.orderId
-    });
+    await Promise.all([
+      notifyOrderEvent(
+        payload.buyerId,
+        {
+          type: "order_auto_completed",
+          orderId: payload.orderId
+        },
+        { strict: true }
+      ),
+      notifyOrderEvent(
+        payload.sellerId,
+        {
+          type: "order_auto_completed",
+          orderId: payload.orderId
+        },
+        { strict: true }
+      )
+    ]);
   } else if (payload.source !== "dispute") {
     await createOutboxNotification(event, {
       userId: payload.sellerId,
@@ -248,10 +271,14 @@ async function handleOrderCompleted(event: DomainOutboxEvent) {
       templateKey: "notifications.orderCompleted",
       orderId: payload.orderId
     });
-    notifyOrderEvent(payload.sellerId, {
-      type: "order_completed",
-      orderId: payload.orderId
-    });
+    await notifyOrderEvent(
+      payload.sellerId,
+      {
+        type: "order_completed",
+        orderId: payload.orderId
+      },
+      { strict: true }
+    );
   }
 
   await invalidateOrderCaches({ ...payload, wallet: true });
@@ -296,14 +323,24 @@ async function handleDisputeOpened(event: DomainOutboxEvent) {
     orderId: payload.orderId
   });
   await invalidateOrderCaches(payload);
-  notifyOrderEvent(payload.buyerId, {
-    type: "order_disputed",
-    orderId: payload.orderId
-  });
-  notifyOrderEvent(payload.sellerId, {
-    type: "order_disputed",
-    orderId: payload.orderId
-  });
+  await Promise.all([
+    notifyOrderEvent(
+      payload.buyerId,
+      {
+        type: "order_disputed",
+        orderId: payload.orderId
+      },
+      { strict: true }
+    ),
+    notifyOrderEvent(
+      payload.sellerId,
+      {
+        type: "order_disputed",
+        orderId: payload.orderId
+      },
+      { strict: true }
+    )
+  ]);
   await broadcastStoredMessages(payload.systemMessageIds);
 }
 
@@ -324,16 +361,26 @@ async function handleDisputeResolved(event: DomainOutboxEvent) {
     )
   );
   await invalidateOrderCaches({ ...payload, wallet: true });
-  notifyOrderEvent(payload.buyerId, {
-    type: "dispute_resolved",
-    orderId: payload.orderId,
-    decision: payload.decision
-  });
-  notifyOrderEvent(payload.sellerId, {
-    type: "dispute_resolved",
-    orderId: payload.orderId,
-    decision: payload.decision
-  });
+  await Promise.all([
+    notifyOrderEvent(
+      payload.buyerId,
+      {
+        type: "dispute_resolved",
+        orderId: payload.orderId,
+        decision: payload.decision
+      },
+      { strict: true }
+    ),
+    notifyOrderEvent(
+      payload.sellerId,
+      {
+        type: "dispute_resolved",
+        orderId: payload.orderId,
+        decision: payload.decision
+      },
+      { strict: true }
+    )
+  ]);
   await broadcastStoredMessages(payload.systemMessageIds);
 }
 
@@ -370,7 +417,11 @@ async function handleMessageCreated(event: DomainOutboxEvent) {
     productId: message.productId ?? undefined,
     orderId: message.orderId ?? undefined
   });
-  broadcastConversation(message.conversationId, { type: "message", message });
+  await broadcastConversation(
+    message.conversationId,
+    { type: "message", message },
+    { strict: true }
+  );
 }
 
 async function handleProductBlocked(event: DomainOutboxEvent) {
@@ -380,8 +431,14 @@ async function handleProductBlocked(event: DomainOutboxEvent) {
 
 async function handleUserBanned(event: DomainOutboxEvent) {
   const payload = userModerationPayload.parse(event.payload);
-  await revokeAllUserSessions(payload.userId, { strict: true });
-  publishSessionSecurityEvent({ type: "user.banned", userId: payload.userId });
+  await revokeAllUserSessions(payload.userId, {
+    strict: true,
+    publishEvent: false
+  });
+  await publishSessionSecurityEvent(
+    { type: "user.banned", userId: payload.userId },
+    { strict: true }
+  );
   const products = await loadSellerProductCacheContexts(payload.userId);
   await invalidateProductCacheBatch(
     products,

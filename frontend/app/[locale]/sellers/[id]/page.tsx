@@ -21,7 +21,7 @@ type SellerResponse = {
     createdAt: string;
     ratingAverage: number;
     reviewCount: number;
-    online: boolean;
+    online: boolean | null;
   };
   stats: {
     activeListings: number;

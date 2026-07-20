@@ -296,8 +296,12 @@ export function ProductPageClient({ id }: { id: string }) {
                 {Number(item.sellerRating ?? 0).toFixed(1)} / {item.sellerReviewCount ?? 0} {t("product.reviews")}
               </span>
               <span className="mt-1 flex items-center gap-1 text-xs font-bold text-muted">
-                <span className={`h-2.5 w-2.5 rounded-full ${item.sellerOnline ? "bg-emerald-400 shadow-[0_0_0_4px_rgba(52,211,153,0.16)]" : "bg-muted"}`} />
-                {item.sellerOnline ? t("product.online") : t("product.offline")}
+                <span className={`h-2.5 w-2.5 rounded-full ${item.sellerOnline === true ? "bg-emerald-400 shadow-[0_0_0_4px_rgba(52,211,153,0.16)]" : item.sellerOnline === false ? "bg-muted" : "bg-action/70"}`} />
+                {item.sellerOnline == null
+                  ? t("product.presenceUnknown")
+                  : item.sellerOnline
+                    ? t("product.online")
+                    : t("product.offline")}
               </span>
             </span>
           </Link>
@@ -358,8 +362,12 @@ export function ProductPageClient({ id }: { id: string }) {
               <span className="min-w-0">
                 <span className="block truncate text-sm font-black text-ink">{item.sellerDisplayName}</span>
                 <span className="mt-0.5 flex items-center gap-1 text-xs text-muted">
-                  <span className={`h-2 w-2 rounded-full ${item.sellerOnline ? "bg-emerald-400" : "bg-muted"}`} />
-                  {item.sellerOnline ? t("product.online") : t("product.offline")}
+                  <span className={`h-2 w-2 rounded-full ${item.sellerOnline === true ? "bg-emerald-400" : item.sellerOnline === false ? "bg-muted" : "bg-action/70"}`} />
+                  {item.sellerOnline == null
+                    ? t("product.presenceUnknown")
+                    : item.sellerOnline
+                      ? t("product.online")
+                      : t("product.offline")}
                 </span>
               </span>
             </Link>

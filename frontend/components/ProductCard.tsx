@@ -81,8 +81,12 @@ export function ProductCard({ product }: { product: Product }) {
               {Number(product.sellerRating ?? 0).toFixed(1)}
             </p>
             <p className="mt-1 flex items-center justify-end gap-1 text-xs font-bold text-muted">
-              <span className={`h-2.5 w-2.5 rounded-full ${product.sellerOnline ? "bg-emerald-400 shadow-[0_0_0_4px_rgba(52,211,153,0.16)]" : "bg-muted"}`} />
-              {product.sellerOnline ? t("product.online") : t("product.offline")}
+              <span className={`h-2.5 w-2.5 rounded-full ${product.sellerOnline === true ? "bg-emerald-400 shadow-[0_0_0_4px_rgba(52,211,153,0.16)]" : product.sellerOnline === false ? "bg-muted" : "bg-action/70"}`} />
+              {product.sellerOnline == null
+                ? t("product.presenceUnknown")
+                : product.sellerOnline
+                  ? t("product.online")
+                  : t("product.offline")}
             </p>
           </div>
         </div>

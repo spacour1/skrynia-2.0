@@ -315,7 +315,10 @@ router.get(
       values
     );
     const total = result.rows[0]?.total ?? 0;
-    const products = await attachCardMetadata(addSellerPresence(result.rows.map(({ total: _total, ...row }) => row)));
+    const productsWithPresence = await addSellerPresence(
+      result.rows.map(({ total: _total, ...row }) => row)
+    );
+    const products = await attachCardMetadata(productsWithPresence);
     const payload = { products, page: input.page, limit: input.limit, total };
     await cacheSet(cacheKey, payload, 30);
     res.json(payload);
@@ -390,7 +393,11 @@ router.get(
     const metadataFields =
       row.sectionId && row.schemaVersion ? (await getSchemaByVersion(row.sectionId, row.schemaVersion))?.fields ?? [] : [];
     const { sellerIsBanned: _sellerIsBanned, ...publicRow } = row;
-    const payload = { product: { ...addSellerPresence([publicRow])[0], metadataFields }, reviews: reviews.rows };
+    const [productWithPresence] = await addSellerPresence([publicRow]);
+    const payload = {
+      product: { ...productWithPresence, metadataFields },
+      reviews: reviews.rows
+    };
     // Never cache non-public payloads: owner/staff previews of paused or blocked listings
     // must not become servable to anonymous visitors through the cache.
     if (isPubliclyVisible) await cacheSet(`marketplace:product:${id}`, payload, 60);

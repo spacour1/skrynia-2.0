@@ -5,7 +5,7 @@ export type PublicSellerDto = {
   createdAt: string;
   ratingAverage: number;
   reviewCount: number;
-  online: boolean;
+  online: boolean | null;
 };
 
 export type PublicSellerStatsDto = {
@@ -44,7 +44,10 @@ function asNumber(value: number | string | null): number {
   return Number(value ?? 0);
 }
 
-export function toPublicSellerDto(row: PublicSellerOverviewRow, online: boolean): PublicSellerDto {
+export function toPublicSellerDto(
+  row: PublicSellerOverviewRow,
+  online: boolean | null
+): PublicSellerDto {
   return {
     id: row.id,
     displayName: row.displayName,

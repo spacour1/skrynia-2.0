@@ -564,13 +564,17 @@ router.get(
       [id]
     );
 
-    const seller = toPublicSellerDto(overview.rows[0], isUserOnline(overview.rows[0].id));
+    const sellerPresence = await isUserOnline(overview.rows[0].id);
+    const seller = toPublicSellerDto(overview.rows[0], sellerPresence);
     const stats = toPublicSellerStatsDto(overview.rows[0]);
     const productsWithCardMetadata = await attachCardMetadata(products.rows);
     res.json({
       user: seller,
       stats,
-      products: productsWithCardMetadata.map((product) => ({ ...product, sellerOnline: isUserOnline(seller.id) })),
+      products: productsWithCardMetadata.map((product) => ({
+        ...product,
+        sellerOnline: sellerPresence
+      })),
       reviews: reviews.rows
     });
   })

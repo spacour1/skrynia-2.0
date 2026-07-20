@@ -96,6 +96,10 @@ const schema = z.object({
   WS_TICKET_RATE_LIMIT_PER_IP: z.coerce.number().int().min(1).default(120),
   WS_MAX_BUFFERED_BYTES: z.coerce.number().int().min(1024).default(1024 * 1024),
   WS_MAX_ROOMS_PER_CONNECTION: z.coerce.number().int().min(1).max(1000).default(50),
+  REALTIME_INSTANCE_ID: z.string().trim().min(1).max(200).optional(),
+  REALTIME_CHANNEL: z.string().trim().min(1).max(200).default("skrynia:realtime:v1"),
+  PRESENCE_TTL_MS: z.coerce.number().int().min(5_000).default(90_000),
+  PRESENCE_HEARTBEAT_MS: z.coerce.number().int().min(1_000).default(30_000),
   PHONE_OTP_RATE_LIMIT_PER_15MIN: z.coerce.number().int().min(1).default(10),
   PHONE_OTP_RATE_LIMIT_PER_IP_15MIN: z.coerce.number().int().min(1).default(30),
   EMAIL_VERIFICATION_RATE_LIMIT_PER_15MIN: z.coerce.number().int().min(1).default(10),
@@ -110,6 +114,13 @@ const schema = z.object({
   // NODE_ENV away from "production". Defaults closed everywhere else stays disabled.
   ENABLE_TEST_PAYMENTS: z.coerce.boolean().default(false)
 }).superRefine((value, ctx) => {
+  if (value.PRESENCE_HEARTBEAT_MS * 2 >= value.PRESENCE_TTL_MS) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["PRESENCE_HEARTBEAT_MS"],
+      message: "PRESENCE_HEARTBEAT_MS must be less than half of PRESENCE_TTL_MS"
+    });
+  }
   if (value.NODE_ENV !== "production") return;
 
   if (value.JWT_SECRET === "dev-secret-change-me-for-production") {

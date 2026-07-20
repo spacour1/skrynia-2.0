@@ -18,7 +18,7 @@ export type User = {
   twoFactorEnabled?: boolean;
   settings?: Record<string, unknown>;
   createdAt?: string;
-  online?: boolean;
+  online?: boolean | null;
   emailVerified?: boolean;
   phone?: string | null;
   phoneVerified?: boolean;
@@ -111,7 +111,7 @@ export type Product = {
   sellerDisplayName: string;
   sellerRating: number;
   sellerReviewCount: number;
-  sellerOnline?: boolean;
+  sellerOnline?: boolean | null;
 };
 
 export type Order = {
@@ -184,7 +184,7 @@ export type ConversationGroup = {
   peerUserId: string;
   peerDisplayName: string;
   peerAvatarUrl?: string | null;
-  isOnline?: boolean;
+  isOnline?: boolean | null;
   totalUnreadCount: number;
   lastMessageAt?: string | null;
   lastMessageBody?: string | null;

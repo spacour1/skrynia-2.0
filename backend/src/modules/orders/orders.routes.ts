@@ -2,7 +2,13 @@ import { Router } from "express";
 import { z } from "zod";
 import { env } from "../../config/env.js";
 import { inTx, pool } from "../../db/pool.js";
-import { asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
+import {
+  ApiError,
+  asyncHandler,
+  badRequest,
+  forbidden,
+  notFound
+} from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { cacheGet, cacheSet } from "../../common/redis.js";
@@ -14,6 +20,10 @@ import {
   createOrderSystemMessage,
   createSystemMessage
 } from "../chat/system-messages.service.js";
+import {
+  hashIdempotencyPayload,
+  runIdempotentTransaction
+} from "../idempotency/idempotency.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
 
 const router = Router();
@@ -42,80 +52,110 @@ router.post(
   requireEmailVerified,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = createOrderSchema.parse(req.body);
-
-    const { order, conversationId } = await inTx(async (client) => {
-      const productResult = await client.query(
-        `select p.id, p.seller_id, p.price_cents, p.currency, p.stock, p.status, u.is_banned
-         from products p
-         join users u on u.id = p.seller_id
-         where p.id = $1
-         for update of p`,
-        [input.productId]
+    const parsedKey = z.string().uuid().safeParse(req.get("Idempotency-Key"));
+    if (!parsedKey.success) {
+      throw new ApiError(
+        400,
+        "A valid Idempotency-Key UUID header is required",
+        "idempotency_key_invalid"
       );
-      const product = productResult.rows[0];
-      if (!product || product.status !== "active" || product.is_banned) throw notFound("Product is unavailable");
-      if (product.seller_id === req.user.id) throw badRequest("You cannot buy your own listing");
-      if (product.stock < input.quantity) throw badRequest("Not enough stock");
+    }
 
-      const amountCents = Number(product.price_cents) * input.quantity;
-      const orderResult = await client.query(
-        `insert into orders(buyer_id, seller_id, product_id, quantity, amount_cents, currency)
-         values ($1, $2, $3, $4, $5, $6)
-         returning *`,
-        [req.user.id, product.seller_id, product.id, input.quantity, amountCents, product.currency]
-      );
-      const createdOrder = orderResult.rows[0];
-
-      // Every order gets its own chat context. The product chat remains the listing
-      // discussion history; order lifecycle/system messages stay in this order chat.
-      const conversation = await getOrCreateOrderConversation(
-        {
-          buyerId: req.user.id,
-          sellerId: product.seller_id,
-          productId: product.id,
-          orderId: createdOrder.id
-        },
-        client
-      );
-      const newConversationId = conversation.id;
-
-      const message = await createSystemMessage(
-        {
-          conversationId: newConversationId,
-          type: "order_created",
-          bodyKey: "system.orderCreated"
-        },
-        client
-      );
-
-      await recordOrderEvent(
-        {
-          orderId: createdOrder.id,
-          actorId: req.user.id,
-          type: "created",
-          templateKey: "orderEvents.created"
-        },
-        client
-      );
-      await enqueueDomainEvent(client, {
-        eventKey: `order.created:${createdOrder.id}`,
-        eventType: "order.created",
-        aggregateType: "order",
-        aggregateId: createdOrder.id,
-        payload: {
-          orderId: createdOrder.id,
-          buyerId: createdOrder.buyer_id,
-          sellerId: createdOrder.seller_id,
-          productId: createdOrder.product_id,
-          conversationId: newConversationId,
-          systemMessageIds: [message.id]
+    const result = await runIdempotentTransaction({
+      userId: req.user.id,
+      scope: "orders.create",
+      key: parsedKey.data,
+      requestHash: hashIdempotencyPayload(input),
+      execute: async (client) => {
+        const productResult = await client.query(
+          `select p.id, p.seller_id, p.price_cents, p.currency, p.stock, p.status, u.is_banned
+           from products p
+           join users u on u.id = p.seller_id
+           where p.id = $1
+           for update of p`,
+          [input.productId]
+        );
+        const product = productResult.rows[0];
+        if (!product || product.status !== "active" || product.is_banned) {
+          throw notFound("Product is unavailable");
         }
-      });
+        if (product.seller_id === req.user.id) {
+          throw badRequest("You cannot buy your own listing");
+        }
+        if (product.stock < input.quantity) throw badRequest("Not enough stock");
 
-      return { order: createdOrder, conversationId: newConversationId };
+        const amountCents = Number(product.price_cents) * input.quantity;
+        const orderResult = await client.query(
+          `insert into orders(buyer_id, seller_id, product_id, quantity, amount_cents, currency)
+           values ($1, $2, $3, $4, $5, $6)
+           returning *`,
+          [
+            req.user.id,
+            product.seller_id,
+            product.id,
+            input.quantity,
+            amountCents,
+            product.currency
+          ]
+        );
+        const createdOrder = orderResult.rows[0];
+
+        // Every order gets its own chat context. The product chat remains the listing
+        // discussion history; order lifecycle/system messages stay in this order chat.
+        const conversation = await getOrCreateOrderConversation(
+          {
+            buyerId: req.user.id,
+            sellerId: product.seller_id,
+            productId: product.id,
+            orderId: createdOrder.id
+          },
+          client
+        );
+        const conversationId = conversation.id;
+
+        const message = await createSystemMessage(
+          {
+            conversationId,
+            type: "order_created",
+            bodyKey: "system.orderCreated"
+          },
+          client
+        );
+
+        await recordOrderEvent(
+          {
+            orderId: createdOrder.id,
+            actorId: req.user.id,
+            type: "created",
+            templateKey: "orderEvents.created"
+          },
+          client
+        );
+        await enqueueDomainEvent(client, {
+          eventKey: `order.created:${createdOrder.id}`,
+          eventType: "order.created",
+          aggregateType: "order",
+          aggregateId: createdOrder.id,
+          payload: {
+            orderId: createdOrder.id,
+            buyerId: createdOrder.buyer_id,
+            sellerId: createdOrder.seller_id,
+            productId: createdOrder.product_id,
+            conversationId,
+            systemMessageIds: [message.id]
+          }
+        });
+
+        return {
+          statusCode: 201,
+          body: { order: createdOrder, conversationId },
+          resourceId: createdOrder.id as string
+        };
+      }
     });
 
-    res.status(201).json({ order, conversationId });
+    if (result.replayed) res.setHeader("Idempotency-Replayed", "true");
+    res.status(result.statusCode).json(result.body);
   })
 );
 
@@ -365,7 +405,7 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const input = reviewSchema.parse(req.body);
-    const review = await inTx(async (client) => {
+    const result = await inTx(async (client) => {
       const orderResult = await client.query(
         `select * from orders where id = $1 for update`,
         [id]
@@ -375,6 +415,26 @@ router.post(
       if (order.buyer_id !== req.user.id) {
         throw forbidden("Only the buyer can review this order");
       }
+
+      const existing = await client.query(
+        `select * from reviews where order_id = $1`,
+        [id]
+      );
+      if (existing.rows[0]) {
+        const review = existing.rows[0];
+        const sameRequest =
+          Number(review.rating) === input.rating &&
+          (review.comment ?? null) === (input.comment ?? null);
+        if (!sameRequest) {
+          throw new ApiError(
+            409,
+            "This order already has a different review",
+            "review_already_exists"
+          );
+        }
+        return { review, created: false };
+      }
+
       if (order.status !== "completed") {
         throw badRequest("Reviews are allowed only after completed orders");
       }
@@ -408,9 +468,10 @@ router.post(
           rating: input.rating
         }
       });
-      return createdReview;
+      return { review: createdReview, created: true };
     });
-    res.status(201).json({ review });
+    if (!result.created) res.setHeader("Idempotency-Replayed", "true");
+    res.status(result.created ? 201 : 200).json({ review: result.review });
   })
 );
 

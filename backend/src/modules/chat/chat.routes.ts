@@ -14,12 +14,13 @@ import {
   getOrCreateProductConversation,
   getUserConversations,
   markConversationRead,
-  sendMessage
+  sendMessageIdempotently
 } from "./chat.service.js";
 
 const router = Router();
 
 const sendMessageSchema = z.object({
+  clientMessageId: z.string().uuid(),
   body: z.string().min(1).max(3000),
   attachmentUrl: z.string().url().optional()
 });
@@ -149,13 +150,15 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const conversationId = z.string().uuid().parse(req.params.conversationId);
     const input = sendMessageSchema.parse(req.body);
-    const message = await sendMessage({
+    const result = await sendMessageIdempotently({
       conversationId,
       senderId: req.user.id,
+      clientMessageId: input.clientMessageId,
       body: input.body,
       attachmentUrl: input.attachmentUrl
     });
-    res.status(201).json({ message });
+    if (!result.created) res.setHeader("Idempotency-Replayed", "true");
+    res.status(result.created ? 201 : 200).json({ message: result.message });
   })
 );
 

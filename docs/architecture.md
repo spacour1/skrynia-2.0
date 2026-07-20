@@ -151,6 +151,23 @@ The worker runs when `OUTBOX_WORKER_ENABLED=true`. Multiple replicas are safe; a
 keeps a live claim from being reclaimed, while stale claims become available after
 `OUTBOX_LOCK_TIMEOUT_MS`.
 
+## Request idempotency
+
+`POST /orders` requires an `Idempotency-Key` UUID. The `idempotency_keys` table scopes
+each key by user and operation, stores a canonical request hash, and keeps the completed
+HTTP status/body for 24 hours. Claiming the key, creating the order, and recording its
+outbox event happen in one PostgreSQL transaction. Concurrent requests with the same key
+therefore replay one result; reusing the key for a different body returns `409`.
+
+User chat messages carry a client-generated `clientMessageId`. HTTP and WebSocket sends
+use the same service and the partial unique index on `(sender_id, client_message_id)`.
+A reconnect can safely retry the same message, while different content with the same ID
+returns `409`.
+
+An identical retry of an order review returns the stored review with `200`; a different
+rating or comment returns `409`. Only the first successful message, order, or review
+write creates its corresponding outbox event.
+
 ## Environment variables
 
 Required in all environments:

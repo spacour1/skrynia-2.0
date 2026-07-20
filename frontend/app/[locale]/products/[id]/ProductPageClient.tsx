@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "@/lib/navigation";
 import { useRouter } from "@/lib/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -56,6 +56,7 @@ export function ProductPageClient({ id }: { id: string }) {
   const user = useAuth((state) => state.user);
   const { t } = useI18n();
   const [reportOpen, setReportOpen] = useState(false);
+  const orderIdempotencyKey = useRef<string | null>(null);
 
   const product = useQuery({
     queryKey: ["product", id],
@@ -68,6 +69,7 @@ export function ProductPageClient({ id }: { id: string }) {
 
   useEffect(() => {
     setProductConversationId(null);
+    orderIdempotencyKey.current = null;
   }, [id]);
 
   const existingProductConversation = useQuery({
@@ -116,13 +118,16 @@ export function ProductPageClient({ id }: { id: string }) {
   const buySecurely = useMutation({
     mutationFn: async () => {
       captureEvent("checkout_started", { product_id: id });
+      orderIdempotencyKey.current ??= crypto.randomUUID();
       const { order } = await apiFetch<{ order: { id: string } }>("/orders", {
         method: "POST",
+        headers: { "Idempotency-Key": orderIdempotencyKey.current },
         body: JSON.stringify({ productId: id, quantity: 1 })
       });
       return order;
     },
     onSuccess: (order) => {
+      orderIdempotencyKey.current = null;
       captureEvent("order_created", { order_id: order.id, product_id: id });
       router.push(`/orders/${order.id}`);
     }

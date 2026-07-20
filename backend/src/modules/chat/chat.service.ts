@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { ApiError, badRequest, forbidden, notFound } from "../../common/errors.js";
 import type { DbClient } from "../../db/pool.js";
 import { inTx, pool } from "../../db/pool.js";
@@ -18,6 +19,7 @@ export type Message = {
   id: string;
   conversationId: string;
   senderId: string | null;
+  clientMessageId?: string | null;
   senderDisplayName: string;
   body: string;
   attachmentUrl: string | null;
@@ -199,27 +201,107 @@ export async function getOrCreateOrderConversation(
   return { id: reread.rows[0].id as string, existing: true };
 }
 
-export async function sendMessage(input: {
+type IdempotentSendMessageInput = {
   conversationId: string;
   senderId: string;
+  clientMessageId: string;
   body: string;
   attachmentUrl?: string;
-}): Promise<Message> {
+};
+
+export type SendMessageResult = {
+  message: Message;
+  created: boolean;
+};
+
+async function findMessageByClientId(
+  client: DbClient,
+  senderId: string,
+  clientMessageId: string
+): Promise<Message | null> {
+  const result = await client.query(
+    `select m.id, m.conversation_id as "conversationId",
+            m.sender_id as "senderId",
+            m.client_message_id as "clientMessageId",
+            u.display_name as "senderDisplayName",
+            m.body, m.attachment_url as "attachmentUrl",
+            m.created_at as "createdAt"
+     from messages m
+     join users u on u.id = m.sender_id
+     where m.sender_id = $1 and m.client_message_id = $2`,
+    [senderId, clientMessageId]
+  );
+  return (result.rows[0] as Message | undefined) ?? null;
+}
+
+function verifyMessageReplay(
+  existing: Message,
+  input: IdempotentSendMessageInput,
+  body: string
+) {
+  if (
+    existing.conversationId !== input.conversationId ||
+    existing.body !== body ||
+    (existing.attachmentUrl ?? null) !== (input.attachmentUrl ?? null)
+  ) {
+    throw new ApiError(
+      409,
+      "This client message ID was already used with different content",
+      "client_message_id_reused"
+    );
+  }
+  return { message: existing, created: false } satisfies SendMessageResult;
+}
+
+export async function sendMessageIdempotently(
+  input: IdempotentSendMessageInput
+): Promise<SendMessageResult> {
   const body = input.body.trim();
   if (body.length < MIN_MESSAGE_LENGTH || body.length > MAX_MESSAGE_LENGTH) throw badRequest("Invalid message");
+
+  const replay = await findMessageByClientId(
+    pool,
+    input.senderId,
+    input.clientMessageId
+  );
+  if (replay) return verifyMessageReplay(replay, input, body);
 
   await assertCanSendMessage(input.conversationId, input.senderId);
 
   return inTx(async (client) => {
     const result = await client.query(
-      `insert into messages(conversation_id, sender_id, body, attachment_url)
-       values ($1, $2, $3, $4)
+      `insert into messages(
+         conversation_id, sender_id, client_message_id, body, attachment_url
+       )
+       values ($1, $2, $3, $4, $5)
+       on conflict (sender_id, client_message_id)
+         where client_message_id is not null
+       do nothing
        returning id, conversation_id as "conversationId", sender_id as "senderId",
+                 client_message_id as "clientMessageId",
                  (select display_name from users where id = $2) as "senderDisplayName",
                  body, attachment_url as "attachmentUrl", created_at as "createdAt"`,
-      [input.conversationId, input.senderId, body, input.attachmentUrl ?? null]
+      [
+        input.conversationId,
+        input.senderId,
+        input.clientMessageId,
+        body,
+        input.attachmentUrl ?? null
+      ]
     );
-    const message = result.rows[0] as Message;
+    const message = result.rows[0] as Message | undefined;
+    if (!message) {
+      const concurrentReplay = await findMessageByClientId(
+        client,
+        input.senderId,
+        input.clientMessageId
+      );
+      if (!concurrentReplay) {
+        throw new Error("Message client ID conflicted but could not be read");
+      }
+      return verifyMessageReplay(concurrentReplay, input, body);
+    }
+
     await enqueueDomainEvent(client, {
       eventKey: `message.created:${message.id}`,
       eventType: "message.created",
@@ -227,8 +309,20 @@ export async function sendMessage(input: {
       aggregateId: message.id,
       payload: { messageId: message.id }
     });
-    return message;
+    return { message, created: true };
   });
+}
+
+export async function sendMessage(
+  input: Omit<IdempotentSendMessageInput, "clientMessageId"> & {
+    clientMessageId?: string;
+  }
+): Promise<Message> {
+  const result = await sendMessageIdempotently({
+    ...input,
+    clientMessageId: input.clientMessageId ?? randomUUID()
+  });
+  return result.message;
 }
 
 export async function getMessages(
@@ -249,6 +343,7 @@ export async function getMessages(
 
   const result = await pool.query(
     `select m.id, m.conversation_id as "conversationId", m.sender_id as "senderId",
+            m.client_message_id as "clientMessageId",
             coalesce(u.display_name, '${SYSTEM_SENDER_DISPLAY_NAME}') as "senderDisplayName",
             case when m.hidden_at is not null and not $${adminParamIndex} then '${HIDDEN_BODY_PLACEHOLDER}' else m.body end as body,
             m.attachment_url as "attachmentUrl", m.created_at as "createdAt",

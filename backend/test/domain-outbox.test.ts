@@ -98,6 +98,7 @@ describe("transactional domain outbox", () => {
         `csrf_token=${session.csrfToken}`
       ])
       .set("X-CSRF-Token", session.csrfToken)
+      .set("Idempotency-Key", randomUUID())
       .send({ productId, quantity: 1 });
 
     expect(created.status).toBe(201);

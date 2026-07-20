@@ -730,3 +730,73 @@ Planned commit: `feat(reliability): add transactional domain outbox`
   in-app notification but do not yet have a durable retry for a failed BullMQ handoff.
 - Outbox age gauges are refreshed by an enabled outbox worker. Deployments that disable
   every worker retain durable rows but do not update those gauges until a worker starts.
+
+## Stage 10: order, message, and review idempotency
+
+Status: complete.
+
+Planned commit: `feat(core): add idempotency for orders messages and reviews`
+
+### Confirmed defects
+
+- Retrying order creation after a timeout could create multiple orders, conversations,
+  timeline entries, and outbox events because the request had no durable identity.
+- HTTP and WebSocket message delivery used separate request paths without a shared
+  client-generated database identity, so reconnect retries could persist duplicates.
+- Retrying an identical review surfaced the database uniqueness conflict instead of the
+  existing review, while concurrent retries had no explicit application contract.
+
+### Implementation
+
+- Added `idempotency_keys`, uniquely scoped by user, operation, and UUID key. It stores a
+  canonical SHA-256 request hash, processing/completed state, response status/body,
+  resource ID, creation time, and 24-hour expiry.
+- Order key claiming, order/conversation creation, system and timeline messages, outbox
+  insertion, and completion of the saved response now share one PostgreSQL transaction.
+  A matching retry replays the stored `201` response; a changed body returns `409`; a
+  committed unfinished key reports `idempotency_in_progress`.
+- Added bounded lazy cleanup for expired keys and an expiry index.
+- Added `messages.client_message_id` with a partial unique index on sender and client ID.
+  HTTP and WebSocket now call the same message service. Matching retries return the
+  existing row, while changed content returns `409`; only the first insert emits outbox.
+- The browser keeps one order idempotency UUID across failed retries and reuses the
+  optimistic chat message UUID in its HTTP fallback.
+- Review creation locks the order, returns an identical existing review with `200`, and
+  rejects a changed rating or comment with `409`. Duplicate attempts do not add timeline
+  or outbox rows.
+
+### Regression coverage
+
+1. Two concurrent order requests with one key create one order and replay one response.
+2. Reusing an order key with another body returns `409`; missing and unfinished keys have
+   explicit errors.
+3. Retrying a WebSocket-originated message through HTTP returns one stored message and
+   one outbox event.
+4. An identical review retry returns the same review; a changed retry returns `409`.
+5. Replayed order, message, and review operations do not duplicate outbox-driven
+   notifications.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `cd backend && npm run build` | PASS |
+| Targeted idempotency/chat/outbox run | PASS, 29/29 |
+| `cd backend && npm test` | PASS, 206/206 in 21/21 files |
+| Clean database migration smoke | PASS, all 34 migrations |
+| Required idempotency/message indexes on clean database | PASS, all present |
+| Idempotency tests on clean database | PASS, 4/4 |
+| `cd frontend && npm run typecheck` | PASS |
+| `cd frontend && npm test` | PASS, 6/6 |
+| `cd frontend && npm run i18n:check` | PASS, 0 errors and 25 baseline warnings |
+| `cd frontend && npm run build` | PASS, with existing Sentry/OpenTelemetry warnings |
+| `docker compose config --quiet` | PASS |
+
+### Remaining constraints
+
+- Order request results expire after 24 hours. Cleanup is bounded and runs lazily during
+  new idempotent order requests rather than through a dedicated maintenance job.
+- Request-level idempotency is currently implemented for order creation. Other mutating
+  endpoints still need explicit contracts before using the generic transaction helper.
+- Review equality is exact after schema parsing, including comment whitespace.

@@ -145,6 +145,7 @@ async function invalidateOrderCaches(input: {
 async function loadMessage(messageId: string) {
   const result = await pool.query(
     `select m.id, m.conversation_id as "conversationId", m.sender_id as "senderId",
+            m.client_message_id as "clientMessageId",
             coalesce(u.display_name, $2) as "senderDisplayName",
             m.body, m.attachment_url as "attachmentUrl", m.created_at as "createdAt",
             m.kind, m.system_type as "systemType", m.metadata,

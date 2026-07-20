@@ -120,6 +120,9 @@ Recommended providers: Supabase Postgres, Neon, Railway Postgres, DigitalOcean M
 - Set `DATABASE_URL` to the managed instance's connection string.
 - Set `PG_POOL_MAX` based on your plan's connection limit (see [docs/pgbouncer.md](./pgbouncer.md)).
 - Run migrations on deploy: the Dockerfile `CMD` already runs `node-pg-migrate up` before starting the server.
+- Preserve the `Idempotency-Key` request header at every proxy/CDN hop. Order clients must
+  retain one UUID only while retrying the same request body; completed results are retained
+  for 24 hours.
 - **Never connect AI tools or local dev machines to the production database.**
 
 ### Read replica (Stage 2)
@@ -203,4 +206,5 @@ S3_SECRET_ACCESS_KEY=<iam-secret>
 - [ ] `ENABLE_TEST_PAYMENTS` is `false` (or unset)
 - [ ] `/health` returns 200 from the load balancer
 - [ ] `/metrics` requires basic auth and is not publicly reachable without it
+- [ ] Reverse proxies forward `Idempotency-Key` unchanged
 - [ ] Migrations ran successfully (`node-pg-migrate up` output in deploy logs)

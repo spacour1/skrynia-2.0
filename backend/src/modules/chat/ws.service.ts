@@ -16,7 +16,7 @@ import {
 } from "../../common/metrics.js";
 import { consumeWsTicket } from "../auth/ws-ticket.service.js";
 import { onSessionSecurityEvent } from "../auth/session-events.service.js";
-import { sendMessage } from "./chat.service.js";
+import { sendMessageIdempotently } from "./chat.service.js";
 
 function readCookie(header: string | undefined, name: string): string | undefined {
   if (!header) return undefined;
@@ -460,9 +460,10 @@ export function attachWebSocketServer(server: http.Server) {
           }
 
           try {
-            const saved = await sendMessage({
+            const result = await sendMessageIdempotently({
               conversationId: msg.conversationId,
               senderId: client.userId!,
+              clientMessageId: msg.clientMessageId,
               body: msg.body,
               attachmentUrl: msg.attachmentUrl
             });
@@ -471,7 +472,8 @@ export function attachWebSocketServer(server: http.Server) {
             sendJson(client, {
               type: "message_ack",
               clientMessageId: msg.clientMessageId,
-              message: saved
+              message: result.message,
+              replayed: !result.created
             });
           } catch (sendError) {
             const code = sendError instanceof ApiError ? sendError.code : undefined;

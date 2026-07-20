@@ -236,6 +236,7 @@ export function ChatPanel({
       {
         method: "POST",
         body: JSON.stringify({
+          clientMessageId: message.clientMessageId,
           body: message.body,
           attachmentUrl: message.attachmentUrl
         })

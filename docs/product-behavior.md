@@ -6,7 +6,7 @@ Rules that define how SKRYNIA works from a user perspective. These are invariant
 
 ### Creation
 - Buyer selects a product and creates an order. A chat conversation is created atomically in the same DB transaction.
-- Order starts in `created` status.
+- Order starts in `pending` status (the full status set is defined in `docs/domain-invariants.md`).
 - System message `order_created` is posted to the chat.
 
 ### Payment
@@ -24,7 +24,7 @@ Rules that define how SKRYNIA works from a user perspective. These are invariant
 
 ### Buyer confirms
 - Buyer confirms receipt: escrow releases.
-- Platform fee is deducted: `fee = ceil(amount * PLATFORM_FEE_BPS / 10000)`.
+- Platform fee is deducted: `fee = floor(amount * PLATFORM_FEE_BPS / 10000)`.
 - Seller's wallet balance increases by `amount - fee` (cents).
 - Status → `completed`, system message `escrow_released`.
 - Ledger: debit seller-escrow, credit user-payable (net amount) + credit platform-fee.
@@ -35,22 +35,24 @@ Rules that define how SKRYNIA works from a user perspective. These are invariant
 - Same escrow-release flow as buyer confirmation.
 
 ### Dispute
-- Either party can open a dispute while order is `delivered`.
+- Either party (buyer or seller) can open a dispute while the order is `paid`, `in_progress`, or `delivered`.
 - Status → `disputed`, system message `dispute_opened`.
-- Admin or moderator resolves with a decision: `release` or `refund`.
+- Both participants and staff can exchange dispute messages; admins can hide messages.
+- Only an **admin** resolves with a decision: `release` or `refund` (moderators can view and respond, but the financially significant resolution is admin-only).
   - `release`: escrow released to seller (fee still deducted). System messages: `dispute_resolved` + `escrow_released`.
   - `refund`: funds returned to buyer wallet. No platform fee taken. System messages: `dispute_resolved` + `refunded`.
 - Ledger entry is posted in both cases.
 
 ### Cancellation
-- Order can be canceled before payment (`created` status).
+- Order can be canceled before payment (`pending` status) — e.g. the test-payment
+  failure flow moves `pending → canceled`.
 - No ledger entry (no money moved yet).
 
 ## Wallet
 
 - Each user has one wallet per currency (currently UAH only).
 - Balance is stored in integer cents. Never use floats.
-- Wallet balance = sum of `liability:user-payable` credit lines minus debit lines in the ledger. The `wallets.balance_cents` column is a cached denormalization — always update it together with the ledger entry in the same transaction.
+- Wallet balance = sum of `liability:user-payable` credit lines minus debit lines in the ledger. The `wallets.available_cents` and `wallets.escrow_cents` columns are cached denormalizations — always update them together with the ledger entry in the same transaction.
 - Top-up: funds arrive via payment provider → wallet balance increases, ledger entry posted.
 - Withdrawal: admin manually pays out → wallet balance decreases, ledger entry posted. Admin can reject a withdrawal (reversal entry posted).
 - Manual adjustment (admin only): arbitrary increase or decrease for support purposes. Requires a reason string. Booked against `equity:manual-adjustment` account.
@@ -58,7 +60,9 @@ Rules that define how SKRYNIA works from a user perspective. These are invariant
 ## Platform fee
 
 - Configured via `PLATFORM_FEE_BPS` env var. Default: 1000 (= 10%).
-- Calculated as `ceil(amountCents * PLATFORM_FEE_BPS / 10000)` using integer arithmetic.
+- Calculated as `floor(amountCents * PLATFORM_FEE_BPS / 10000)` using integer (BigInt)
+  arithmetic — see `backend/src/domain/money.ts`. Floor is the historical rule the
+  existing ledger was booked under; do not change the rounding direction.
 - Only charged on successful escrow release. Not charged on refunds.
 - Credited to `revenue:platform-fee` ledger account.
 
@@ -71,7 +75,8 @@ Rules that define how SKRYNIA works from a user perspective. These are invariant
 
 **moderator** — elevated support role.
 - Access to admin panel: user list, reports, media moderation.
-- Can ban users, resolve disputes, view orders.
+- Can ban users, view orders, and participate in dispute threads.
+- Cannot resolve disputes (release/refund is a financial decision — admin-only).
 - Cannot access financial data: transactions, ledger, payouts, reconciliation, manual adjustments.
 
 **admin** — full access.
@@ -119,7 +124,7 @@ Disable: `POST /me/2fa/disable { currentPassword }` — requires password re-con
 ## Reconciliation
 
 Daily job (cron 03:00 UTC) compares:
-- Sum of wallet balance columns (`wallets.balance_cents`)
+- Sum of wallet balance columns (`wallets.available_cents`, `wallets.escrow_cents`)
 - Sum of `liability:user-payable` net movements in the ledger
 
 If they differ by more than a small threshold, all admins receive an alert notification.

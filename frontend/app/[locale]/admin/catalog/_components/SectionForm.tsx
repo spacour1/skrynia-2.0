@@ -13,7 +13,9 @@ import type { Selection } from "./types";
 import { useAutoSlug } from "./useAutoSlug";
 
 const LISTING_TYPES = ["account", "key", "topup", "boosting", "service", "item", "currency"];
-const DELIVERY_TYPES = ["manual", "instant", "service"];
+// "service" is a listing (product) type, not a delivery mechanism — the backend and
+// products.delivery_type accept manual/instant only.
+const DELIVERY_TYPES = ["manual", "instant"];
 
 export function SectionForm({ section, itemId, onSelect }: { section?: AdminCatalogSection; itemId: string; onSelect: (s: Selection) => void }) {
   const { t } = useI18n();

@@ -82,7 +82,7 @@ These have no I/O and are straightforward to unit-test:
 
 - `verifyTotpCode(secret, code, atTimeMs?)` — `src/modules/auth/totp.service.ts`
 - `generateTotpSecret()` — returns valid base32 string
-- Fee calculation: `ceil(amountCents * bps / 10000)` — inline in orders.routes.ts, consider extracting
+- Fee calculation: `platformFeeCents(amountCents, bps)` (floor, BigInt) — `src/domain/money.ts`
 
 ## Integration test helpers
 

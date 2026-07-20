@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
 import { pool, type DbClient } from "../../db/pool.js";
 import { badRequest } from "../../common/errors.js";
+import { CATALOG_STATUSES, isCatalogStatus, type CatalogStatus } from "../../domain/enums.js";
 
-export type CatalogStatus = "draft" | "active" | "hidden" | "archived" | "deleted";
-const STATUSES: CatalogStatus[] = ["draft", "active", "hidden", "archived", "deleted"];
+export type { CatalogStatus };
 const SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 export function assertValidSlug(slug: string) {
@@ -13,7 +13,9 @@ export function assertValidSlug(slug: string) {
 }
 
 export function assertValidStatus(status: string): asserts status is CatalogStatus {
-  if (!STATUSES.includes(status as CatalogStatus)) throw badRequest("Invalid status");
+  if (!isCatalogStatus(status)) {
+    throw badRequest(`Invalid status: must be one of ${CATALOG_STATUSES.join(", ")}`);
+  }
 }
 
 /** Slug is only editable while the entity is still a draft - published URLs must not move. */

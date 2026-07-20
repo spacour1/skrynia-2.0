@@ -7,6 +7,7 @@ import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { moneyToCents } from "../../common/validation.js";
 import type { AuthedRequest } from "../../common/types.js";
+import { DELIVERY_TYPES, PRODUCT_TYPES } from "../../domain/enums.js";
 import { resolveActiveSectionChain, validateLotMetadata } from "../catalog/catalog.service.js";
 import { addSellerPresence, attachCardMetadata, buildDynamicUpdate } from "./marketplace.helpers.js";
 import { mediaAggWithStatus } from "./marketplace.sql.js";
@@ -34,8 +35,8 @@ const productSchema = z.object({
   price: z.string(),
   currency: z.string().length(3).default("UAH"),
   stock: z.coerce.number().int().min(0).max(100000).default(1),
-  deliveryType: z.enum(["manual", "instant"]).default("manual"),
-  productType: z.enum(["account", "key", "topup", "boosting", "service", "item", "currency"]).optional(),
+  deliveryType: z.enum(DELIVERY_TYPES).default("manual"),
+  productType: z.enum(PRODUCT_TYPES).optional(),
   oldPrice: z.string().optional().nullable(),
   server: z.string().max(80).optional().nullable(),
   platform: z.string().max(80).optional().nullable(),

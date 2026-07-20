@@ -1,6 +1,7 @@
 import type { Request } from "express";
+import type { Role } from "../domain/enums.js";
 
-export type Role = "user" | "moderator" | "admin";
+export type { Role };
 
 export type AuthUser = {
   id: string;

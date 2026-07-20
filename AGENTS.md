@@ -18,7 +18,7 @@ P2P digital marketplace with escrow. Buyers pay, funds are held in escrow, selle
 - **Ledger is append-only.** The DB has a trigger that blocks UPDATE/DELETE on `ledger_entries` and `ledger_lines`. Corrections go through a new entry, never by rewriting history.
 - **Every money mutation books a ledger entry** inside the same DB transaction. See `accounting.service.ts`.
 - **Payment callbacks must stay idempotent.** They rely on `on conflict (idempotency_key) do nothing`. Do not remove this pattern.
-- **Do not change the order status machine** (`created → paid → in_progress → delivered → completed`, plus `disputed/resolved/canceled/refunded`) without adding tests that cover the transition.
+- **Do not change the order status machine** (`pending → paid → in_progress → delivered → completed`, plus `disputed/refunded/canceled`; see `docs/domain-invariants.md`) without adding tests that cover the transition.
 - **Never expose secrets** in logs, responses, or error messages: JWT_SECRET, payment provider keys, webhook secrets, DATABASE_URL, admin credentials.
 - **Never connect to the production database** from a development or AI tool context.
 - **All schema changes require a migration file** (numeric timestamp prefix, SQL, with rollback note).

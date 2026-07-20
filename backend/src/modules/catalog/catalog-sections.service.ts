@@ -1,5 +1,6 @@
 import { pool } from "../../db/pool.js";
 import { badRequest, notFound } from "../../common/errors.js";
+import { DELIVERY_TYPES, PRODUCT_TYPES } from "../../domain/enums.js";
 import { assertSlugEditable, assertValidSlug, assertValidStatus, buildDynamicUpdate, recordCatalogAudit, statusChangeActionType, type CatalogStatus } from "./catalog.helpers.js";
 
 export type CatalogSectionInput = {
@@ -17,8 +18,22 @@ export type CatalogSectionInput = {
   status?: CatalogStatus;
 };
 
-const LISTING_TYPES = ["account", "key", "topup", "boosting", "service", "item", "currency"] as const;
-const DELIVERY_TYPES = ["instant", "manual", "service"] as const;
+// A section's listing type is a ProductType; its delivery types are real delivery
+// mechanisms only. "service" used to be accepted here as a delivery type, but
+// products.delivery_type has always rejected it — a section configured that way
+// produced lots that failed at the DB with a 500 instead of a 400.
+const LISTING_TYPES = PRODUCT_TYPES;
+
+function assertAllowedDeliveryTypes(deliveryTypes: string[]) {
+  if (deliveryTypes.length === 0) {
+    throw badRequest("allowedDeliveryTypes must contain at least one delivery type");
+  }
+  for (const type of deliveryTypes) {
+    if (!DELIVERY_TYPES.includes(type as (typeof DELIVERY_TYPES)[number])) {
+      throw badRequest(`Invalid allowedDeliveryTypes value: must be one of ${DELIVERY_TYPES.join(", ")}`);
+    }
+  }
+}
 
 export async function createCatalogSection(input: CatalogSectionInput, adminId: string) {
   assertValidSlug(input.slug);
@@ -28,11 +43,7 @@ export async function createCatalogSection(input: CatalogSectionInput, adminId: 
     throw badRequest(`Invalid listingType: must be one of ${LISTING_TYPES.join(", ")}`);
   }
   const deliveryTypes = input.allowedDeliveryTypes ?? ["manual", "instant"];
-  for (const type of deliveryTypes) {
-    if (!DELIVERY_TYPES.includes(type as (typeof DELIVERY_TYPES)[number])) {
-      throw badRequest(`Invalid allowedDeliveryTypes value: must be one of ${DELIVERY_TYPES.join(", ")}`);
-    }
-  }
+  assertAllowedDeliveryTypes(deliveryTypes);
   // products.category_id is not-null (pre-existing constraint, unrelated to the catalog
   // builder) and categories.risk_level drives moderation strictness for the lots created
   // under this section - so the admin must pick one explicitly rather than us guessing a
@@ -78,11 +89,7 @@ export async function updateCatalogSection(id: string, input: Partial<CatalogSec
     throw badRequest(`Invalid listingType: must be one of ${LISTING_TYPES.join(", ")}`);
   }
   if (input.allowedDeliveryTypes) {
-    for (const type of input.allowedDeliveryTypes) {
-      if (!DELIVERY_TYPES.includes(type as (typeof DELIVERY_TYPES)[number])) {
-        throw badRequest(`Invalid allowedDeliveryTypes value: must be one of ${DELIVERY_TYPES.join(", ")}`);
-      }
-    }
+    assertAllowedDeliveryTypes(input.allowedDeliveryTypes);
   }
   if (input.categoryId !== undefined) {
     const category = await pool.query(`select id from categories where id = $1`, [input.categoryId]);

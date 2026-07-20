@@ -6,6 +6,7 @@ import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
+import { DISPUTE_DECISIONS } from "../../domain/enums.js";
 import { recordOrderEvent } from "../orders/order-events.service.js";
 import { getMessages } from "../chat/chat.service.js";
 import { createOrderSystemMessage } from "../chat/system-messages.service.js";
@@ -25,7 +26,7 @@ const openSchema = z.object({
 });
 
 const resolveSchema = z.object({
-  decision: z.enum(["refund", "release"]),
+  decision: z.enum(DISPUTE_DECISIONS),
   adminNote: z.string().min(3).max(3000)
 });
 

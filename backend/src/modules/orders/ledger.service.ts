@@ -14,6 +14,7 @@ import {
   type ProductCacheContext
 } from "../marketplace/marketplace-cache.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
+import { platformFeeCents } from "../../domain/money.js";
 
 type OrderRow = {
   id: string;
@@ -56,7 +57,7 @@ export async function ensureWallet(client: DbClient, userId: string, currency: s
 }
 
 function feeFor(amountCents: number) {
-  return Math.floor((amountCents * env.PLATFORM_FEE_BPS) / 10_000);
+  return platformFeeCents(amountCents, env.PLATFORM_FEE_BPS);
 }
 
 export async function lockEscrow(

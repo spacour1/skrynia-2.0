@@ -19,6 +19,7 @@ import type {
   TwoFaReauthMethod,
   TwoFaStep
 } from "./_components/types";
+import { uploadImage } from "@/lib/storage";
 
 export default function SettingsPage() {
   return (
@@ -36,6 +37,7 @@ function SettingsContent() {
   const [profileMessage, setProfileMessage] = useState("");
   const [passwordMessage, setPasswordMessage] = useState("");
   const [avatarPreview, setAvatarPreview] = useState("");
+  const [avatarUploadId, setAvatarUploadId] = useState("");
 
   const me = useQuery({
     queryKey: ["me-settings"],
@@ -61,22 +63,27 @@ function SettingsContent() {
 
   const uploadAvatar = useMutation({
     mutationFn: async (file: File) => {
-      const body = new FormData();
-      body.append("file", file);
-      return apiFetch<{ url: string }>("/storage/upload", { method: "POST", body });
+      return uploadImage(file, "avatar");
     },
-    onSuccess: ({ url }) => {
-      setProfile((current) => ({ ...current, avatarUrl: url }));
+    onSuccess: (upload) => {
+      setProfile((current) => ({ ...current, avatarUrl: upload.url }));
+      setAvatarUploadId(upload.id);
       setProfileMessage(t("settings.avatar.uploaded"));
     },
     onError: (err) => setProfileMessage(err instanceof Error ? err.message : t("settings.avatar.uploadFailed"))
   });
 
   function saveProfile(next: ProfileState) {
+    const { avatarUrl, ...profileFields } = next;
     return apiFetch<{ user: User }>("/users/me", {
       method: "PATCH",
       body: JSON.stringify({
-        ...next,
+        ...profileFields,
+        ...(avatarUploadId
+          ? { avatarUploadId }
+          : avatarUrl === ""
+            ? { clearAvatar: true }
+            : {}),
         settings: {
           ...(me.data?.user.settings ?? {}),
           profileDescription: next.profileDescription.trim()
@@ -87,6 +94,8 @@ function SettingsContent() {
 
   function applySavedUser(response: { user: User }) {
     if (authUser) setUser({ ...authUser, ...response.user });
+    setAvatarUploadId("");
+    setAvatarPreview("");
     queryClient.invalidateQueries({ queryKey: ["me-settings"] });
   }
 
@@ -292,6 +301,7 @@ function SettingsContent() {
   function clearAvatar() {
     if (avatarPreview) URL.revokeObjectURL(avatarPreview);
     setAvatarPreview("");
+    setAvatarUploadId("");
     setProfile((current) => ({ ...current, avatarUrl: "" }));
     setProfileMessage(t("settings.avatar.deleteNotice"));
   }

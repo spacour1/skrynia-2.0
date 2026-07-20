@@ -16,6 +16,7 @@ import { sendTelegramMessage, type TelegramButton } from "../../common/telegram-
 import { normalizeLocale } from "../../i18n/config.js";
 import { t } from "../../i18n/t.js";
 import { recoverStaleDisputeResolutions } from "../disputes/dispute-resolution.service.js";
+import { cleanupTemporaryStorageObjects } from "../storage/storage.service.js";
 
 export type MarketplaceJobName =
   | "escrow_release"
@@ -25,7 +26,8 @@ export type MarketplaceJobName =
   // Historical name for "notification_delivery" — some already-enqueued/repeatable jobs may
   // still carry it, so the worker keeps handling it rather than dropping them on deploy.
   | "email_notification"
-  | "reconciliation_daily";
+  | "reconciliation_daily"
+  | "storage_cleanup";
 
 export type MarketplaceJobPayload = {
   orderId?: string;
@@ -104,6 +106,7 @@ export async function scheduleRecurringJobs() {
   await enqueueJob("escrow_release", {}, { jobId: "escrow-release-sweep", repeat: { every: 60_000 } });
   await enqueueJob("dispute_timer", {}, { jobId: "dispute-timer-sweep", repeat: { every: 5 * 60_000 } });
   await enqueueJob("reconciliation_daily", {}, { jobId: "reconciliation-daily", repeat: { pattern: "0 3 * * *" } });
+  await enqueueJob("storage_cleanup", {}, { jobId: "storage-cleanup", repeat: { every: 60 * 60_000 } });
 }
 
 async function processEscrowRelease(orderId?: string) {
@@ -335,6 +338,7 @@ export function startJobWorker() {
       if (job.name === "payout") await processPayout(job.data.userId);
       if (job.name === "notification_delivery" || job.name === "email_notification") await processNotificationDelivery(job.data);
       if (job.name === "reconciliation_daily") await processReconciliationDaily();
+      if (job.name === "storage_cleanup") await cleanupTemporaryStorageObjects();
     },
     { connection: redis, concurrency: 5 }
   );

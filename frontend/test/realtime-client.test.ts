@@ -200,8 +200,7 @@ test("message acknowledgement moves delivery from sending to sent", async () => 
     type: "message",
     clientMessageId: "9cb21d6e-8d4d-4f78-82b0-94ac91a057e0",
     conversationId: "b774a996-e3d9-47c4-8918-8281d8eff2f9",
-    body: "hello",
-    attachmentId: null
+    body: "hello"
   });
 
   const saved = { id: "server-message-id", body: "hello" };

@@ -375,8 +375,8 @@ const incomingMessageSchema = z.discriminatedUnion("type", [
     clientMessageId: z.string().uuid(),
     conversationId: z.string().uuid(),
     body: z.string().trim().min(1).max(3000),
-    attachmentId: z.null().optional(),
-    attachmentUrl: z.string().url().max(2048).optional()
+    attachmentUploadId: z.string().uuid().optional(),
+    attachmentUrl: z.undefined().optional()
   })
 ]);
 
@@ -544,7 +544,7 @@ export function attachWebSocketServer(server: http.Server) {
               senderId: client.userId!,
               clientMessageId: msg.clientMessageId,
               body: msg.body,
-              attachmentUrl: msg.attachmentUrl
+              attachmentUploadId: msg.attachmentUploadId
             });
             // ACK is queued before the room broadcast so the sender can replace its
             // optimistic row before receiving the normal conversation event.

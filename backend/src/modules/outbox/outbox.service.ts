@@ -12,7 +12,8 @@ export const domainEventTypes = [
   "product.blocked",
   "user.banned",
   "user.warned",
-  "user.muted"
+  "user.muted",
+  "storage.delete"
 ] as const;
 
 export type DomainEventType = (typeof domainEventTypes)[number];

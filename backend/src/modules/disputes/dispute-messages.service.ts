@@ -1,4 +1,8 @@
 import type { AuthUser } from "../../common/types.js";
+import {
+  attachStorageObject,
+  buildMediaUrl
+} from "../storage/storage.service.js";
 import { badRequest, forbidden, notFound } from "../../common/errors.js";
 import { inTx, pool, type DbClient } from "../../db/pool.js";
 
@@ -136,7 +140,7 @@ export async function createDisputeMessage(input: {
   disputeId: string;
   user: AuthUser;
   body: string;
-  attachmentUrl?: string | null;
+  attachmentUploadId?: string;
 }) {
   const messageId = await inTx(async (client) => {
     const dispute = await getDisputeAccess(client, input.disputeId, input.user, true);
@@ -144,15 +148,27 @@ export async function createDisputeMessage(input: {
       throw badRequest("Resolved disputes do not accept new messages");
     }
 
+    const attachment = input.attachmentUploadId
+      ? await attachStorageObject(client, {
+          uploadId: input.attachmentUploadId,
+          ownerId: input.user.id,
+          purpose: "chat_attachment"
+        })
+      : null;
+
     const inserted = await client.query<{ id: string }>(
-      `insert into dispute_messages(dispute_id, author_id, body, attachment_url)
-       values ($1, $2, $3, $4)
+      `insert into dispute_messages(
+         dispute_id, author_id, body, attachment_url,
+         attachment_storage_object_id
+       )
+       values ($1, $2, $3, $4, $5)
        returning id`,
       [
         input.disputeId,
         input.user.id,
         input.body.trim(),
-        input.attachmentUrl ?? null
+        attachment ? buildMediaUrl(attachment.objectKey) : null,
+        attachment?.id ?? null
       ]
     );
     return inserted.rows[0].id;

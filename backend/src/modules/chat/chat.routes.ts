@@ -22,7 +22,8 @@ const router = Router();
 const sendMessageSchema = z.object({
   clientMessageId: z.string().uuid(),
   body: z.string().min(1).max(3000),
-  attachmentUrl: z.string().url().optional()
+  attachmentUploadId: z.string().uuid().optional(),
+  attachmentUrl: z.undefined().optional()
 });
 
 const listMessagesQuerySchema = z.object({
@@ -155,7 +156,7 @@ router.post(
       senderId: req.user.id,
       clientMessageId: input.clientMessageId,
       body: input.body,
-      attachmentUrl: input.attachmentUrl
+      attachmentUploadId: input.attachmentUploadId
     });
     if (!result.created) res.setHeader("Idempotency-Replayed", "true");
     res.status(result.created ? 201 : 200).json({ message: result.message });

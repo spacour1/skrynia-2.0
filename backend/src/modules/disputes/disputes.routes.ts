@@ -31,7 +31,8 @@ const resolveSchema = z.object({
 
 const messageSchema = z.object({
   body: z.string().trim().min(1).max(5000),
-  attachmentUrl: z.string().url().max(2048).optional().nullable()
+  attachmentUploadId: z.string().uuid().optional(),
+  attachmentUrl: z.undefined().optional()
 });
 
 const hideMessageSchema = z.object({
@@ -180,7 +181,7 @@ router.post(
       disputeId: id,
       user: req.user,
       body: input.body,
-      attachmentUrl: input.attachmentUrl
+      attachmentUploadId: input.attachmentUploadId
     });
     res.status(201).json({ message });
   })

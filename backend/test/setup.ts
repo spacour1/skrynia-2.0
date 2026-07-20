@@ -38,3 +38,6 @@ process.env.EMAIL_VERIFICATION_RATE_LIMIT_PER_IP_15MIN = "100000";
 process.env.PASSWORD_RESET_RATE_LIMIT_PER_15MIN = "100000";
 process.env.PASSWORD_RESET_RATE_LIMIT_PER_IP_15MIN = "100000";
 process.env.WEBHOOK_RATE_LIMIT_PER_MIN = "100000";
+process.env.STORAGE_DRIVER = "local";
+process.env.LOCAL_UPLOAD_DIR = "uploads/test";
+process.env.MEDIA_PUBLIC_BASE_URL = "http://localhost:4000/uploads";

@@ -113,7 +113,7 @@ export function SellerHero({
                 <input
                   ref={avatarInputRef}
                   type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  accept="image/png,image/jpeg,image/webp"
                   className="hidden"
                   aria-label={t("seller.avatar")}
                   onChange={(event) => {

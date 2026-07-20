@@ -12,6 +12,7 @@ import { PreviewCard } from "./_components/PreviewCard";
 import { SalesTips } from "./_components/SalesTips";
 import { SellerListings } from "./_components/SellerListings";
 import type { EditProduct, LotForm, SelectedMedia, SellerProduct } from "./_components/types";
+import { uploadImage } from "@/lib/storage";
 
 export default function SellerProductsPage() {
   return (
@@ -118,14 +119,14 @@ function SellerProductsContent() {
 
   async function uploadMedia() {
     const urls: string[] = [];
+    const uploadIds: string[] = [];
     for (const item of media) {
-      const body = new FormData();
-      body.append("file", item.file);
-      const uploaded = await apiFetch<{ url: string }>("/storage/upload", { method: "POST", body });
+      const uploaded = await uploadImage(item.file, "product_media");
       urls.push(uploaded.url);
+      uploadIds.push(uploaded.id);
     }
     setUploadedUrls(urls);
-    return urls;
+    return uploadIds;
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -138,7 +139,7 @@ function SellerProductsContent() {
     }
 
     try {
-      const mediaUrls = await uploadMedia();
+      const mediaUploadIds = await uploadMedia();
       await create.mutateAsync({
         title: form.title,
         description: form.description,
@@ -161,7 +162,7 @@ function SellerProductsContent() {
           deliveryTime: form.deliveryTime,
           autoDelivery: form.autoDelivery
         },
-        media: mediaUrls
+        mediaUploadIds
       });
       media.forEach((item) => URL.revokeObjectURL(item.previewUrl));
       setMedia([]);

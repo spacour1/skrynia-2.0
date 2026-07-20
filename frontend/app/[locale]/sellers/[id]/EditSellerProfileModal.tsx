@@ -5,6 +5,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Loader2, X } from "lucide-react";
 import { apiFetch, type User } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { uploadImage } from "@/lib/storage";
 
 export function EditSellerProfileModal({
   user,
@@ -23,6 +24,7 @@ export function EditSellerProfileModal({
   const settings = user.settings ?? {};
   const [displayName, setDisplayName] = useState(user.displayName);
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl ?? "");
+  const [avatarUploadId, setAvatarUploadId] = useState("");
   const [tagline, setTagline] = useState(readString(settings.sellerTagline) || readString(settings.headline));
   const [description, setDescription] = useState(readString(settings.profileDescription) || readString(settings.sellerDescription));
   const [specialty, setSpecialty] = useState(readString(settings.specialty));
@@ -40,11 +42,12 @@ export function EditSellerProfileModal({
 
   const uploadAvatar = useMutation({
     mutationFn: async (file: File) => {
-      const body = new FormData();
-      body.append("file", file);
-      return apiFetch<{ url: string }>("/storage/upload", { method: "POST", body });
+      return uploadImage(file, "avatar");
     },
-    onSuccess: ({ url }) => setAvatarUrl(url),
+    onSuccess: (upload) => {
+      setAvatarUrl(upload.url);
+      setAvatarUploadId(upload.id);
+    },
     onError: (err) => setFormError(err instanceof Error ? err.message : t("seller.profileSaveFailed"))
   });
 
@@ -54,7 +57,11 @@ export function EditSellerProfileModal({
         method: "PATCH",
         body: JSON.stringify({
           displayName: displayName.trim(),
-          avatarUrl: avatarUrl || "",
+          ...(avatarUploadId
+            ? { avatarUploadId }
+            : !avatarUrl
+              ? { clearAvatar: true }
+              : {}),
           settings: {
             ...settings,
             sellerTagline: tagline.trim(),
@@ -110,7 +117,7 @@ export function EditSellerProfileModal({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif"
+              accept="image/png,image/jpeg,image/webp"
               className="hidden"
               aria-label={t("seller.avatar")}
               onChange={(event) => pickAvatar(event.target.files?.[0])}

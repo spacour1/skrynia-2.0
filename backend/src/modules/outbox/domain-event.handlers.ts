@@ -21,6 +21,7 @@ import {
   createNotification,
   type NotificationInput
 } from "../notifications/notifications.service.js";
+import { deleteStorageObject } from "../storage/storage.service.js";
 import type { DomainOutboxEvent } from "./outbox.service.js";
 
 const baseOrderPayload = z.object({
@@ -87,6 +88,10 @@ const userWarnedPayload = userModerationPayload.extend({
 const userMutedPayload = userModerationPayload.extend({
   reason: z.string().nullable(),
   mutedUntil: z.string().datetime()
+});
+
+const storageDeletePayload = z.object({
+  storageObjectId: z.string().uuid()
 });
 
 function notificationEventKey(
@@ -478,6 +483,11 @@ async function handleUserMuted(event: DomainOutboxEvent) {
   });
 }
 
+async function handleStorageDelete(event: DomainOutboxEvent) {
+  const payload = storageDeletePayload.parse(event.payload);
+  await deleteStorageObject(payload.storageObjectId);
+}
+
 export async function handleDomainEvent(event: DomainOutboxEvent): Promise<void> {
   switch (event.eventType) {
     case "order.created":
@@ -504,6 +514,8 @@ export async function handleDomainEvent(event: DomainOutboxEvent): Promise<void>
       return handleUserWarned(event);
     case "user.muted":
       return handleUserMuted(event);
+    case "storage.delete":
+      return handleStorageDelete(event);
     default: {
       const exhaustive: never = event.eventType;
       throw new Error(`Unsupported domain event: ${exhaustive}`);

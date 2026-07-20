@@ -33,6 +33,14 @@ const schema = z.object({
   STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
   LOCAL_UPLOAD_DIR: z.string().default("uploads"),
   PUBLIC_BACKEND_URL: z.string().default("http://localhost:4000"),
+  MEDIA_PUBLIC_BASE_URL: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().url().optional()
+  ),
+  STORAGE_TEMP_TTL_HOURS: z.coerce.number().int().min(1).default(24),
+  STORAGE_MAX_IMAGE_WIDTH: z.coerce.number().int().min(1).default(8192),
+  STORAGE_MAX_IMAGE_HEIGHT: z.coerce.number().int().min(1).default(8192),
+  STORAGE_MAX_IMAGE_PIXELS: z.coerce.number().int().min(1).default(40_000_000),
   SENTRY_DSN: z.string().optional(),
   SENTRY_RELEASE: z.string().optional(),
   SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).optional(),
@@ -121,6 +129,13 @@ const schema = z.object({
       message: "PRESENCE_HEARTBEAT_MS must be less than half of PRESENCE_TTL_MS"
     });
   }
+  if (Boolean(value.S3_ACCESS_KEY_ID) !== Boolean(value.S3_SECRET_ACCESS_KEY)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["S3_ACCESS_KEY_ID"],
+      message: "S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be configured together"
+    });
+  }
   if (value.NODE_ENV !== "production") return;
 
   if (value.JWT_SECRET === "dev-secret-change-me-for-production") {
@@ -147,6 +162,23 @@ const schema = z.object({
     });
   }
 
+  if (value.STORAGE_DRIVER === "s3") {
+    if (!value.S3_BUCKET) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["S3_BUCKET"],
+        message: "S3_BUCKET is required when STORAGE_DRIVER=s3"
+      });
+    }
+    if (!value.MEDIA_PUBLIC_BASE_URL) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["MEDIA_PUBLIC_BASE_URL"],
+        message: "MEDIA_PUBLIC_BASE_URL is required when STORAGE_DRIVER=s3"
+      });
+    }
+  }
+
   const hasLiqpay = Boolean(value.LIQPAY_PUBLIC_KEY && value.LIQPAY_PRIVATE_KEY);
   const hasMonobank = Boolean(value.MONOBANK_TOKEN);
   const hasWayforpay = Boolean(value.WAYFORPAY_MERCHANT_ACCOUNT && value.WAYFORPAY_MERCHANT_SECRET_KEY);
@@ -169,6 +201,9 @@ const parsedEnv = schema.parse(process.env);
 // effective ceilings while operators migrate to the separated limiter configuration.
 export const env = {
   ...parsedEnv,
+  MEDIA_PUBLIC_BASE_URL:
+    parsedEnv.MEDIA_PUBLIC_BASE_URL ??
+    `${parsedEnv.PUBLIC_BACKEND_URL.replace(/\/+$/, "")}/uploads`,
   OUTBOX_WORKER_ENABLED:
     parsedEnv.OUTBOX_WORKER_ENABLED ?? parsedEnv.JOB_WORKER_ENABLED,
   ANONYMOUS_WRITE_RATE_LIMIT_PER_MIN:

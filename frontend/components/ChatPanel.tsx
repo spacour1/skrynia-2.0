@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Flag, FileText, ImageIcon, Loader2, Paperclip, RefreshCw, Send, X } from "lucide-react";
+import { Flag, ImageIcon, Loader2, Paperclip, RefreshCw, Send, X } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
@@ -10,6 +10,7 @@ import { RealtimeMessageError } from "@/lib/realtime-client";
 import { useRealtime, useRealtimeStatus } from "@/components/RealtimeProvider";
 import { EmailNotVerifiedNotice } from "./EmailNotVerifiedNotice";
 import { ReportModal } from "./ReportModal";
+import { uploadImage } from "@/lib/storage";
 
 type Message = {
   id: string;
@@ -17,6 +18,7 @@ type Message = {
   senderDisplayName?: string;
   body: string;
   attachmentUrl?: string;
+  attachmentUploadId?: string;
   createdAt: string;
   conversationId?: string;
   clientMessageId?: string;
@@ -55,6 +57,7 @@ export function ChatPanel({
   const [reportMessageId, setReportMessageId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [attachmentUrl, setAttachmentUrl] = useState("");
+  const [attachmentUploadId, setAttachmentUploadId] = useState("");
   const [attachmentLabel, setAttachmentLabel] = useState("");
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
@@ -134,10 +137,9 @@ export function ChatPanel({
     setUploading(true);
     setError("");
     try {
-      const body = new FormData();
-      body.append("file", file);
-      const uploaded = await apiFetch<{ url: string }>("/storage/upload", { method: "POST", body });
+      const uploaded = await uploadImage(file, "chat_attachment");
       setAttachmentUrl(uploaded.url);
+      setAttachmentUploadId(uploaded.id);
       setAttachmentLabel(file.name);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Upload failed");
@@ -153,7 +155,7 @@ export function ChatPanel({
     const form = new FormData(formElement);
     const typed = String(form.get("body") ?? "").trim();
     const attachment = attachmentUrl.trim();
-    if (!typed && !attachment) return;
+    if (!typed && !attachmentUploadId) return;
     const body = typed || `Attached file: ${attachmentLabel || "file"}`;
     let targetConversationId = activeConversationId;
     let pendingClientMessageId: string | undefined;
@@ -182,6 +184,7 @@ export function ChatPanel({
         senderDisplayName: user?.displayName,
         body,
         attachmentUrl: attachment || undefined,
+        attachmentUploadId: attachmentUploadId || undefined,
         createdAt: new Date().toISOString(),
         deliveryStatus: "sending",
         retryable: true
@@ -195,6 +198,7 @@ export function ChatPanel({
 
       formElement.reset();
       setAttachmentUrl("");
+      setAttachmentUploadId("");
       setAttachmentLabel("");
     } catch (sendError) {
       if (pendingClientMessageId) {
@@ -227,7 +231,7 @@ export function ChatPanel({
         clientMessageId: message.clientMessageId,
         conversationId: conversation,
         body: message.body,
-        attachmentUrl: message.attachmentUrl
+        attachmentUploadId: message.attachmentUploadId
       })) as Message;
     }
 
@@ -238,7 +242,7 @@ export function ChatPanel({
         body: JSON.stringify({
           clientMessageId: message.clientMessageId,
           body: message.body,
-          attachmentUrl: message.attachmentUrl
+          attachmentUploadId: message.attachmentUploadId
         })
       }
     );
@@ -318,7 +322,7 @@ export function ChatPanel({
               <div className={`max-w-[78%] ${mine ? "items-end" : "items-start"} flex flex-col`}>
                 <div className={`rounded-2xl px-4 py-3 ${isCompact ? "" : "shadow-soft"} ${mine ? "rounded-br-md bg-brand text-stone-950" : `${isCompact ? "bg-panel/80" : "border border-line bg-card"} rounded-bl-md text-ink`}`}>
                   <p className="whitespace-pre-wrap text-sm leading-6">{message.body}</p>
-                  {message.attachmentUrl ? <AttachmentPreview url={message.attachmentUrl} mine={mine} /> : null}
+                  {message.attachmentUrl ? <AttachmentPreview url={message.attachmentUrl} /> : null}
                 </div>
                 <p className="mt-1 flex items-center gap-2 px-1 text-xs text-muted">
                   {message.senderDisplayName ?? (mine ? "You" : t("messages.participant"))} · {new Date(message.createdAt).toLocaleString(language)}
@@ -385,16 +389,16 @@ export function ChatPanel({
         {attachmentUrl ? (
           <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-brand/30 bg-brand/10 px-3 py-2 text-sm">
             <span className="inline-flex min-w-0 items-center gap-2 font-bold text-brand">
-              {isImage(attachmentUrl) ? <ImageIcon className="h-4 w-4 shrink-0" /> : <FileText className="h-4 w-4 shrink-0" />}
+              <ImageIcon className="h-4 w-4 shrink-0" />
               <span className="truncate">{attachmentLabel || "Attachment ready"}</span>
             </span>
-            <button type="button" className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-card hover:text-ink" onClick={() => { setAttachmentUrl(""); setAttachmentLabel(""); }}>
+            <button type="button" className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-card hover:text-ink" onClick={() => { setAttachmentUrl(""); setAttachmentUploadId(""); setAttachmentLabel(""); }}>
               <X className="h-4 w-4" />
             </button>
           </div>
         ) : null}
         <div className="flex items-end gap-2">
-          <input ref={fileRef} className="hidden" type="file" accept="image/*,.txt,.pdf,.doc,.docx,.rtf" onChange={uploadAttachment} />
+          <input ref={fileRef} className="hidden" type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadAttachment} />
           <button
             className={`${isCompact ? "h-10 w-10 rounded-lg border-0 bg-panel/70" : "h-12 w-12 rounded-xl border border-line bg-panel"} grid shrink-0 place-items-center text-muted transition hover:border-brand/60 hover:text-brand disabled:cursor-not-allowed disabled:opacity-60`}
             type="button"
@@ -428,30 +432,12 @@ export function ChatPanel({
   );
 }
 
-function AttachmentPreview({ url, mine }: { url: string; mine: boolean }) {
-  if (isImage(url)) {
-    return (
-      <a className="mt-3 block overflow-hidden rounded-xl border border-black/10 bg-black/10" href={url} target="_blank" rel="noreferrer">
-        <img className="max-h-72 w-full object-cover" src={url} alt="" />
-      </a>
-    );
-  }
-
+function AttachmentPreview({ url }: { url: string }) {
   return (
-    <a
-      className={`mt-3 flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-bold ${mine ? "bg-stone-950/10 text-stone-950" : "bg-panel text-brand"}`}
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-    >
-      <FileText className="h-4 w-4" />
-      Open attached document
+    <a className="mt-3 block overflow-hidden rounded-xl border border-black/10 bg-black/10" href={url} target="_blank" rel="noreferrer">
+      <img className="max-h-72 w-full object-cover" src={url} alt="" />
     </a>
   );
-}
-
-function isImage(url: string) {
-  return /\.(png|jpe?g|gif|webp|avif)$/i.test(url.split("?")[0] ?? "");
 }
 
 function isRetryable(error: unknown) {

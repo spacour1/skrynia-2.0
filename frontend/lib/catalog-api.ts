@@ -1,4 +1,8 @@
 import { apiFetch } from "./api";
+import {
+  attachCatalogAsset,
+  uploadImage as createStorageUpload
+} from "./storage";
 
 export type CatalogStatus = "draft" | "active" | "hidden" | "archived" | "deleted";
 
@@ -159,10 +163,9 @@ export const catalogApi = {
     seoDescription?: string;
   }) => apiFetch<{ item: AdminCatalogItem }>("/admin/catalog/items", { method: "POST", body: JSON.stringify(input) }),
 
-  uploadImage: (file: File) => {
-    const body = new FormData();
-    body.append("file", file);
-    return apiFetch<{ url: string }>("/storage/upload", { method: "POST", body });
+  uploadImage: async (file: File) => {
+    const upload = await createStorageUpload(file, "catalog_asset");
+    return attachCatalogAsset(upload.id);
   },
   updateItem: (id: string, input: Record<string, unknown>) =>
     apiFetch<{ item: AdminCatalogItem }>(`/admin/catalog/items/${id}`, { method: "PATCH", body: JSON.stringify(input) }),

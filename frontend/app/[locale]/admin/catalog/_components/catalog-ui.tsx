@@ -73,8 +73,8 @@ export function Toggle({ label, hint, checked, onChange }: { label: string; hint
 
 /**
  * Single admin image slot: drag-and-drop or click to pick, uploads through the shared
- * /storage/upload service (JPEG/PNG/WEBP/GIF, magic-byte checked server-side), stores the
- * returned URL via onChange. Never touches base64 - only the hosted URL is persisted.
+ * owned storage flow (JPEG/PNG/WEBP, decoded and re-encoded server-side), then attaches
+ * the catalog asset before exposing its hosted URL to the form.
  */
 export function ImageSlot({
   label,
@@ -98,7 +98,7 @@ export function ImageSlot({
   async function upload(file: File | undefined) {
     if (!file) return;
     setError(null);
-    if (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type)) {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
       setError(t("adminCatalog.images.badType"));
       return;
     }
@@ -160,7 +160,7 @@ export function ImageSlot({
       <input
         ref={inputRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp,image/gif"
+        accept="image/jpeg,image/png,image/webp"
         className="hidden"
         onChange={(event) => {
           upload(event.target.files?.[0]);

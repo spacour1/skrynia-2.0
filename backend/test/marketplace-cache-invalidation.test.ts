@@ -163,7 +163,12 @@ describe("marketplace cache invalidation", () => {
     const seller = await verifiedSellerClient();
     const admin = await adminClient();
     const mediaUrl = `https://cdn.test/${randomUUID()}.webp`;
-    const productId = await createListing(seller, await anyCategoryId(), { media: [mediaUrl] });
+    const productId = await createListing(seller, await anyCategoryId());
+    await pool.query(
+      `insert into product_media(product_id, url, sort_order)
+       values ($1, $2, 0)`,
+      [productId, mediaUrl]
+    );
     const media = await pool.query<{ id: string }>(
       `select id from product_media where product_id = $1`,
       [productId]

@@ -1,7 +1,7 @@
 import { Router, type Response } from "express";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
-import { pool } from "../../db/pool.js";
+import { inTx, pool } from "../../db/pool.js";
 import { asyncHandler, badRequest, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
@@ -29,7 +29,11 @@ import {
   regenerateTwoFactorBackupCodes,
   setupTwoFactor
 } from "../auth/twofa.service.js";
-import { deleteStoredFile } from "../storage/storage.routes.js";
+import {
+  attachStorageObject,
+  buildMediaUrl,
+  enqueueStorageDeletion
+} from "../storage/storage.service.js";
 import { locales } from "../../i18n/config.js";
 import { getRequestLocale } from "../../i18n/t.js";
 import { attachCardMetadata } from "../marketplace/marketplace.helpers.js";
@@ -45,12 +49,31 @@ const router = Router();
 const updateMeSchema = z.object({
   displayName: z.string().min(2).max(80).optional(),
   email: z.string().email().optional(),
-  avatarUrl: z.string().url().or(z.literal("")).optional().nullable(),
+  avatarUploadId: z.string().uuid().optional(),
+  clearAvatar: z.boolean().optional(),
+  sellerBannerUploadId: z.string().uuid().optional(),
+  clearSellerBanner: z.boolean().optional(),
+  avatarUrl: z.undefined().optional(),
   pushEnabled: z.coerce.boolean().optional(),
   // twoFactorEnabled is intentionally NOT settable here - it used to be a bare client-writable
   // flag with no actual login-time check behind it ("fake 2FA"). It can only flip on/off
   // through /me/2fa/enable and /me/2fa/disable, which require a real confirmed TOTP code.
   settings: z.record(z.string(), z.unknown()).optional()
+}).superRefine((value, ctx) => {
+  if (value.avatarUploadId && value.clearAvatar) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["avatarUploadId"],
+      message: "Cannot upload and clear the avatar in one request"
+    });
+  }
+  if (value.sellerBannerUploadId && value.clearSellerBanner) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["sellerBannerUploadId"],
+      message: "Cannot upload and clear the seller banner in one request"
+    });
+  }
 });
 
 const changePasswordSchema = z.object({
@@ -102,37 +125,113 @@ router.patch(
       if (exists.rows[0]) throw badRequest("Email is already used");
     }
 
-    const avatarCleared = input.avatarUrl === "";
-    const previousAvatar = await pool.query(`select avatar_url as "avatarUrl" from users where id = $1`, [req.user.id]);
-    const previousAvatarUrl: string | null = previousAvatar.rows[0]?.avatarUrl ?? null;
+    const user = await inTx(async (client) => {
+      const currentResult = await client.query<{
+        avatarStorageObjectId: string | null;
+        sellerBannerStorageObjectId: string | null;
+        settings: Record<string, unknown>;
+      }>(
+        `select avatar_storage_object_id as "avatarStorageObjectId",
+                seller_banner_storage_object_id as "sellerBannerStorageObjectId",
+                settings
+         from users
+         where id = $1
+         for update`,
+        [req.user.id]
+      );
+      const current = currentResult.rows[0];
+      if (!current) throw notFound("User not found");
 
-    const result = await pool.query(
-      `update users
-       set display_name = coalesce($2, display_name),
-           email = coalesce($3, email),
-           avatar_url = case when $8 then null else coalesce($4, avatar_url) end,
-           push_enabled = coalesce($5, push_enabled),
-           settings = coalesce($6, settings),
-           email_verified_at = case when $7 then null else email_verified_at end,
-           updated_at = now()
-       where id = $1
-       returning id, email, display_name as "displayName", role,
-                 avatar_url as "avatarUrl", push_enabled as "pushEnabled",
-                 two_factor_enabled as "twoFactorEnabled", settings,
-                 (email_verified_at is not null or telegram_id is not null) as "emailVerified",
-                 phone, (phone_verified_at is not null) as "phoneVerified"`,
-      [
-        req.user.id,
-        input.displayName,
-        input.email?.toLowerCase(),
-        avatarCleared ? null : input.avatarUrl,
-        input.pushEnabled,
-        input.settings,
-        emailChanged,
-        avatarCleared
-      ]
-    );
-    const user = result.rows[0];
+      const avatar = input.avatarUploadId
+        ? await attachStorageObject(client, {
+            uploadId: input.avatarUploadId,
+            ownerId: req.user.id,
+            purpose: "avatar"
+          })
+        : null;
+      const banner = input.sellerBannerUploadId
+        ? await attachStorageObject(client, {
+            uploadId: input.sellerBannerUploadId,
+            ownerId: req.user.id,
+            purpose: "avatar"
+          })
+        : null;
+
+      const settings = input.settings
+        ? { ...input.settings }
+        : { ...current.settings };
+      const currentBannerUrl = current.settings.sellerBannerUrl;
+      if (banner) {
+        settings.sellerBannerUrl = buildMediaUrl(banner.objectKey);
+      } else if (input.clearSellerBanner) {
+        delete settings.sellerBannerUrl;
+      } else if (currentBannerUrl !== undefined) {
+        settings.sellerBannerUrl = currentBannerUrl;
+      } else {
+        delete settings.sellerBannerUrl;
+      }
+
+      const updated = await client.query(
+        `update users
+         set display_name = coalesce($2, display_name),
+             email = coalesce($3, email),
+             avatar_url = case
+               when $4 then null
+               when $5::text is not null then $5
+               else avatar_url
+             end,
+             avatar_storage_object_id = case
+               when $4 then null
+               when $6::uuid is not null then $6
+               else avatar_storage_object_id
+             end,
+             seller_banner_storage_object_id = case
+               when $7 then null
+               when $8::uuid is not null then $8
+               else seller_banner_storage_object_id
+             end,
+             push_enabled = coalesce($9, push_enabled),
+             settings = $10,
+             email_verified_at = case when $11 then null else email_verified_at end,
+             updated_at = now()
+         where id = $1
+         returning id, email, display_name as "displayName", role,
+                   avatar_url as "avatarUrl", push_enabled as "pushEnabled",
+                   two_factor_enabled as "twoFactorEnabled", settings,
+                   (email_verified_at is not null or telegram_id is not null) as "emailVerified",
+                   phone, (phone_verified_at is not null) as "phoneVerified"`,
+        [
+          req.user.id,
+          input.displayName,
+          input.email?.toLowerCase(),
+          Boolean(input.clearAvatar),
+          avatar ? buildMediaUrl(avatar.objectKey) : null,
+          avatar?.id ?? null,
+          Boolean(input.clearSellerBanner),
+          banner?.id ?? null,
+          input.pushEnabled,
+          settings,
+          emailChanged
+        ]
+      );
+
+      if (
+        current.avatarStorageObjectId &&
+        (avatar || input.clearAvatar)
+      ) {
+        await enqueueStorageDeletion(client, current.avatarStorageObjectId);
+      }
+      if (
+        current.sellerBannerStorageObjectId &&
+        (banner || input.clearSellerBanner)
+      ) {
+        await enqueueStorageDeletion(
+          client,
+          current.sellerBannerStorageObjectId
+        );
+      }
+      return updated.rows[0];
+    });
     if (emailChanged) {
       fireAndForget(
         createAndSendVerificationEmail(user, getRequestLocale(req)).then((created) => created.sendPromise),
@@ -147,9 +246,6 @@ router.patch(
         params: { newEmail: user.email },
         emailOverride: req.user.email
       });
-    }
-    if (previousAvatarUrl && previousAvatarUrl !== user.avatarUrl) {
-      fireAndForget(deleteStoredFile(previousAvatarUrl), "avatar_cleanup_failed");
     }
     res.json({ user });
   })

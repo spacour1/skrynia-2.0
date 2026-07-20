@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type pg from "pg";
 import { z } from "zod";
 import { inTx, pool, type DbClient } from "../../db/pool.js";
 import { ApiError, asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
@@ -14,6 +15,11 @@ import {
   invalidateProductCaches,
   type ProductCacheContext
 } from "./marketplace-cache.service.js";
+import {
+  attachStorageObject,
+  buildMediaUrl,
+  enqueueStorageDeletion
+} from "../storage/storage.service.js";
 
 const router = Router();
 
@@ -35,7 +41,13 @@ const productSchema = z.object({
   platform: z.string().max(80).optional().nullable(),
   deliveryTemplate: z.string().max(5000).optional().nullable(),
   metadata: z.record(z.string(), z.unknown()).optional().default({}),
-  media: z.array(z.string().url()).max(10).optional()
+  mediaUploadIds: z
+    .array(z.string().uuid())
+    .max(10)
+    .refine((ids) => new Set(ids).size === ids.length, "Upload IDs must be unique")
+    .optional(),
+  // The legacy URL contract is deliberately rejected instead of silently stripping it.
+  media: z.undefined().optional()
 });
 
 router.get(
@@ -72,18 +84,50 @@ router.get(
 // Always called inside the same transaction as the product row change: a failure between
 // the delete and the insert must roll the whole operation back, never leave a listing
 // stripped of its media.
-async function replaceProductMedia(client: DbClient, productId: string, urls: string[]) {
-  await client.query(`delete from product_media where product_id = $1`, [productId]);
-  if (!urls.length) return;
-  const values: unknown[] = [productId];
-  const rows = urls.map((url, index) => {
-    values.push(url, index);
-    return `($1, $${values.length - 1}, $${values.length})`;
-  });
-  await client.query(
-    `insert into product_media(product_id, url, sort_order) values ${rows.join(", ")}`,
-    values
+async function replaceProductMedia(
+  client: pg.PoolClient,
+  productId: string,
+  uploadIds: string[],
+  ownerId: string
+) {
+  const previous = await client.query<{ storageObjectId: string | null }>(
+    `select storage_object_id as "storageObjectId"
+     from product_media
+     where product_id = $1
+     for update`,
+    [productId]
   );
+
+  const objects = [];
+  for (const uploadId of uploadIds) {
+    objects.push(
+      await attachStorageObject(client, {
+        uploadId,
+        ownerId,
+        purpose: "product_media"
+      })
+    );
+  }
+
+  await client.query(`delete from product_media where product_id = $1`, [productId]);
+  if (objects.length) {
+    const values: unknown[] = [productId];
+    const rows = objects.map((object, index) => {
+      values.push(buildMediaUrl(object.objectKey), index, object.id);
+      return `($1, $${values.length - 2}, $${values.length - 1}, $${values.length})`;
+    });
+    await client.query(
+      `insert into product_media(product_id, url, sort_order, storage_object_id)
+       values ${rows.join(", ")}`,
+      values
+    );
+  }
+
+  for (const old of previous.rows) {
+    if (old.storageObjectId) {
+      await enqueueStorageDeletion(client, old.storageObjectId);
+    }
+  }
 }
 
 type Categorization = {
@@ -183,7 +227,14 @@ router.post(
           schemaVersion
         ]
       );
-      if (input.media?.length) await replaceProductMedia(client, result.rows[0].id, input.media);
+      if (input.mediaUploadIds?.length) {
+        await replaceProductMedia(
+          client,
+          result.rows[0].id,
+          input.mediaUploadIds,
+          req.user.id
+        );
+      }
       return { productId: result.rows[0].id as string, categorization };
     });
     await invalidateProductCaches({
@@ -343,7 +394,14 @@ router.patch(
         );
         context = updated.rows[0];
       }
-      if (input.media !== undefined) await replaceProductMedia(client, id, input.media);
+      if (input.mediaUploadIds !== undefined) {
+        await replaceProductMedia(
+          client,
+          id,
+          input.mediaUploadIds,
+          req.user.id
+        );
+      }
       return { existingProduct, updatedProduct: context };
     });
     await invalidateProductCacheBatch([result.existingProduct, result.updatedProduct]);

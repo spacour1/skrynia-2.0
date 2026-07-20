@@ -5,6 +5,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Loader2, X } from "lucide-react";
 import { apiFetch, type User } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { uploadImage } from "@/lib/storage";
 
 export function EditSellerBannerModal({
   currentBannerUrl,
@@ -47,10 +48,17 @@ export function EditSellerBannerModal({
   }
 
   const save = useMutation({
-    mutationFn: async (bannerUrl: string) =>
+    mutationFn: async (input: { uploadId?: string; clear?: boolean }) =>
       apiFetch<{ user: User }>("/users/me", {
         method: "PATCH",
-        body: JSON.stringify({ settings: { ...(settings ?? {}), sellerBannerUrl: bannerUrl } })
+        body: JSON.stringify({
+          settings: settings ?? {},
+          ...(input.uploadId
+            ? { sellerBannerUploadId: input.uploadId }
+            : input.clear
+              ? { clearSellerBanner: true }
+              : {})
+        })
       }),
     onSuccess: ({ user: updated }) => onSaved(updated),
     onError: (err) => setFormError(err instanceof Error ? err.message : t("seller.bannerSaveFailed"))
@@ -58,11 +66,9 @@ export function EditSellerBannerModal({
 
   const upload = useMutation({
     mutationFn: async (picked: File) => {
-      const body = new FormData();
-      body.append("file", picked);
-      return apiFetch<{ url: string }>("/storage/upload", { method: "POST", body });
+      return uploadImage(picked, "avatar");
     },
-    onSuccess: ({ url }) => save.mutate(url),
+    onSuccess: (uploaded) => save.mutate({ uploadId: uploaded.id }),
     onError: (err) => setFormError(err instanceof Error ? err.message : t("seller.bannerSaveFailed"))
   });
 
@@ -74,7 +80,7 @@ export function EditSellerBannerModal({
 
   function removeBanner() {
     setFormError("");
-    save.mutate("");
+    save.mutate({ clear: true });
   }
 
   const pending = save.isPending || upload.isPending;
@@ -100,7 +106,7 @@ export function EditSellerBannerModal({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/png,image/jpeg,image/webp,image/gif"
+          accept="image/png,image/jpeg,image/webp"
           className="hidden"
           aria-label={t("seller.uploadImage")}
           onChange={(event) => pickFile(event.target.files?.[0])}

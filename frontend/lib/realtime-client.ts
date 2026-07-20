@@ -17,7 +17,7 @@ export type RealtimeMessageInput = {
   clientMessageId: string;
   conversationId: string;
   body: string;
-  attachmentUrl?: string;
+  attachmentUploadId?: string;
 };
 
 type TimerHandle = ReturnType<typeof setTimeout>;
@@ -190,8 +190,9 @@ export class RealtimeClient {
             clientMessageId: input.clientMessageId,
             conversationId: input.conversationId,
             body: input.body,
-            attachmentId: null,
-            ...(input.attachmentUrl ? { attachmentUrl: input.attachmentUrl } : {})
+            ...(input.attachmentUploadId
+              ? { attachmentUploadId: input.attachmentUploadId }
+              : {})
           })
         );
       } catch {

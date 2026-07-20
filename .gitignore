@@ -2,6 +2,7 @@ node_modules/
 .next/
 dist/
 uploads/
+test-uploads/
 
 .env
 .env.local

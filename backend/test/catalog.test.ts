@@ -609,7 +609,7 @@ describe("product section/schema consistency", () => {
       sectionId: sectionB.section.id,
       title: "Must roll back",
       metadata: { region: "APAC" },
-      media: ["https://cdn.test/should-not-persist.webp"]
+      mediaUploadIds: [randomUUID()]
     });
 
     expect(response.status).toBe(400);

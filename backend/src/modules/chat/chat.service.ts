@@ -6,6 +6,10 @@ import type { TranslateParams } from "../../i18n/t.js";
 import { broadcastConversation, isUserOnline } from "./ws.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
 import {
+  attachStorageObject,
+  buildMediaUrl
+} from "../storage/storage.service.js";
+import {
   createSystemMessage,
   getConversationIdForOrder,
   SYSTEM_SENDER_DISPLAY_NAME
@@ -23,6 +27,7 @@ export type Message = {
   senderDisplayName: string;
   body: string;
   attachmentUrl: string | null;
+  attachmentUploadId?: string | null;
   createdAt: string;
   hidden?: boolean;
   kind?: "user" | "system";
@@ -206,7 +211,7 @@ type IdempotentSendMessageInput = {
   senderId: string;
   clientMessageId: string;
   body: string;
-  attachmentUrl?: string;
+  attachmentUploadId?: string;
 };
 
 export type SendMessageResult = {
@@ -225,6 +230,7 @@ async function findMessageByClientId(
             m.client_message_id as "clientMessageId",
             u.display_name as "senderDisplayName",
             m.body, m.attachment_url as "attachmentUrl",
+            m.attachment_storage_object_id as "attachmentUploadId",
             m.created_at as "createdAt"
      from messages m
      join users u on u.id = m.sender_id
@@ -242,7 +248,8 @@ function verifyMessageReplay(
   if (
     existing.conversationId !== input.conversationId ||
     existing.body !== body ||
-    (existing.attachmentUrl ?? null) !== (input.attachmentUrl ?? null)
+    (existing.attachmentUploadId ?? null) !==
+      (input.attachmentUploadId ?? null)
   ) {
     throw new ApiError(
       409,
@@ -269,24 +276,47 @@ export async function sendMessageIdempotently(
   await assertCanSendMessage(input.conversationId, input.senderId);
 
   return inTx(async (client) => {
+    await client.query(
+      `select pg_advisory_xact_lock(hashtextextended($1, 0))`,
+      [`message:${input.senderId}:${input.clientMessageId}`]
+    );
+    const lockedReplay = await findMessageByClientId(
+      client,
+      input.senderId,
+      input.clientMessageId
+    );
+    if (lockedReplay) return verifyMessageReplay(lockedReplay, input, body);
+
+    const attachment = input.attachmentUploadId
+      ? await attachStorageObject(client, {
+          uploadId: input.attachmentUploadId,
+          ownerId: input.senderId,
+          purpose: "chat_attachment"
+        })
+      : null;
+
     const result = await client.query(
       `insert into messages(
-         conversation_id, sender_id, client_message_id, body, attachment_url
+         conversation_id, sender_id, client_message_id, body, attachment_url,
+         attachment_storage_object_id
        )
-       values ($1, $2, $3, $4, $5)
+       values ($1, $2, $3, $4, $5, $6)
        on conflict (sender_id, client_message_id)
          where client_message_id is not null
        do nothing
        returning id, conversation_id as "conversationId", sender_id as "senderId",
                  client_message_id as "clientMessageId",
                  (select display_name from users where id = $2) as "senderDisplayName",
-                 body, attachment_url as "attachmentUrl", created_at as "createdAt"`,
+                 body, attachment_url as "attachmentUrl",
+                 attachment_storage_object_id as "attachmentUploadId",
+                 created_at as "createdAt"`,
       [
         input.conversationId,
         input.senderId,
         input.clientMessageId,
         body,
-        input.attachmentUrl ?? null
+        attachment ? buildMediaUrl(attachment.objectKey) : null,
+        attachment?.id ?? null
       ]
     );
     const message = result.rows[0] as Message | undefined;

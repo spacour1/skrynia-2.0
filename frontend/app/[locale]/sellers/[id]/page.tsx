@@ -7,6 +7,7 @@ import { apiFetch, type Product, type User } from "@/lib/api";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
 import { showAppToast } from "@/lib/toast-events";
+import { uploadImage } from "@/lib/storage";
 import { EditSellerBannerModal } from "./EditSellerBannerModal";
 import { EditSellerProfileModal } from "./EditSellerProfileModal";
 import { SellerHero } from "./SellerHero";
@@ -132,12 +133,10 @@ export default function SellerPage({ params }: { params: { id: string } }) {
 
   const avatarUpload = useMutation({
     mutationFn: async (file: File) => {
-      const body = new FormData();
-      body.append("file", file);
-      const uploaded = await apiFetch<{ url: string }>("/storage/upload", { method: "POST", body });
+      const uploaded = await uploadImage(file, "avatar");
       const updated = await apiFetch<{ user: User }>("/users/me", {
         method: "PATCH",
-        body: JSON.stringify({ avatarUrl: uploaded.url })
+        body: JSON.stringify({ avatarUploadId: uploaded.id })
       });
       return updated.user;
     },

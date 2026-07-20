@@ -66,6 +66,9 @@ export async function lockEscrow(
   providerName: PaymentProviderName,
   externalReference?: string
 ) {
+  // maxAttempts: 1 - this transaction calls provider.capture() (an external payment
+  // side effect) while holding the row lock; an automatic retry would repeat that
+  // call. The payment provider path keeps its own idempotency key instead.
   const result = await inSerializableTx(async (client) => {
     const orderResult = await client.query<OrderRow>(`select * from orders where id = $1 for update`, [orderId]);
     const order = orderResult.rows[0];
@@ -169,7 +172,7 @@ export async function lockEscrow(
     await cacheDelPattern(`orders:${order.buyer_id}:*`);
     await cacheDelPattern(`orders:${order.seller_id}:*`);
     return { order: updated.rows[0], productContext: product as ProductCacheContext };
-  });
+  }, { maxAttempts: 1 });
   await invalidateProductCaches(result.productContext);
   return result.order;
 }

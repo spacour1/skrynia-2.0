@@ -70,6 +70,18 @@ export const rateLimitHitsTotal = new client.Counter({
   help: "Requests rejected by rate limiting (429)"
 });
 
+export const transactionRetryTotal = new client.Counter({
+  name: "marketplace_transaction_retry_total",
+  help: "SERIALIZABLE transaction attempts retried after 40001/40P01",
+  labelNames: ["code"] as const
+});
+
+export const transactionRetryExhaustedTotal = new client.Counter({
+  name: "marketplace_transaction_retry_exhausted_total",
+  help: "SERIALIZABLE transactions that failed after exhausting retries",
+  labelNames: ["code"] as const
+});
+
 export async function metricsText() {
   return client.register.metrics();
 }

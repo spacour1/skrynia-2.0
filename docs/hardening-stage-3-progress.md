@@ -182,3 +182,45 @@ security change, simulating a Redis failure, and the session must still die:
 | Migration on test DB | PASS (37 total) |
 | `npx vitest run test/session-versioning.test.ts` | PASS, 7/7 |
 | `cd backend && npm test` | PASS, 254/254 in 26 files |
+
+## Stage 4: transaction retries
+
+Status: complete.
+
+Commit: `fix(db): retry serialization failures and deadlocks`
+
+### Confirmed defect
+
+`inSerializableTx` propagated PostgreSQL `40001` (serialization_failure) and `40P01`
+(deadlock_detected) directly to the HTTP error handler, returning 500 for outcomes
+PostgreSQL documents as "retry the transaction". Escrow release, refunds, and wallet
+operations run under SERIALIZABLE and could randomly fail under concurrency.
+
+### Implementation
+
+- `inSerializableTx(fn, options?)` now retries only `40001`/`40P01`: 3 attempts by
+  default, exponential cap with full jitter (20ms base, 200ms max), rollback always
+  happens before the retry (each attempt is a fresh transaction), structured warn
+  logs, and `marketplace_transaction_retry_total` /
+  `marketplace_transaction_retry_exhausted_total{code}` counters.
+- Side-effect audit of every SERIALIZABLE caller: wallet topup/withdraw/adjust/reject
+  and escrow release/refund contain only DB writes plus idempotent cache deletes —
+  safe to retry. `lockEscrow` calls `provider.capture()` inside the transaction, so it
+  explicitly passes `{ maxAttempts: 1 }` (no retry; the provider path keeps its own
+  idempotency key). No payment-provider behavior changed.
+
+### Regression coverage (`backend/test/tx-retry.test.ts`, 7 tests)
+
+40001 retried then succeeds; 40P01 retried; arbitrary error not retried; exhaustion
+after maxAttempts rethrows; successful callback runs once; the failed attempt's
+insert is rolled back before the retry (verified through a unique-constraint probe);
+`maxAttempts: 1` opts out.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `npx vitest run test/tx-retry.test.ts` | PASS, 7/7 |
+| `npx vitest run test/ledger.test.ts test/test-payments.test.ts` | PASS, 16/16 |
+| `cd backend && npm test` | PASS, 261/261 in 27 files |

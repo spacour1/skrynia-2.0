@@ -110,10 +110,19 @@ NODE_ENV=production
 DATABASE_URL=postgres://user:pass@host:5432/db
 REDIS_URL=redis://host:6379
 JWT_SECRET=<min-24-char-random-secret>
+TWO_FACTOR_ENCRYPTION_KEY=<64-hex-chars — unique 32-byte AES key>
+TWO_FACTOR_ENCRYPTION_KEY_VERSION=1
 METRICS_USER=metrics
 METRICS_PASSWORD=<strong-password>
 FRONTEND_URL=https://your-domain.example
 PUBLIC_BACKEND_URL=https://api.your-domain.example
+```
+
+`TWO_FACTOR_ENCRYPTION_KEY` encrypts stored 2FA secrets (AES-256-GCM). The backend
+refuses to boot in production when it is unset or equals the dev default. Generate one:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
 ---
@@ -205,6 +214,7 @@ S3_SECRET_ACCESS_KEY=<iam-secret>
 ## Production deployment checklist
 
 - [ ] `JWT_SECRET` is a unique ≥32-char random string
+- [ ] `TWO_FACTOR_ENCRYPTION_KEY` is a unique 64-hex (32-byte) key, not the dev default
 - [ ] `METRICS_PASSWORD` is a unique strong password
 - [ ] `DATABASE_URL` points to managed PostgreSQL, not local Docker
 - [ ] `REDIS_URL` is set and reachable

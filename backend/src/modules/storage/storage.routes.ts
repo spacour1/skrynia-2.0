@@ -3,6 +3,7 @@ import multer from "multer";
 import { z } from "zod";
 import { asyncHandler, badRequest, forbidden } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
+import { uploadRateLimit } from "../../common/middleware/security.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { inTx } from "../../db/pool.js";
 import {
@@ -36,6 +37,7 @@ const purposeSchema = z.enum(storagePurposes);
 router.post(
   "/upload",
   authenticate,
+  uploadRateLimit,
   upload.single("file"),
   asyncHandler(async (req: AuthedRequest, res) => {
     if (!req.file) throw badRequest("No file uploaded");

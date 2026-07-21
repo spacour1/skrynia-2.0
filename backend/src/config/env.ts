@@ -41,6 +41,15 @@ const schema = z.object({
   STORAGE_MAX_IMAGE_WIDTH: z.coerce.number().int().min(1).default(8192),
   STORAGE_MAX_IMAGE_HEIGHT: z.coerce.number().int().min(1).default(8192),
   STORAGE_MAX_IMAGE_PIXELS: z.coerce.number().int().min(1).default(40_000_000),
+  // Per-user abuse ceilings for uploads. Bytes are counted over stored (processed)
+  // objects; the daily window also counts objects that were later deleted.
+  STORAGE_DAILY_UPLOAD_BYTES_PER_USER: z.coerce.number().int().min(1).default(104_857_600),
+  STORAGE_TOTAL_QUOTA_BYTES_PER_USER: z.coerce.number().int().min(1).default(524_288_000),
+  STORAGE_MAX_OBJECTS_PER_PURPOSE: z.coerce.number().int().min(1).default(500),
+  STORAGE_MAX_CONCURRENT_PROCESSING: z.coerce.number().int().min(1).default(4),
+  STORAGE_PROCESSING_QUEUE_LIMIT: z.coerce.number().int().min(1).default(16),
+  UPLOAD_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(20),
+  UPLOAD_RATE_LIMIT_PER_IP: z.coerce.number().int().min(1).default(60),
   SENTRY_DSN: z.string().optional(),
   SENTRY_RELEASE: z.string().optional(),
   SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).optional(),

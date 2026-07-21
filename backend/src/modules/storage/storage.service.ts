@@ -7,8 +7,12 @@ import {
 } from "@aws-sdk/client-s3";
 import { nanoid } from "nanoid";
 import sharp from "sharp";
-import { badRequest, forbidden, notFound } from "../../common/errors.js";
+import { ApiError, badRequest, forbidden, notFound, serviceUnavailable } from "../../common/errors.js";
 import { logger } from "../../common/logger.js";
+import {
+  storageProcessingActive,
+  storageQuotaRejectedTotal
+} from "../../common/metrics.js";
 import { env } from "../../config/env.js";
 import { inTx, pool, type DbClient } from "../../db/pool.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
@@ -228,35 +232,130 @@ function newObjectKey(
   return `${purpose}/${ownerId}/${nanoid(24)}.${extension}`;
 }
 
+/**
+ * Bounded semaphore around Sharp work: each decode/re-encode holds the full image in
+ * memory, so unbounded parallel uploads are a memory/CPU amplification vector. Beyond
+ * the running limit a short queue absorbs bursts; past that the request is refused
+ * instead of buffering unbounded work.
+ */
+export class ProcessingSemaphore {
+  private active = 0;
+  private readonly waiting: Array<() => void> = [];
+
+  constructor(
+    private readonly limit: number,
+    private readonly queueLimit: number
+  ) {}
+
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.active >= this.limit) {
+      if (this.waiting.length >= this.queueLimit) {
+        throw serviceUnavailable("Image processing is busy, try again shortly");
+      }
+      await new Promise<void>((resolve) => this.waiting.push(resolve));
+    }
+    this.active += 1;
+    storageProcessingActive.set(this.active);
+    try {
+      return await fn();
+    } finally {
+      this.active -= 1;
+      storageProcessingActive.set(this.active);
+      this.waiting.shift()?.();
+    }
+  }
+}
+
+const processingSemaphore = new ProcessingSemaphore(
+  env.STORAGE_MAX_CONCURRENT_PROCESSING,
+  env.STORAGE_PROCESSING_QUEUE_LIMIT
+);
+
+function quotaError(reason: string, message: string) {
+  storageQuotaRejectedTotal.labels(reason).inc();
+  return new ApiError(400, message, "storage_quota_exceeded");
+}
+
+/**
+ * Live bytes (temporary + attached) drive the total quota; the daily window counts
+ * everything created in the last 24h - deleting an object never refunds the day's
+ * processing budget. Temporary objects count everywhere, so attach never needs a
+ * byte re-check.
+ */
+async function assertUploadQuota(
+  client: DbClient,
+  ownerId: string,
+  purpose: StoragePurpose,
+  addBytes: number
+) {
+  const usage = await client.query<{
+    totalBytes: string;
+    dailyBytes: string;
+    purposeCount: number;
+  }>(
+    `select
+       coalesce(sum(size_bytes) filter (where status in ('temporary', 'attached')), 0)::bigint as "totalBytes",
+       coalesce(sum(size_bytes) filter (where created_at > now() - interval '24 hours'), 0)::bigint as "dailyBytes",
+       (count(*) filter (where purpose = $2 and status in ('temporary', 'attached')))::int as "purposeCount"
+     from storage_objects
+     where owner_id = $1`,
+    [ownerId, purpose]
+  );
+  const { totalBytes, dailyBytes, purposeCount } = usage.rows[0];
+
+  if (Number(dailyBytes) + addBytes > env.STORAGE_DAILY_UPLOAD_BYTES_PER_USER) {
+    throw quotaError("daily_bytes", "Daily upload limit reached, try again tomorrow");
+  }
+  if (Number(totalBytes) + addBytes > env.STORAGE_TOTAL_QUOTA_BYTES_PER_USER) {
+    throw quotaError("total_bytes", "Storage quota exceeded, delete unused media first");
+  }
+  if (purposeCount >= env.STORAGE_MAX_OBJECTS_PER_PURPOSE) {
+    throw quotaError("purpose_count", "Too many stored objects of this type");
+  }
+}
+
 export async function createStorageUpload(input: {
   ownerId: string;
   purpose: StoragePurpose;
   file: Pick<Express.Multer.File, "buffer" | "mimetype">;
 }): Promise<StorageObject> {
-  const image = await processUploadedImage(input.file);
+  // Cheap pre-check with the raw upload size before any Sharp work; the raw buffer
+  // bounds the processed size closely enough to refuse obvious over-quota traffic
+  // without paying for decoding.
+  await assertUploadQuota(pool, input.ownerId, input.purpose, input.file.buffer.length);
+
+  const image = await processingSemaphore.run(() => processUploadedImage(input.file));
   const storageDriver = env.STORAGE_DRIVER;
   const objectKey = newObjectKey(input.ownerId, input.purpose);
 
   await writePhysicalObject(storageDriver, objectKey, image);
   try {
-    const inserted = await pool.query<StorageObject>(
-      `insert into storage_objects(
-         owner_id, object_key, storage_driver, purpose, mime_type,
-         size_bytes, width, height
-       )
-       values ($1, $2, $3, $4, $5, $6, $7, $8)
-       returning ${storageObjectColumns}`,
-      [
-        input.ownerId,
-        objectKey,
-        storageDriver,
-        input.purpose,
-        image.mimeType,
-        image.buffer.length,
-        image.width,
-        image.height
-      ]
-    );
+    const inserted = await inTx(async (client) => {
+      // Serialize per-owner: the advisory lock makes the quota re-check plus insert
+      // atomic, so parallel uploads cannot each pass the check and overshoot together.
+      await client.query(`select pg_advisory_xact_lock(hashtextextended('storage_quota:' || $1, 0))`, [
+        input.ownerId
+      ]);
+      await assertUploadQuota(client, input.ownerId, input.purpose, image.buffer.length);
+      return client.query<StorageObject>(
+        `insert into storage_objects(
+           owner_id, object_key, storage_driver, purpose, mime_type,
+           size_bytes, width, height
+         )
+         values ($1, $2, $3, $4, $5, $6, $7, $8)
+         returning ${storageObjectColumns}`,
+        [
+          input.ownerId,
+          objectKey,
+          storageDriver,
+          input.purpose,
+          image.mimeType,
+          image.buffer.length,
+          image.width,
+          image.height
+        ]
+      );
+    });
     return inserted.rows[0];
   } catch (error) {
     try {

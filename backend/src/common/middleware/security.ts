@@ -63,6 +63,7 @@ const DEDICATED_WRITE_PATHS = new Set([
   "/users/me/2fa/disable",
   "/users/me/2fa/backup-codes/regenerate",
   "/users/me/telegram/connect",
+  "/storage/upload",
   "/payments/liqpay/callback",
   "/payments/monobank/callback",
   "/payments/wayforpay/callback",
@@ -292,6 +293,22 @@ export const credentialRateLimit = composeMiddleware(
     15 * 60 * 1000,
     env.CREDENTIAL_RATE_LIMIT_PER_15MIN
   )
+);
+
+// Uploads get their own buckets: image processing is CPU/memory-heavy, so the general
+// authenticated-write ceiling is too generous for it, and upload floods must not
+// exhaust unrelated write budgets.
+export const uploadRateLimit = composeMiddleware(
+  subjectLimiter(
+    "rl:upload:user:",
+    60 * 1000,
+    env.UPLOAD_RATE_LIMIT_PER_MIN,
+    (req) => {
+      const userId = requestUserId(req);
+      return userId ? `user:${userId}` : undefined;
+    }
+  ),
+  ipLimiter("rl:upload:ip:", 60 * 1000, env.UPLOAD_RATE_LIMIT_PER_IP)
 );
 
 export const wsTicketRateLimit = composeMiddleware(

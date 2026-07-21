@@ -70,6 +70,17 @@ export const rateLimitHitsTotal = new client.Counter({
   help: "Requests rejected by rate limiting (429)"
 });
 
+export const storageQuotaRejectedTotal = new client.Counter({
+  name: "marketplace_storage_quota_rejected_total",
+  help: "Uploads rejected by per-user storage quotas",
+  labelNames: ["reason"] as const
+});
+
+export const storageProcessingActive = new client.Gauge({
+  name: "marketplace_storage_processing_active",
+  help: "Image processing tasks currently running"
+});
+
 export const transactionRetryTotal = new client.Counter({
   name: "marketplace_transaction_retry_total",
   help: "SERIALIZABLE transaction attempts retried after 40001/40P01",

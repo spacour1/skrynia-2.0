@@ -224,3 +224,59 @@ insert is rolled back before the retry (verified through a unique-constraint pro
 | `npx vitest run test/tx-retry.test.ts` | PASS, 7/7 |
 | `npx vitest run test/ledger.test.ts test/test-payments.test.ts` | PASS, 16/16 |
 | `cd backend && npm test` | PASS, 261/261 in 27 files |
+
+## Stage 5.1: upload quotas and processing bounds
+
+Status: complete.
+
+Commit: `fix(storage): enforce quotas and durable deletion`
+
+### Confirmed defect
+
+Uploads had a per-file cap (8 MB multer limit) and image validation, but nothing
+stopped one authenticated user from uploading thousands of files: no upload rate
+limiter, no per-user daily byte budget, no total storage quota, no per-purpose object
+ceiling, and unbounded parallel Sharp processing (each task holds the full decoded
+image in memory). Durable deletion and temporary-TTL cleanup were NOT missing — the
+outbox `storage.delete` event (committed with the business change) plus the
+`storage_cleanup` job already implement the durable-intent flow, so that part of the
+plan required no change.
+
+### Implementation
+
+- New env-config ceilings (all with production compose passthrough and example-env
+  entries): `STORAGE_DAILY_UPLOAD_BYTES_PER_USER` (100 MB),
+  `STORAGE_TOTAL_QUOTA_BYTES_PER_USER` (500 MB), `STORAGE_MAX_OBJECTS_PER_PURPOSE`
+  (500), `STORAGE_MAX_CONCURRENT_PROCESSING` (4), `STORAGE_PROCESSING_QUEUE_LIMIT`
+  (16), `UPLOAD_RATE_LIMIT_PER_MIN` (20/user), `UPLOAD_RATE_LIMIT_PER_IP` (60).
+- Dedicated `uploadRateLimit` (user bucket + IP ceiling) on `/storage/upload`,
+  registered in the dedicated-write-paths set so upload floods cannot drain general
+  write budgets. 429s carry `Retry-After` like every other limiter.
+- Quota rules: live bytes (temporary + attached) count toward the total quota; the
+  daily window counts everything created in 24h (deleting does not refund the day's
+  processing budget); per-purpose counts live objects. Temporary objects count
+  everywhere, so attach needs no byte re-check.
+- Cheap pre-check with the raw upload size runs before any Sharp work; the definitive
+  re-check plus insert run under a per-owner `pg_advisory_xact_lock`, so parallel
+  uploads serialize and cannot jointly overshoot.
+- `ProcessingSemaphore` bounds concurrent Sharp work with a short queue; past the
+  queue the request gets 503 instead of buffering unbounded memory. Metrics:
+  `storage_quota_rejected_total{reason}`, `storage_processing_active`.
+
+### Regression coverage (storage-quotas 7 + upload-rate-limit 1)
+
+Daily quota rejection; deleted objects still consume the daily window; total-quota
+rejection; deletion frees the total quota; per-purpose ceiling (other purpose
+unaffected); 4 parallel uploads at ceiling-1 produce exactly 1 success and the DB
+count equals the ceiling; semaphore bounds concurrency and 503s past the queue;
+per-user 429 with integer Retry-After leaves another user unaffected and creates no
+row.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `npx vitest run test/storage-quotas.test.ts test/upload-rate-limit.test.ts` | PASS, 8/8 |
+| `npx vitest run test/storage.test.ts test/product-media-transaction.test.ts` | PASS, 10/10 |
+| `cd backend && npm test` | PASS, 269/269 in 29 files |

@@ -59,13 +59,23 @@ export function parseRefreshRecord(value: string): RefreshRecord | null {
   return value ? { userId: value, sessionVersion: 1 } : null;
 }
 
-export async function issueSession(userId: string, role: Role) {
+export async function issueSession(
+  userId: string,
+  role: Role,
+  options: { expectedSessionVersion?: number } = {}
+) {
   const versionResult = await pool.query<{ sessionVersion: number }>(
     `select session_version as "sessionVersion" from users where id = $1`,
     [userId]
   );
   const sessionVersion = versionResult.rows[0]?.sessionVersion;
   if (sessionVersion === undefined) throw unauthorized("Account is unavailable");
+  if (
+    options.expectedSessionVersion !== undefined &&
+    options.expectedSessionVersion !== sessionVersion
+  ) {
+    throw unauthorized("Authentication state changed, log in again");
+  }
 
   const jti = nanoid();
   const csrfToken = nanoid(32);
@@ -103,19 +113,60 @@ const TWO_FACTOR_PENDING_TTL_MIN = 5;
 
 /**
  * A short-lived bridge token between "password verified" and "session issued" for 2FA
- * accounts. Deliberately not a real session: no jti, not tracked in Redis, can't be used
- * for anything except POST /auth/2fa/verify, and expires in minutes rather than days.
+ * accounts. It is not a real session and cannot authenticate any other endpoint. The
+ * nonce is tracked in Redis so a successfully verified bridge cannot be replayed, while
+ * the session version prevents a bridge issued before logout-all/password reset from
+ * minting a fresh session afterwards.
  */
-export function issueTwoFactorPendingToken(userId: string): string {
-  return jwt.sign({ sub: userId, purpose: "2fa_pending" }, env.JWT_SECRET as Secret, {
+export async function issueTwoFactorPendingToken(
+  userId: string,
+  sessionVersion: number
+): Promise<string> {
+  const redis = getRedis();
+  if (!redis) throw serviceUnavailable("Authentication is unavailable right now, try again shortly");
+  const jti = nanoid();
+  await redis.set(`2fa_pending:${jti}`, "1", "EX", TWO_FACTOR_PENDING_TTL_MIN * 60);
+  return jwt.sign(
+    { sub: userId, purpose: "2fa_pending", sv: sessionVersion, jti },
+    env.JWT_SECRET as Secret,
+    {
     expiresIn: `${TWO_FACTOR_PENDING_TTL_MIN}m` as SignOptions["expiresIn"]
-  });
+    }
+  );
 }
 
-export function verifyTwoFactorPendingToken(token: string): string {
-  const payload = jwt.verify(token, env.JWT_SECRET as Secret) as { sub: string; purpose?: string };
-  if (payload.purpose !== "2fa_pending") throw new Error("Invalid token purpose");
-  return payload.sub;
+export type TwoFactorPendingIdentity = {
+  userId: string;
+  sessionVersion: number;
+  jti: string;
+};
+
+export function verifyTwoFactorPendingToken(token: string): TwoFactorPendingIdentity {
+  const payload = jwt.verify(token, env.JWT_SECRET as Secret) as {
+    sub?: unknown;
+    purpose?: unknown;
+    sv?: unknown;
+    jti?: unknown;
+  };
+  if (
+    payload.purpose !== "2fa_pending" ||
+    typeof payload.sub !== "string" ||
+    typeof payload.sv !== "number" ||
+    typeof payload.jti !== "string"
+  ) {
+    throw new Error("Invalid two-factor token");
+  }
+  return {
+    userId: payload.sub,
+    sessionVersion: payload.sv,
+    jti: payload.jti
+  };
+}
+
+export async function consumeTwoFactorPendingToken(jti: string): Promise<boolean> {
+  const redis = getRedis();
+  if (!redis) throw serviceUnavailable("Authentication is unavailable right now, try again shortly");
+  return (await redis.getdel(`2fa_pending:${jti}`)) !== null;
 }
 
 export async function revokeRefreshToken(token: string | undefined, userId?: string) {

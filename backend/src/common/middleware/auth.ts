@@ -66,6 +66,7 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
     const { sessionVersion: _sessionVersion, ...user } = row;
     req.user = user;
     req.sessionId = payload.jti;
+    req.sessionVersion = row.sessionVersion;
     req.rateLimitUserId = user.id;
     req.rateLimitSessionId = payload.jti;
     Sentry.setUser({ id: user.id, segment: user.role });
@@ -99,6 +100,7 @@ export const authenticateOptional: RequestHandler = async (req, _res, next) => {
       const { sessionVersion: _sessionVersion, ...user } = row;
       req.user = user;
       req.sessionId = payload.jti;
+      req.sessionVersion = row.sessionVersion;
       req.rateLimitUserId = user.id;
       req.rateLimitSessionId = payload.jti;
     }

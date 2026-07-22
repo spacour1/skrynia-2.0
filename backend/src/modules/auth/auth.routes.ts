@@ -17,6 +17,7 @@ import type { AuthedRequest } from "../../common/types.js";
 import { verifyTelegramAuth } from "./telegram.service.js";
 import {
   bumpSessionVersion,
+  consumeTwoFactorPendingToken,
   hashRefreshToken,
   issueSession,
   issueTwoFactorPendingToken,
@@ -123,6 +124,7 @@ router.post(
     const result = await pool.query(
       `select id, email, password_hash, display_name as "displayName", role, is_banned as "isBanned",
               two_factor_enabled as "twoFactorEnabled",
+              session_version as "sessionVersion",
               (email_verified_at is not null or telegram_id is not null) as "emailVerified"
        from users where email = $1`,
       [input.email.toLowerCase()]
@@ -135,13 +137,14 @@ router.post(
     if (!ok) throw badRequest("Invalid email or password");
 
     if (user.twoFactorEnabled) {
-      const twoFactorToken = issueTwoFactorPendingToken(user.id);
+      const twoFactorToken = await issueTwoFactorPendingToken(user.id, user.sessionVersion);
       return res.json({ twoFactorRequired: true, twoFactorToken });
     }
 
     const session = await issueSession(user.id, user.role);
     setAuthCookies(res, session);
     delete user.password_hash;
+    delete user.sessionVersion;
     res.json({ user });
   })
 );
@@ -151,28 +154,38 @@ router.post(
   credentialRateLimit,
   asyncHandler(async (req, res) => {
     const input = twoFactorVerifySchema.parse(req.body);
-    let userId: string;
+    let pendingIdentity: ReturnType<typeof verifyTwoFactorPendingToken>;
     try {
-      userId = verifyTwoFactorPendingToken(input.twoFactorToken);
+      pendingIdentity = verifyTwoFactorPendingToken(input.twoFactorToken);
     } catch {
       throw badRequest("Two-factor session has expired, log in again");
     }
 
     const result = await pool.query(
       `select id, email, display_name as "displayName", role, is_banned as "isBanned",
+              session_version as "sessionVersion",
               (email_verified_at is not null or telegram_id is not null) as "emailVerified"
        from users where id = $1`,
-      [userId]
+      [pendingIdentity.userId]
     );
     const user = result.rows[0];
     if (!user) throw badRequest("Account not found");
     if (user.isBanned) throw forbidden("Account is banned");
+    if (user.sessionVersion !== pendingIdentity.sessionVersion) {
+      throw badRequest("Two-factor session has expired, log in again");
+    }
 
-    const valid = await verifyTwoFactorCode(userId, input.code);
+    const valid = await verifyTwoFactorCode(pendingIdentity.userId, input.code);
     if (!valid) throw badRequest("Invalid two-factor code");
+    if (!(await consumeTwoFactorPendingToken(pendingIdentity.jti))) {
+      throw badRequest("Two-factor session has expired, log in again");
+    }
 
-    const session = await issueSession(user.id, user.role);
+    const session = await issueSession(user.id, user.role, {
+      expectedSessionVersion: pendingIdentity.sessionVersion
+    });
     setAuthCookies(res, session);
+    delete user.sessionVersion;
     res.json({ user });
   })
 );
@@ -415,6 +428,7 @@ router.post(
     const { ticket, expiresInSeconds } = await issueWsTicket({
       userId: req.user.id,
       jti: req.sessionId ?? "",
+      sessionVersion: req.sessionVersion ?? 1,
       emailVerified: req.user.emailVerified
     });
     res.status(201).json({ ticket, expiresInSeconds });

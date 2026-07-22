@@ -196,6 +196,50 @@ describe("2FA lifecycle", () => {
     await disableTwoFactor(userId, { totpCode: generateTotpCode(setup.secret) });
     expect(await getSessionVersion(userId)).toBe(3);
   });
+
+  it("rejects a pending login issued before a session-version bump", async () => {
+    const { email, password, userId } = await registerSession();
+    await pool.query(`update users set email_verified_at = now() where id = $1`, [userId]);
+    const setup = await setupTwoFactor(userId, email, {});
+    await confirmTwoFactor(userId, generateTotpCode(setup.secret));
+
+    const login = await request(app)
+      .post("/auth/login")
+      .send({ email, password })
+      .expect(200);
+    expect(login.body.twoFactorRequired).toBe(true);
+
+    await pool.query(`update users set session_version = session_version + 1 where id = $1`, [userId]);
+    const verify = await request(app)
+      .post("/auth/2fa/verify")
+      .send({
+        twoFactorToken: login.body.twoFactorToken,
+        code: generateTotpCode(setup.secret)
+      });
+    expect(verify.status).toBe(400);
+    expect(verify.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("consumes a pending login after the first successful verification", async () => {
+    const { email, password, userId } = await registerSession();
+    await pool.query(`update users set email_verified_at = now() where id = $1`, [userId]);
+    const setup = await setupTwoFactor(userId, email, {});
+    await confirmTwoFactor(userId, generateTotpCode(setup.secret));
+
+    const login = await request(app)
+      .post("/auth/login")
+      .send({ email, password })
+      .expect(200);
+    const payload = {
+      twoFactorToken: login.body.twoFactorToken,
+      code: generateTotpCode(setup.secret)
+    };
+
+    await request(app).post("/auth/2fa/verify").send(payload).expect(200);
+    const replay = await request(app).post("/auth/2fa/verify").send(payload);
+    expect(replay.status).toBe(400);
+    expect(replay.headers["set-cookie"]).toBeUndefined();
+  });
 });
 
 describe("legacy compatibility", () => {

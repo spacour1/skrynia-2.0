@@ -43,6 +43,7 @@ function readCookie(header: string | undefined, name: string): string | undefine
 type Client = WebSocket & {
   userId?: string;
   jti?: string;
+  sessionVersion?: number;
   connectionId?: string;
   emailVerified?: boolean;
   rooms?: Set<string>;
@@ -56,6 +57,7 @@ type Client = WebSocket & {
 type JwtPayload = {
   sub: string;
   jti: string;
+  sv?: number;
 };
 
 const clientsByUser = new Map<string, Set<Client>>();
@@ -64,16 +66,28 @@ const clientsByConversation = new Map<string, Set<Client>>();
 // so this must track a set, not a single client - see disconnectSession/leaveAll below.
 const clientsByJti = new Map<string, Set<Client>>();
 
-async function verifyUserAlive(userId: string) {
-  const result = await pool.query<{ id: string; isBanned: boolean; emailVerified: boolean }>(
+async function verifyUserAlive(userId: string, expectedSessionVersion?: number) {
+  const result = await pool.query<{
+    id: string;
+    isBanned: boolean;
+    emailVerified: boolean;
+    sessionVersion: number;
+  }>(
     `select id, is_banned as "isBanned",
+            session_version as "sessionVersion",
             (email_verified_at is not null or telegram_id is not null) as "emailVerified"
      from users where id = $1`,
     [userId]
   );
   const user = result.rows[0];
-  if (!user) throw new Error("Invalid user");
-  if (user.isBanned) throw new Error("Account is banned");
+  if (!user) throw new ApiError(401, "Session expired", "unauthorized");
+  if (user.isBanned) throw new ApiError(403, "Account is banned", "account_banned");
+  if (
+    expectedSessionVersion !== undefined &&
+    expectedSessionVersion !== user.sessionVersion
+  ) {
+    throw new ApiError(401, "Session expired", "unauthorized");
+  }
   return user;
 }
 
@@ -95,8 +109,14 @@ async function authenticateSocket(token: string) {
     }
   }
 
-  const user = await verifyUserAlive(payload.sub);
-  return { userId: user.id, jti: payload.jti, emailVerified: user.emailVerified };
+  const sessionVersion = payload.sv ?? 1;
+  const user = await verifyUserAlive(payload.sub, sessionVersion);
+  return {
+    userId: user.id,
+    jti: payload.jti,
+    sessionVersion,
+    emailVerified: user.emailVerified
+  };
 }
 
 /**
@@ -123,8 +143,14 @@ async function authenticateHandshake(req: http.IncomingMessage) {
         logger.warn({ error, jti: identity.jti }, "ws_session_revocation_check_failed_redis_unavailable");
       }
     }
-    const user = await verifyUserAlive(identity.userId);
-    return { userId: identity.userId, jti: identity.jti, emailVerified: user.emailVerified };
+    const sessionVersion = identity.sessionVersion ?? 1;
+    const user = await verifyUserAlive(identity.userId, sessionVersion);
+    return {
+      userId: identity.userId,
+      jti: identity.jti,
+      sessionVersion,
+      emailVerified: user.emailVerified
+    };
   }
 
   const token = readCookie(req.headers.cookie, ACCESS_COOKIE);
@@ -452,12 +478,13 @@ export function attachWebSocketServer(server: http.Server) {
     try {
       if (!isOriginAllowed(req)) throw new Error("Origin not allowed");
 
-      const { userId, jti, emailVerified } = await authenticateHandshake(req);
+      const { userId, jti, sessionVersion, emailVerified } = await authenticateHandshake(req);
       if ((clientsByUser.get(userId)?.size ?? 0) >= MAX_CONNECTIONS_PER_USER) {
         throw new Error("Too many connections");
       }
       client.userId = userId;
       client.jti = jti;
+      client.sessionVersion = sessionVersion;
       client.connectionId = randomUUID();
       client.emailVerified = emailVerified;
       client.rooms = new Set();
@@ -532,6 +559,20 @@ export function attachWebSocketServer(server: http.Server) {
 
           const msg = validated.data;
           wsMessagesTotal.labels(msg.type).inc();
+
+          // Redis/pubsub closes revoked sockets immediately in the normal case. This DB
+          // epoch check is the durable fallback: a Redis outage must not let a socket
+          // issued before password reset/logout-all keep mutating state.
+          try {
+            await verifyUserAlive(client.userId!, client.sessionVersion);
+          } catch (authError) {
+            const banned = authError instanceof ApiError && authError.status === 403;
+            client.close(
+              banned ? WS_CLOSE_USER_BANNED : WS_CLOSE_SESSION_REVOKED,
+              banned ? "Account banned" : "Session revoked"
+            );
+            return;
+          }
 
           if (msg.type === "join_conversation") {
             if (client.rooms?.has(msg.conversationId)) {

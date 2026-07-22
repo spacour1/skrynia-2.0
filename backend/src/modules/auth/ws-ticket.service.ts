@@ -18,6 +18,7 @@ const TICKET_TTL_SECONDS = 25;
 export type WsTicketIdentity = {
   userId: string;
   jti: string;
+  sessionVersion: number;
   emailVerified: boolean;
   createdAt: string;
 };

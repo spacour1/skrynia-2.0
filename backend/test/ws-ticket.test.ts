@@ -203,6 +203,18 @@ describe("ws tickets", () => {
     expect(result.code).toBe(1008);
   });
 
+  it("rejects a ticket issued before the database session epoch changed", async () => {
+    const session = await sessionFor();
+    const ticket = await getTicket(session);
+    await pool.query(`update users set session_version = session_version + 1 where id = $1`, [
+      session.userId
+    ]);
+
+    const result = await connect(`${wsUrl}?ticket=${encodeURIComponent(ticket)}`);
+    expect(result.outcome).toBe("closed");
+    expect(result.code).toBe(1008);
+  });
+
   it("rejects a browser Origin outside the allowlist even with a valid ticket", async () => {
     const session = await sessionFor();
     const ticket = await getTicket(session);
@@ -223,9 +235,33 @@ describe("ws tickets", () => {
     const result = await connect(wsUrl, { Cookie: session.cookie });
     expect(result.outcome).toBe("connected");
   });
+
+  it("rejects a cookie token issued before the database session epoch changed", async () => {
+    const session = await sessionFor();
+    await pool.query(`update users set session_version = session_version + 1 where id = $1`, [
+      session.userId
+    ]);
+
+    const result = await connect(wsUrl, { Cookie: session.cookie });
+    expect(result.outcome).toBe("closed");
+    expect(result.code).toBe(1008);
+  });
 });
 
 describe("realtime delivery and connection limits", () => {
+  it("closes an already-connected socket when the durable session epoch changes", async () => {
+    const session = await sessionFor();
+    const ticket = await getTicket(session);
+    const socket = await connectLive(`${wsUrl}?ticket=${encodeURIComponent(ticket)}`);
+    await pool.query(`update users set session_version = session_version + 1 where id = $1`, [
+      session.userId
+    ]);
+
+    const closed = waitForClose(socket);
+    socket.send(JSON.stringify({ type: "leave_conversation", conversationId: randomUUID() }));
+    expect((await closed).code).toBe(WS_CLOSE_SESSION_REVOKED);
+  });
+
   it("acknowledges a saved message with the same clientMessageId", async () => {
     const buyer = await sessionFor();
     const sellerId = await createUser();

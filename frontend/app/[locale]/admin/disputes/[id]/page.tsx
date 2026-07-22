@@ -10,14 +10,14 @@ import { useI18n } from "@/lib/i18n";
 
 type DisputeDetail = {
   id: string;
-  order_id: string;
+  orderId: string;
   status: string;
   reason: string;
   resolution?: string;
-  order_status: string;
-  amount_cents: number;
+  orderStatus: string;
+  amountCents: number;
   currency: string;
-  product_title: string;
+  productTitle: string;
 };
 
 type DisputeMessage = {
@@ -75,9 +75,9 @@ function AdminDisputeDetailContent({ params }: { params: { id: string } }) {
       <section className="app-card p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-sm text-muted">Order {dispute.order_id.slice(0, 8)}</p>
-            <h1 className="mt-1 text-xl font-semibold">{dispute.product_title}</h1>
-            <p className="mt-1 text-sm text-muted">{money(dispute.amount_cents, dispute.currency)}</p>
+            <p className="text-sm text-muted">Order {dispute.orderId.slice(0, 8)}</p>
+            <h1 className="mt-1 text-xl font-semibold">{dispute.productTitle}</h1>
+            <p className="mt-1 text-sm text-muted">{money(dispute.amountCents, dispute.currency)}</p>
           </div>
           <StatusBadge status={dispute.status} />
         </div>

@@ -40,14 +40,14 @@ function SellerSalesContent() {
     return orders.filter((order) => {
       const active = !["completed", "refunded"].includes(order.status);
       const matchesStatus = status === "all" || (status === "active" ? active : order.status === status);
-      const title = (order.productTitle ?? order.product_title ?? "").toLowerCase();
+      const title = (order.productTitle ?? "").toLowerCase();
       return matchesStatus && (!needle || title.includes(needle) || order.id.toLowerCase().includes(needle));
     });
   }, [orders, q, status]);
 
   const activeCount = orders.filter((order) => !["completed", "refunded"].includes(order.status)).length;
   const completedCount = orders.filter((order) => order.status === "completed").length;
-  const totalAmount = orders.reduce((sum, order) => sum + Number(order.amountCents ?? order.amount_cents ?? 0), 0);
+  const totalAmount = orders.reduce((sum, order) => sum + Number(order.amountCents ?? 0), 0);
   const currency = orders[0]?.currency ?? "UAH";
 
   return (
@@ -109,7 +109,7 @@ function SellerSalesContent() {
                   <span className="rounded-full bg-panel px-2.5 py-1 text-xs font-bold text-muted">#{order.id.slice(0, 8)}</span>
                 </div>
                 <Link className="mt-3 block truncate text-base font-black text-ink hover:text-brand" href={`/orders/${order.id}`}>
-                  {order.productTitle ?? order.product_title ?? "Заказ"}
+                  {order.productTitle ?? "Заказ"}
                 </Link>
                 <p className="mt-1 text-xs text-muted">Покупатель: {order.buyerDisplayName ?? "Покупатель"}</p>
               </div>
@@ -121,7 +121,7 @@ function SellerSalesContent() {
 
               <div className="rounded-lg border border-brand/25 bg-brand/10 p-3 lg:text-right">
                 <p className="text-xs font-bold uppercase text-muted">Сумма</p>
-                <p className="mt-1 text-lg font-black text-brand">{money(order.amountCents ?? order.amount_cents, order.currency)}</p>
+                <p className="mt-1 text-lg font-black text-brand">{money(order.amountCents ?? 0, order.currency)}</p>
               </div>
 
               <div className="flex gap-2 lg:justify-end">

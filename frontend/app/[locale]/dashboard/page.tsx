@@ -53,8 +53,8 @@ function DashboardContent() {
 
   const allOrders = orders.data?.orders ?? [];
   const activeOrders = allOrders.filter((order) => !["completed", "refunded"].includes(order.status));
-  const buying = allOrders.filter((order) => order.buyerId === user.id || order.buyer_id === user.id);
-  const selling = allOrders.filter((order) => order.sellerId === user.id || order.seller_id === user.id);
+  const buying = allOrders.filter((order) => order.buyerId === user.id);
+  const selling = allOrders.filter((order) => order.sellerId === user.id);
   const completed = allOrders.filter((order) => order.status === "completed").length;
   const pending = allOrders.filter((order) => order.status === "pending").length;
 
@@ -140,10 +140,10 @@ function DashboardContent() {
 }
 
 function OrderRow({ order, userId }: { order: Order; userId: string }) {
-  const isBuyer = order.buyerId === userId || order.buyer_id === userId;
+  const isBuyer = order.buyerId === userId;
   const partner = isBuyer ? order.sellerDisplayName : order.buyerDisplayName;
-  const amount = money(order.amountCents ?? order.amount_cents, order.currency);
-  const productTitle = order.productTitle ?? order.product_title ?? "Заказ";
+  const amount = money(order.amountCents ?? 0, order.currency);
+  const productTitle = order.productTitle ?? "Заказ";
 
   return (
     <article className="rounded-lg border border-line bg-surface/60 p-4 transition hover:border-brand/50 hover:bg-panel/40">

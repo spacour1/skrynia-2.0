@@ -384,3 +384,80 @@ fixed limit with no cursor. They were left unchanged in this pass to keep the di
 scoped to the two clearest defects (a truly unbounded list and a hard growth ceiling
 with no way to page past it); the same `pagination.ts` helper applies directly if
 these need the same treatment later.
+
+## Stage 6: centralize marketplace response contracts (partial)
+
+Status: complete for the two confirmed leaks; full-surface DTO/shared-package work
+deferred (see remaining constraint below).
+
+Commit: `refactor(api): centralize marketplace response contracts`
+
+### Confirmed defect
+
+`GET /orders/:id` returned `select o.*` (raw snake_case: `buyer_id`, `seller_id`,
+`amount_cents`, ...) mixed with snake_case-aliased joins (`product_title`,
+`buyer_display_name`). `GET /disputes/:id` (admin) returned `select d.*` the same
+way. `POST /disputes/:id/resolve` returned the resolution service's internal
+snake_case row and, when escrow executed, the raw `orders` row from
+`refundEscrow`/`releaseEscrow` (`returning *`) directly. The dispute-open endpoint's
+own "DTO mapper" (`participantDisputeDto`) also produced snake_case keys
+(`order_id`, `opened_by`, ...) despite being a named mapper, not a raw select.
+Confirmed proof the frontend already depended on this: `frontend/lib/api.ts`'s
+`Order` type carried every field twice (`productTitle?` / `product_title?`,
+`buyerId?` / `buyer_id?`, ...) and five pages read the snake_case fallback
+(`item.productTitle ?? item.product_title`) - the exact mixed-format anti-pattern
+the hardening task forbids.
+
+### Implementation
+
+- `GET /orders/:id`: replaced `select o.*` with explicit camelCase-aliased columns
+  (mirrors the existing `GET /orders` list style); `canSeeOrder` takes camelCase
+  fields.
+- `GET /disputes/:id` (admin): replaced `select d.*` with explicit camelCase columns,
+  matching the pattern already used by the admin list and by
+  `dispute-messages.service.ts`'s participant-facing `getDisputeAccess`.
+- `POST /disputes/:id/resolve`: added `mapAdminDisputeResolutionDto` (converts the
+  resolution service's internal `ResolutionRow` - unchanged, still snake_case as an
+  internal/private-layer type - to camelCase at the one point it crosses into an HTTP
+  response) and a new `backend/src/modules/orders/orders.dto.ts` (`mapOrderRowDto`)
+  for the raw order row `refundEscrow`/`releaseEscrow` return. Admin-only, so
+  retry/recovery fields (`resolutionOperationId`, `resolutionAttempts`,
+  `lastResolutionError`) stay in the response — only the *participant* DTO
+  (unchanged, already correct) hides those.
+- `participantDisputeDto` (open-dispute endpoint) switched from snake_case to
+  camelCase keys; no frontend consumer reads its response body, so this was
+  risk-free.
+- Frontend: `Order` type in `lib/api.ts` lost every duplicate snake_case field.
+  Updated all five consumers that read the dead fallback
+  (`orders/[id]/page.tsx`, `dashboard/page.tsx`, `orders/page.tsx`,
+  `seller/sales/page.tsx`) plus `admin/disputes/[id]/page.tsx`'s `DisputeDetail` type
+  and JSX, which had read the snake_case fields directly (no fallback at all).
+
+### Regression coverage (`backend/test/dto-contracts.test.ts`, 5 tests)
+
+Recursive `assertNoSnakeCaseKeys` (walks arrays/objects, skips `Date`) asserts zero
+snake_case keys anywhere in: `GET /orders/:id`, `GET /disputes` (list),
+`GET /disputes/:id` (detail), `POST /disputes/:id/resolve` (including the nested
+`order`), and the open-dispute participant response. Each fixture goes through the
+real `lockEscrow` so resolve actually moves money instead of faking a status column.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `npx vitest run test/dto-contracts.test.ts` | PASS, 5/5 |
+| `cd backend && npm test` | PASS, 286/286 in 32 files |
+| `cd frontend && npm run typecheck` | PASS |
+| `cd frontend && npm run i18n:check` | PASS, 0 errors, 25 baseline warnings (unchanged) |
+| `cd frontend && npm run build` | PASS |
+
+### Remaining constraint
+
+Full Stage 6 scope (a `shared/contracts/` package, DTO mappers for every
+Order/Product/Dispute/Message/Seller view, a source-scan lint rule against
+`select o.*`/`select d.*`/`select u.*`/`select p.*` in public routes) is deferred.
+This pass fixed the two endpoints with a confirmed, evidenced defect (raw snake_case
+reaching an HTTP response, with a frontend mixed-format symptom already present);
+the remaining marketplace/product/seller response shapes were not audited in this
+cycle and may still mix conventions.

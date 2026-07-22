@@ -43,7 +43,7 @@ function OrdersContent() {
     return list.filter((order) => {
       const active = !["completed", "refunded"].includes(order.status);
       const matchesStatus = status === "all" || (status === "active" ? active : order.status === status);
-      const title = (order.productTitle ?? order.product_title ?? "").toLowerCase();
+      const title = (order.productTitle ?? "").toLowerCase();
       const matchesSearch = !needle || title.includes(needle) || order.id.toLowerCase().includes(needle);
       return matchesStatus && matchesSearch;
     });
@@ -51,7 +51,7 @@ function OrdersContent() {
 
   const activeCount = list.filter((order) => !["completed", "refunded"].includes(order.status)).length;
   const completedCount = list.filter((order) => order.status === "completed").length;
-  const totalAmount = list.reduce((sum, order) => sum + Number(order.amountCents ?? order.amount_cents ?? 0), 0);
+  const totalAmount = list.reduce((sum, order) => sum + Number(order.amountCents ?? 0), 0);
   const currency = list[0]?.currency ?? "UAH";
 
   return (
@@ -117,10 +117,10 @@ function OrdersContent() {
 
 function OrderCard({ order, currentUserId }: { order: Order; currentUserId?: string }) {
   const { language, t } = useI18n();
-  const title = order.productTitle ?? order.product_title ?? t("common.order");
-  const amount = order.amountCents ?? order.amount_cents;
-  const buyerId = order.buyerId ?? order.buyer_id;
-  const sellerId = order.sellerId ?? order.seller_id;
+  const title = order.productTitle ?? t("common.order");
+  const amount = order.amountCents ?? 0;
+  const buyerId = order.buyerId;
+  const sellerId = order.sellerId;
   const role = currentUserId === buyerId ? t("orders.purchase") : currentUserId === sellerId ? t("orders.sale") : t("orders.deal");
 
   return (

@@ -146,13 +146,13 @@ export default function OrderPage({ params }: { params: { id: string } }) {
 
   const item = order.data.order;
   const events = order.data.events ?? [];
-  const buyerId = item.buyerId ?? item.buyer_id;
-  const sellerId = item.sellerId ?? item.seller_id;
-  const amount = item.amountCents ?? item.amount_cents;
+  const buyerId = item.buyerId;
+  const sellerId = item.sellerId;
+  const amount = item.amountCents ?? 0;
   const fee = item.feeCents ?? 0;
   const isBuyer = user?.id === buyerId;
   const isSeller = user?.id === sellerId;
-  const productTitle = item.productTitle ?? item.product_title ?? "Заказ";
+  const productTitle = item.productTitle ?? "Заказ";
   const activeStep = Math.max(0, statusSteps.findIndex((step) => step.key === item.status));
   const canDispute = ["paid", "in_progress", "delivered"].includes(item.status);
 
@@ -277,7 +277,7 @@ export default function OrderPage({ params }: { params: { id: string } }) {
           </div>
         </section>
 
-        {item.delivery_note ? (
+        {item.deliveryNote ? (
           <section className="app-card p-5">
             <div className="flex items-center gap-3">
               <span className="grid h-10 w-10 place-items-center rounded-lg bg-emerald-500/10 text-emerald-500">
@@ -289,7 +289,7 @@ export default function OrderPage({ params }: { params: { id: string } }) {
               </div>
             </div>
             <div className="mt-4 rounded-lg border border-line bg-panel/50 p-4">
-              <p className="whitespace-pre-wrap text-sm leading-6 text-ink">{item.delivery_note}</p>
+              <p className="whitespace-pre-wrap text-sm leading-6 text-ink">{item.deliveryNote}</p>
             </div>
           </section>
         ) : null}

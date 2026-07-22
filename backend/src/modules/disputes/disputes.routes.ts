@@ -18,7 +18,8 @@ import {
   hideDisputeMessage,
   listDisputeMessages
 } from "./dispute-messages.service.js";
-import { resolveDisputeResolution } from "./dispute-resolution.service.js";
+import { resolveDisputeResolution, type DisputeResolutionResult } from "./dispute-resolution.service.js";
+import { mapOrderRowDto, type RawOrderRow } from "../orders/orders.dto.js";
 
 const router = Router();
 
@@ -44,13 +45,13 @@ const hideMessageSchema = z.object({
 function participantDisputeDto(dispute: Record<string, unknown>) {
   return {
     id: dispute.id,
-    order_id: dispute.order_id,
-    opened_by: dispute.opened_by,
+    orderId: dispute.order_id,
+    openedBy: dispute.opened_by,
     reason: dispute.reason,
     status: dispute.status,
     resolution: dispute.resolution,
-    created_at: dispute.created_at,
-    resolved_at: dispute.resolved_at
+    createdAt: dispute.created_at,
+    resolvedAt: dispute.resolved_at
   };
 }
 
@@ -244,8 +245,16 @@ router.get(
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const dispute = await pool.query(
-      `select d.*, o.buyer_id, o.seller_id, o.amount_cents, o.currency, o.status as order_status,
-              p.title as product_title, c.id as conversation_id
+      `select d.id, d.order_id as "orderId", d.opened_by as "openedBy", d.reason, d.status,
+              d.resolution, d.resolution_decision as "resolutionDecision",
+              d.resolution_operation_id as "resolutionOperationId",
+              d.resolution_attempts as "resolutionAttempts",
+              d.last_resolution_error as "lastResolutionError",
+              d.admin_id as "adminId", d.admin_note as "adminNote",
+              d.created_at as "createdAt", d.resolved_at as "resolvedAt",
+              o.buyer_id as "buyerId", o.seller_id as "sellerId",
+              o.amount_cents as "amountCents", o.currency, o.status as "orderStatus",
+              p.title as "productTitle", c.id as "conversationId"
        from disputes d
        join orders o on o.id = d.order_id
        join products p on p.id = o.product_id
@@ -258,14 +267,41 @@ router.get(
     // Order chat lives on conversation_id, not the legacy messages.order_id column - a
     // dispute must look the conversation up by order_id first, then read messages by
     // conversation_id, the same way the regular chat endpoints do.
-    const messages = dispute.rows[0].conversation_id
-      ? await getMessages(dispute.rows[0].conversation_id, { limit: 200, viewerIsAdmin: true })
+    const messages = dispute.rows[0].conversationId
+      ? await getMessages(dispute.rows[0].conversationId, { limit: 200, viewerIsAdmin: true })
       : [];
     const disputeMessages = await listDisputeMessages(id, req.user);
 
     res.json({ dispute: dispute.rows[0], messages, disputeMessages });
   })
 );
+
+/**
+ * The resolution service's internal row is snake_case (private repository/service
+ * layer type, unchanged) - this is the one place it crosses into an HTTP response, so
+ * it goes through an explicit camelCase mapper first. Admin-only, so the retry/recovery
+ * fields are fine to include (only the participant DTO in dispute-messages.service.ts
+ * hides them).
+ */
+function mapAdminDisputeResolutionDto(dispute: DisputeResolutionResult["dispute"]) {
+  return {
+    id: dispute.id,
+    orderId: dispute.order_id,
+    status: dispute.status,
+    resolution: dispute.resolution,
+    resolutionDecision: dispute.resolution_decision,
+    resolutionOperationId: dispute.resolution_operation_id,
+    resolvingStartedAt: dispute.resolving_started_at,
+    resolutionAttempts: dispute.resolution_attempts,
+    lastResolutionError: dispute.last_resolution_error,
+    adminId: dispute.admin_id,
+    adminNote: dispute.admin_note,
+    resolvedAt: dispute.resolved_at,
+    orderStatus: dispute.order_status,
+    buyerId: dispute.buyer_id,
+    sellerId: dispute.seller_id
+  };
+}
 
 router.post(
   "/:id/resolve",
@@ -283,11 +319,9 @@ router.post(
       adminId: req.user.id,
       adminNote: input.adminNote
     });
-    const row = result.dispute;
-
     res.json({
-      dispute: row,
-      order: result.order,
+      dispute: mapAdminDisputeResolutionDto(result.dispute),
+      order: result.order ? mapOrderRowDto(result.order as RawOrderRow) : null,
       operationId: result.operationId,
       idempotent: !result.newlyResolved
     });

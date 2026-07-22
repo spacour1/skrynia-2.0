@@ -42,8 +42,8 @@ const reviewSchema = z.object({
   comment: z.string().max(2000).optional()
 });
 
-function canSeeOrder(order: { buyer_id: string; seller_id: string }, user: AuthedRequest["user"]) {
-  return user.role === "admin" || order.buyer_id === user.id || order.seller_id === user.id;
+function canSeeOrder(order: { buyerId: string; sellerId: string }, user: AuthedRequest["user"]) {
+  return user.role === "admin" || order.buyerId === user.id || order.sellerId === user.id;
 }
 
 router.post(
@@ -218,8 +218,14 @@ router.get(
     const cached = await cacheGet(`order:${id}:${req.user.id}`);
     if (cached) return res.json(cached);
     const result = await pool.query(
-      `select o.*, p.title as product_title, p.description as product_description,
-              b.display_name as buyer_display_name, s.display_name as seller_display_name
+      `select o.id, o.buyer_id as "buyerId", o.seller_id as "sellerId", o.product_id as "productId",
+              o.quantity, o.amount_cents as "amountCents", o.fee_cents as "feeCents", o.currency,
+              o.status, o.payment_provider as "paymentProvider", o.payment_reference as "paymentReference",
+              o.delivery_note as "deliveryNote", o.auto_release_at as "autoReleaseAt",
+              o.paid_at as "paidAt", o.delivered_at as "deliveredAt", o.completed_at as "completedAt",
+              o.created_at as "createdAt", o.updated_at as "updatedAt",
+              p.title as "productTitle", p.description as "productDescription",
+              b.display_name as "buyerDisplayName", s.display_name as "sellerDisplayName"
        from orders o
        join products p on p.id = o.product_id
        join users b on b.id = o.buyer_id

@@ -15,7 +15,7 @@ change a set only together with a migration, the enums module, and that test.
   payment failure flow (`pending → canceled`). Do not remove it.
 - Terminal statuses: `completed`, `refunded`, `canceled`.
 
-### Transition graph (current behavior; enforced centrally from the state-machine stage)
+### Transition graph (enforced centrally by `backend/src/modules/orders/order-transitions.ts`)
 
 ```
 pending     -> paid (payment capture; instant-delivery products go straight to delivered)

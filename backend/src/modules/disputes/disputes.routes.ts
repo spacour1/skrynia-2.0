@@ -7,8 +7,9 @@ import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
-import { DISPUTE_DECISIONS } from "../../domain/enums.js";
+import { DISPUTE_DECISIONS, type OrderStatus } from "../../domain/enums.js";
 import { recordOrderEvent } from "../orders/order-events.service.js";
+import { canTransitionOrder } from "../orders/order-transitions.js";
 import { getMessages } from "../chat/chat.service.js";
 import { createOrderSystemMessage } from "../chat/system-messages.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
@@ -83,7 +84,7 @@ router.post(
       if (orderRow.buyer_id !== req.user.id && orderRow.seller_id !== req.user.id) throw forbidden();
 
       const isRepeat = orderRow.status === "disputed";
-      if (!isRepeat && !["paid", "in_progress", "delivered"].includes(orderRow.status)) {
+      if (!isRepeat && !canTransitionOrder(orderRow.status as OrderStatus, "disputed")) {
         throw badRequest("Only active escrowed orders can be disputed");
       }
 

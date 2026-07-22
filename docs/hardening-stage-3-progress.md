@@ -461,3 +461,76 @@ This pass fixed the two endpoints with a confirmed, evidenced defect (raw snake_
 reaching an HTTP response, with a frontend mixed-format symptom already present);
 the remaining marketplace/product/seller response shapes were not audited in this
 cycle and may still mix conventions.
+
+## Stage 7: centralized order state machine
+
+Status: complete (transition-matrix centralization; see remaining constraint for the
+narrower scope actually shipped).
+
+Commit: `refactor(orders): enforce centralized order state transitions`
+
+### Confirmed defect
+
+The order status graph existed only as seven independent, hand-written status lists
+scattered across `lockEscrow`/`releaseEscrow`/`refundEscrow` (`ledger.service.ts`),
+the seller `/start` and `/deliver` routes, the dispute-open route, and the mock
+payment failure path — each a literal array duplicating the same knowledge with no
+shared source of truth and no test that they agreed with each other or with
+`docs/domain-invariants.md`.
+
+### Implementation
+
+- `backend/src/modules/orders/order-transitions.ts`: `ORDER_TRANSITIONS` (the
+  canonical `Record<OrderStatus, OrderStatus[]>`, reverse-engineered from the seven
+  existing guards, matching `docs/domain-invariants.md` exactly) and
+  `canTransitionOrder(from, to)`.
+- Wired as a drop-in boolean replacement for the existing inline
+  `[...].includes(status)` checks in `releaseEscrow`, `refundEscrow` (both
+  money-critical; only the source-status *set* changed from a literal array to the
+  shared matrix — no change to fee calculation, ledger entries, wallet updates, or
+  error messages/status codes), the dispute-open route, and `/orders/:id/deliver`
+  (restructured from a single combined `UPDATE ... WHERE seller_id=$2 AND status IN
+  (...)` into `SELECT ... FOR UPDATE` + the shared check + an unconditional `UPDATE
+  ... WHERE id=$1` — same atomicity via the row lock, same error message, same 400
+  status).
+- Left untouched, deliberately: `lockEscrow` (only one valid source status,
+  `pending` — a plain equality check, not a multi-source set the matrix would
+  simplify) and `/orders/:id/start` and the mock payment-failure path (same reason;
+  `/start`'s message is also not asserted by any test but the equality check itself
+  carries no duplicated-array risk to centralize). Status-specific timestamp writes
+  (`paidAt`, `deliveredAt`, `completedAt`, `autoReleaseAt`) stay at each call site,
+  not centralized in this pass.
+
+### Regression coverage (`backend/test/order-transitions.test.ts`, 7 tests)
+
+Full N×N matrix (`ORDER_STATUSES × ORDER_STATUSES`) asserts every pair's
+allowed/forbidden status against the documented graph; every terminal status
+(`completed`/`refunded`/`canceled`) has zero outgoing transitions; no status
+transitions to itself. Integration tests exercise the *real* `lockEscrow` /
+`releaseEscrow` / `refundEscrow` (not mocked) to prove a forbidden transition leaves
+the DB unchanged, `releaseEscrow` only succeeds from `delivered`/`disputed`,
+`refundEscrow` succeeds from all four escrowed statuses and rejects an
+already-refunded order, and two concurrent resolution attempts on one order
+serialize to exactly one winner (also exercises the Stage 4 retry helper live -
+`serializable_tx_retry` fires during the run).
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `npx vitest run test/order-transitions.test.ts` | PASS, 7/7 |
+| `npx vitest run test/ledger.test.ts test/dispute-consistency.test.ts test/test-payments.test.ts` | PASS, 21/21 |
+| `cd backend && npm test` | PASS, 293/293 in 33 files |
+
+### Remaining constraint
+
+A fully generic `transitionOrder(client, {orderId, to, actor, reason, ...})` service
+that every mutation site calls through (per the plan's original sketch) was not
+built — money-critical `lockEscrow`/`releaseEscrow`/`refundEscrow` interleave the
+status write with fee computation, ledger entries, and wallet updates in one
+statement each, and forcing that through one generic helper risked becoming a leaky
+abstraction (an "extra SET clause" parameter) for uncertain benefit. What shipped
+instead is the higher-value, lower-risk half: one tested, canonical definition of the
+graph that the multi-source-status call sites now consume, with zero change to
+money-moving logic, fee formulas, or ledger entries.

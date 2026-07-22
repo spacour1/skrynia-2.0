@@ -15,6 +15,8 @@ import {
 } from "../marketplace/marketplace-cache.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
 import { platformFeeCents } from "../../domain/money.js";
+import type { OrderStatus } from "../../domain/enums.js";
+import { canTransitionOrder } from "./order-transitions.js";
 
 type OrderRow = {
   id: string;
@@ -191,7 +193,7 @@ export async function releaseEscrow(
     const orderResult = await client.query<OrderRow>(`select * from orders where id = $1 for update`, [orderId]);
     const order = orderResult.rows[0];
     if (!order) throw notFound("Order not found");
-    if (!["delivered", "disputed"].includes(order.status)) {
+    if (!canTransitionOrder(order.status as OrderStatus, "completed")) {
       throw badRequest("Only delivered or disputed orders can be released");
     }
 
@@ -292,7 +294,7 @@ export async function refundEscrow(orderId: string, adminId?: string) {
     const orderResult = await client.query<OrderRow>(`select * from orders where id = $1 for update`, [orderId]);
     const order = orderResult.rows[0];
     if (!order) throw notFound("Order not found");
-    if (!["paid", "in_progress", "delivered", "disputed"].includes(order.status)) {
+    if (!canTransitionOrder(order.status as OrderStatus, "refunded")) {
       throw badRequest("Only escrowed orders can be refunded");
     }
 

@@ -15,6 +15,8 @@ import { cacheGet, cacheSet } from "../../common/redis.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { releaseEscrow } from "./ledger.service.js";
 import { recordOrderEvent } from "./order-events.service.js";
+import { canTransitionOrder } from "./order-transitions.js";
+import type { OrderStatus } from "../../domain/enums.js";
 import { getOrCreateOrderConversation } from "../chat/chat.service.js";
 import {
   createOrderSystemMessage,
@@ -313,21 +315,27 @@ router.post(
     const id = z.string().uuid().parse(req.params.id);
     const input = deliverSchema.parse(req.body);
     const order = await inTx(async (client) => {
+      const existing = await client.query(`select * from orders where id = $1 for update`, [id]);
+      const existingOrder = existing.rows[0];
+      if (
+        !existingOrder ||
+        existingOrder.seller_id !== req.user.id ||
+        !canTransitionOrder(existingOrder.status as OrderStatus, "delivered")
+      ) {
+        throw badRequest("Only the seller can deliver an active escrowed order");
+      }
       const result = await client.query(
         `update orders
          set status = 'delivered',
-             delivery_note = $3,
+             delivery_note = $2,
              delivered_at = now(),
-             auto_release_at = now() + make_interval(hours => $4::int),
+             auto_release_at = now() + make_interval(hours => $3::int),
              updated_at = now()
-         where id = $1 and seller_id = $2 and status in ('paid', 'in_progress')
+         where id = $1
          returning *`,
-        [id, req.user.id, input.deliveryNote, env.AUTO_RELEASE_HOURS]
+        [id, input.deliveryNote, env.AUTO_RELEASE_HOURS]
       );
       const updatedOrder = result.rows[0];
-      if (!updatedOrder) {
-        throw badRequest("Only the seller can deliver an active escrowed order");
-      }
       await recordOrderEvent(
         {
           orderId: id,

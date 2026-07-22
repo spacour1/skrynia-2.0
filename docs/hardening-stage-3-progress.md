@@ -534,3 +534,34 @@ abstraction (an "extra SET clause" parameter) for uncertain benefit. What shippe
 instead is the higher-value, lower-risk half: one tested, canonical definition of the
 graph that the multi-source-status call sites now consume, with zero change to
 money-moving logic, fee formulas, or ledger entries.
+
+## Stage 8: frontend test foundation
+
+Status: complete (test infrastructure; the user-visible reliability contracts are
+implemented and tested in Stage 9).
+
+### Confirmed gap
+
+The frontend test command ran one `node:test` file through `tsx`. There was no DOM
+environment, React Testing Library render helper, user-event support, React Query
+wrapper, deterministic browser-state setup, strict network mock, or coverage command.
+
+### Implementation
+
+- Added Vitest with jsdom, React Testing Library, jest-dom, user-event, and V8 coverage.
+- Added a shared renderer with isolated React Query clients and locale selection.
+- Added deterministic cleanup for storage, navigation mocks, fake timers, and browser
+  online/offline state, plus a BroadcastChannel test implementation.
+- Added an expectation-driven fetch mock that fails on unexpected requests and can
+  assert that every declared request was consumed.
+- Migrated the six realtime-client tests without dropping their reconnect, ACK, or
+  retry assertions, and added two foundation tests that exercise the shared harness.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd frontend && npm test` | PASS, 8/8 in 2 files |
+| `cd frontend && npm run test:coverage` | PASS, report generated |
+| `cd frontend && npm run typecheck` | PASS |
+| `cd frontend && npm run i18n:check` | PASS, 0 errors, 25 baseline warnings |

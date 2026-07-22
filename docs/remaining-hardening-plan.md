@@ -1,9 +1,14 @@
 # Remaining production-hardening plan
 
-Stages 0–7 are complete at baseline `36ea677`. This document contains only the
-remaining work, in execution order. It does not certify production readiness.
+Stages 0–7 are complete at baseline `36ea677`; the Stage 8 test foundation is now
+implemented on top of it. This document tracks the remaining work in execution order.
+It does not certify production readiness.
 
 ## Stage 8 — frontend test foundation
+
+Status: complete. Vitest, jsdom, React Testing Library, deterministic browser/network
+helpers, coverage reporting, and the existing realtime-client coverage are wired into
+`npm test`. Stage 9 owns the focused user-visible reliability tests listed below.
 
 1. Add a frontend test runner and React Testing Library setup without replacing the
    existing realtime-client test.

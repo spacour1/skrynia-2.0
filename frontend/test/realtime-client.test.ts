@@ -1,5 +1,4 @@
-import assert from "node:assert/strict";
-import test from "node:test";
+import { expect, it } from "vitest";
 import {
   RealtimeClient,
   RealtimeMessageError
@@ -71,7 +70,8 @@ function fakeScheduler() {
     },
     runNext() {
       const entry = tasks.entries().next().value as [number, () => void] | undefined;
-      assert.ok(entry, "expected a scheduled task");
+      expect(entry, "expected a scheduled task").toBeDefined();
+      if (!entry) return;
       tasks.delete(entry[0]);
       entry[1]();
     }
@@ -93,7 +93,7 @@ function ticketError(status: number, retryAfterMs?: number) {
   });
 }
 
-test("a 401 ticket error stops reconnecting", async () => {
+it("a 401 ticket error stops reconnecting", async () => {
   const scheduler = fakeScheduler();
   let attempts = 0;
   const client = new RealtimeClient({
@@ -108,12 +108,12 @@ test("a 401 ticket error stops reconnecting", async () => {
   client.start();
   await flushPromises();
 
-  assert.equal(attempts, 1);
-  assert.deepEqual(scheduler.delays, []);
-  assert.equal(client.getSnapshot().status, "stopped");
+  expect(attempts).toBe(1);
+  expect(scheduler.delays).toEqual([]);
+  expect(client.getSnapshot().status).toBe("stopped");
 });
 
-test("a 429 ticket error honors Retry-After", async () => {
+it("a 429 ticket error honors Retry-After", async () => {
   const scheduler = fakeScheduler();
   const client = new RealtimeClient({
     openSocket: async () => {
@@ -126,11 +126,11 @@ test("a 429 ticket error honors Retry-After", async () => {
   client.start();
   await flushPromises();
 
-  assert.deepEqual(scheduler.delays, [7_500]);
-  assert.equal(client.getSnapshot().status, "waiting");
+  expect(scheduler.delays).toEqual([7_500]);
+  expect(client.getSnapshot().status).toBe("waiting");
 });
 
-test("503 ticket errors use exponential backoff", async () => {
+it("503 ticket errors use exponential backoff", async () => {
   const scheduler = fakeScheduler();
   let attempts = 0;
   const client = new RealtimeClient({
@@ -147,11 +147,11 @@ test("503 ticket errors use exponential backoff", async () => {
   scheduler.runNext();
   await flushPromises();
 
-  assert.equal(attempts, 2);
-  assert.deepEqual(scheduler.delays, [1_000, 2_000]);
+  expect(attempts).toBe(2);
+  expect(scheduler.delays).toEqual([1_000, 2_000]);
 });
 
-test("one client start creates only one connection", async () => {
+it("one client start creates only one connection", async () => {
   const socket = new FakeSocket();
   let attempts = 0;
   const client = new RealtimeClient({
@@ -168,11 +168,11 @@ test("one client start creates only one connection", async () => {
   await flushPromises();
   client.start();
 
-  assert.equal(attempts, 1);
+  expect(attempts).toBe(1);
   client.stop();
 });
 
-test("message acknowledgement moves delivery from sending to sent", async () => {
+it("message acknowledgement moves delivery from sending to sent", async () => {
   const socket = new FakeSocket();
   const scheduler = fakeScheduler();
   const client = new RealtimeClient({
@@ -195,8 +195,8 @@ test("message acknowledgement moves delivery from sending to sent", async () => 
       delivery.status = "sent";
       return message;
     });
-  assert.equal(delivery.status, "sending");
-  assert.deepEqual(JSON.parse(socket.sent[0]), {
+  expect(delivery.status).toBe("sending");
+  expect(JSON.parse(socket.sent[0])).toEqual({
     type: "message",
     clientMessageId: "9cb21d6e-8d4d-4f78-82b0-94ac91a057e0",
     conversationId: "b774a996-e3d9-47c4-8918-8281d8eff2f9",
@@ -210,12 +210,12 @@ test("message acknowledgement moves delivery from sending to sent", async () => 
     message: saved
   });
 
-  assert.deepEqual(await sending, saved);
-  assert.equal(delivery.status, "sent");
+  expect(await sending).toEqual(saved);
+  expect(delivery.status).toBe("sent");
   client.stop();
 });
 
-test("disconnect before acknowledgement moves delivery to failed and retryable", async () => {
+it("disconnect before acknowledgement moves delivery to failed and retryable", async () => {
   const socket = new FakeSocket();
   const scheduler = fakeScheduler();
   const client = new RealtimeClient({
@@ -235,12 +235,12 @@ test("disconnect before acknowledgement moves delivery to failed and retryable",
   socket.disconnect();
 
   const delivery = { status: "sending" as "sending" | "failed", retryable: false };
-  await assert.rejects(sending, (error: unknown) => {
-    assert.ok(error instanceof RealtimeMessageError);
+  await sending.catch((error: unknown) => {
+    expect(error).toBeInstanceOf(RealtimeMessageError);
+    if (!(error instanceof RealtimeMessageError)) return;
     delivery.status = "failed";
     delivery.retryable = error.retryable;
-    return true;
   });
-  assert.deepEqual(delivery, { status: "failed", retryable: true });
+  expect(delivery).toEqual({ status: "failed", retryable: true });
   client.stop();
 });

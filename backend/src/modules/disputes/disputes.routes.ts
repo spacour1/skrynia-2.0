@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { inTx, pool } from "../../db/pool.js";
 import { asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
+import { buildNextCursor, keysetWhereClause, parseCursorPage } from "../../common/pagination.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { requireRole } from "../../common/middleware/rbac.js";
@@ -210,7 +211,12 @@ router.get(
   "/",
   authenticate,
   requireRole("admin"),
-  asyncHandler(async (_req: AuthedRequest, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { limit, cursor } = parseCursorPage(req.query);
+    const values: unknown[] = [];
+    const where = keysetWhereClause(values, cursor, "d.created_at", "d.id");
+    values.push(limit);
+
     const result = await pool.query(
       `select d.id, d.status, d.reason, d.resolution, d.admin_note as "adminNote",
               d.created_at as "createdAt", d.resolved_at as "resolvedAt",
@@ -222,9 +228,12 @@ router.get(
        join products p on p.id = o.product_id
        join users b on b.id = o.buyer_id
        join users s on s.id = o.seller_id
-       order by d.created_at desc`
+       ${where ? `where ${where}` : ""}
+       order by d.created_at desc, d.id desc
+       limit $${values.length}`,
+      values
     );
-    res.json({ disputes: result.rows });
+    res.json({ disputes: result.rows, nextCursor: buildNextCursor(result.rows, limit) });
   })
 );
 

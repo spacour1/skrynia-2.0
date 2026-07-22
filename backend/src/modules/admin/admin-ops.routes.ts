@@ -3,6 +3,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { inTx, pool } from "../../db/pool.js";
 import { asyncHandler, badRequest, notFound } from "../../common/errors.js";
+import { buildNextCursor, keysetWhereClause, parseCursorPage } from "../../common/pagination.js";
 import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { enqueueJob, getJobQueue } from "../jobs/queue.js";
@@ -60,7 +61,12 @@ router.patch(
 router.get(
   "/audit",
   adminOnly,
-  asyncHandler(async (_req: AuthedRequest, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { limit, cursor } = parseCursorPage(req.query);
+    const values: unknown[] = [];
+    const where = keysetWhereClause(values, cursor, "a.created_at", "a.id");
+    values.push(limit);
+
     const result = await pool.query(
       `select a.id, a.trace_id as "traceId", a.user_id as "userId",
               u.email, u.display_name as "displayName",
@@ -70,10 +76,12 @@ router.get(
               a.created_at as "createdAt"
        from audit_logs a
        left join users u on u.id = a.user_id
-       order by a.created_at desc
-       limit 300`
+       ${where ? `where ${where}` : ""}
+       order by a.created_at desc, a.id desc
+       limit $${values.length}`,
+      values
     );
-    res.json({ auditLogs: result.rows });
+    res.json({ auditLogs: result.rows, nextCursor: buildNextCursor(result.rows, limit) });
   })
 );
 

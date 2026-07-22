@@ -327,3 +327,60 @@ revocation-driven closes (28 neighboring tests re-run green).
 | `npx vitest run test/ws-limits.test.ts` | PASS, 4/4 |
 | `npx vitest run test/ws-ticket.test.ts test/realtime-distribution.test.ts test/chat-service.test.ts` | PASS, 28/28 |
 | `cd backend && npm test` | PASS, 273/273 in 30 files |
+
+## Stage 5.3: bounded pagination
+
+Status: complete.
+
+Commit: `fix(api): paginate unbounded marketplace queries`
+
+### Confirmed defect
+
+`GET /disputes` (admin list) had no limit at all — every dispute ever opened was
+returned in one response. `GET /admin/audit` capped at a fixed `limit 300` with no
+way to see older rows once outgrown. Several other admin/finance listings share the
+same fixed-limit-no-cursor shape (`admin-finance.routes.ts`, `admin-ops.routes.ts`
+media/listings, `orders.routes.ts` admin "all" view) — out of scope for this pass;
+noted below as a remaining constraint.
+
+### Implementation
+
+- `backend/src/common/pagination.ts`: opaque base64url cursor over
+  `(created_at, id)` (`encodeCursor`/`decodeCursor`), `parseCursorPage(query)`
+  (Zod-validated `limit` 1–100, default 25) and `keysetWhereClause` producing the
+  standard `(created_at, id) < (cursor_created_at, cursor_id)` predicate under a
+  `created_at desc, id desc` sort — stable and gap-free even with duplicate
+  timestamps because `id` is a total tiebreaker.
+- Applied to `GET /disputes` (admin) and `GET /admin/audit`: both now accept
+  `?limit=&cursor=`, sort by `created_at desc, id desc`, and return `nextCursor`
+  (null on the last page). Purely additive — existing callers with no query params
+  get the same shape plus one new field, so the admin disputes page (which only
+  reads `disputes`) needed no change.
+- Invalid cursors return 400, not 500.
+
+### Regression coverage (`backend/test/pagination.test.ts`, 8 tests)
+
+Cursor encode/decode round-trip and malformed-cursor rejection (garbage base64, no
+separator, invalid date); max-limit enforcement on both endpoints; full traversal of
+7 disputes sharing one timestamp across 3-row pages produces every row exactly once
+with no duplicates; last page reports `nextCursor: null`; audit-log pagination is
+gap-free across a page boundary with tied timestamps; a garbage cursor on
+`/admin/audit` is a 400.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `npx vitest run test/pagination.test.ts` | PASS, 8/8 |
+| `npx vitest run test/dispute-consistency.test.ts test/audit-redaction.test.ts` | PASS, 11/11 |
+| `cd backend && npm test` | PASS, 281/281 in 31 files |
+
+### Remaining constraint
+
+`admin-finance.routes.ts` (transactions/ledger/reconciliation), `admin-ops.routes.ts`
+(media, listings), and the admin "all orders" view in `orders.routes.ts` still use a
+fixed limit with no cursor. They were left unchanged in this pass to keep the diff
+scoped to the two clearest defects (a truly unbounded list and a hard growth ceiling
+with no way to page past it); the same `pagination.ts` helper applies directly if
+these need the same treatment later.

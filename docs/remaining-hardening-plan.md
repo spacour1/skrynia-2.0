@@ -49,6 +49,15 @@ Test suite: 162 backend tests green; suite-level auth rate limits raised in test
    currently returns raw `d.*`); centralize Order/Product/Dispute/Role/DeliveryType enums
    shared with frontend; document the order state machine (initial status `pending`).
 
+## Follow-up: remaining fixed-limit admin listings
+
+`admin-finance.routes.ts` (transactions/ledger/reconciliation snapshots),
+`admin-ops.routes.ts` (media, listings), and the admin "all orders" view in
+`orders.routes.ts` still use a fixed `limit N` with no cursor. `backend/src/common/pagination.ts`
+(added in the cycle-3 pagination stage) applies directly — same
+`parseCursorPage`/`keysetWhereClause`/`buildNextCursor` pattern already used by
+`GET /disputes` and `GET /admin/audit`.
+
 ## P2 — product/ops polish
 
 1. **Search** — pg_trgm + unaccent migration, normalized search vector across

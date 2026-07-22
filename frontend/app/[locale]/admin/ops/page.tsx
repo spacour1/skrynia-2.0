@@ -19,6 +19,8 @@ import { API_URL, apiFetch } from "@/lib/api";
 import { absMoneyCents, subtractMoneyCents, sumMoneyCents, useMoney, type WireMoneyCents } from "@/lib/currency";
 import { RequireAuth } from "@/components/RequireAuth";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useLocale } from "@/lib/i18n";
+import { formatDate as formatLocaleDate } from "@/lib/locale-format";
 
 type JobCounts = {
   waiting?: number;
@@ -94,6 +96,7 @@ export default function AdminOpsPage() {
 
 function AdminOpsContent() {
   const money = useMoney();
+  const locale = useLocale();
   const queryClient = useQueryClient();
   const jobs = useQuery({
     queryKey: ["admin-jobs"],
@@ -268,7 +271,7 @@ function AdminOpsContent() {
               <tbody>
                 {audit.data?.auditLogs.slice(0, 18).map((item) => (
                   <tr key={item.id} className="border-b border-line transition last:border-b-0 hover:bg-panel/60">
-                    <td>{formatDate(item.createdAt)}</td>
+                    <td>{formatDate(item.createdAt, locale)}</td>
                     <td>{item.displayName ?? item.email ?? "анонимно"}</td>
                     <td><MethodBadge method={item.method} /></td>
                     <td className="max-w-[320px] truncate">{item.path}</td>
@@ -420,8 +423,8 @@ function shortTrace(value: string) {
   return value.length > 12 ? `${value.slice(0, 8)}...${value.slice(-4)}` : value;
 }
 
-function formatDate(value: string) {
-  return new Date(value).toLocaleString("ru-RU", {
+function formatDate(value: string, locale: string) {
+  return formatLocaleDate(value, locale, {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",

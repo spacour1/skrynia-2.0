@@ -8,6 +8,7 @@ import { useMoney, type WireMoneyCents } from "@/lib/currency";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useI18n } from "@/lib/i18n";
+import { formatDate } from "@/lib/locale-format";
 
 type DisputeDetail = {
   id: string;
@@ -40,7 +41,7 @@ export default function AdminDisputeDetailPage({ params }: { params: { id: strin
 function AdminDisputeDetailContent({ params }: { params: { id: string } }) {
   const money = useMoney();
   const client = useQueryClient();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [adminNote, setAdminNote] = useState("");
   const detail = useQuery({
     queryKey: ["admin-dispute", params.id],
@@ -115,7 +116,7 @@ function AdminDisputeDetailContent({ params }: { params: { id: string } }) {
             <article key={message.id} className="rounded-md border border-line bg-surface/50 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                 <span className="font-semibold">{message.senderDisplayName}</span>
-                <span className="text-muted">{new Date(message.createdAt).toLocaleString()}</span>
+                <span className="text-muted">{formatDate(message.createdAt, locale)}</span>
               </div>
               <p className="mt-2 whitespace-pre-wrap text-sm">{message.body}</p>
               {message.attachmentUrl && (

@@ -12,6 +12,7 @@ import { ReportModal } from "@/components/ReportModal";
 import { apiFetch, type ConversationContext, type ConversationGroup } from "@/lib/api";
 import { useMoney } from "@/lib/currency";
 import { useI18n } from "@/lib/i18n";
+import { formatDate } from "@/lib/locale-format";
 
 const ACTIVE_ORDER_STATUSES = ["pending", "paid", "in_progress", "delivered", "disputed"];
 const EXPANDED_GROUPS_STORAGE_KEY = "skrynia:messages:expanded-groups";
@@ -26,7 +27,7 @@ export default function MessagesPage() {
 
 function MessagesContent() {
   const money = useMoney();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const router = useRouter();
   const chatTabs: Array<[string, string]> = [
     ["all", t("messages.tabAll")],
@@ -198,7 +199,7 @@ function MessagesContent() {
                       <span className="flex shrink-0 items-center gap-2">
                         <span className="rounded-full bg-panel px-2 py-0.5 text-[11px] font-black text-muted">{group.totalContextCount}</span>
                         {group.totalUnreadCount ? <UnreadBadge count={group.totalUnreadCount} /> : null}
-                        <span className="text-xs text-muted">{formatTime(group.lastMessageAt)}</span>
+                        <span className="text-xs text-muted">{formatTime(group.lastMessageAt, locale)}</span>
                         <ChevronDown className={`h-4 w-4 text-muted transition ${expanded ? "rotate-180" : ""}`} />
                       </span>
                     </div>
@@ -374,7 +375,7 @@ function avatarGradient(index: number) {
   ][index % 4];
 }
 
-function formatTime(value?: string | null) {
+function formatTime(value: string | null | undefined, locale: string) {
   if (!value) return "";
-  return new Date(value).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  return formatDate(value, locale, { hour: "2-digit", minute: "2-digit" });
 }

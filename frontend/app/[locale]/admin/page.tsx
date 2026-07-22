@@ -8,6 +8,8 @@ import { useMoney, type WireMoneyCents } from "@/lib/currency";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/auth-store";
+import { useLocale } from "@/lib/i18n";
+import { formatDate } from "@/lib/locale-format";
 
 type Overview = {
   users: number;
@@ -48,6 +50,7 @@ export default function AdminPage() {
 
 function AdminContent() {
   const money = useMoney();
+  const locale = useLocale();
   const client = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -183,7 +186,7 @@ function AdminContent() {
                     <td>{tx.type.replace("_", " ")}</td>
                     <td>{tx.direction}</td>
                     <td className="text-right">{money(tx.amountCents, tx.currency)}</td>
-                    <td className="text-right">{new Date(tx.createdAt).toLocaleString("ru-RU")}</td>
+                    <td className="text-right">{formatDate(tx.createdAt, locale)}</td>
                   </tr>
                 ))}
               </tbody>

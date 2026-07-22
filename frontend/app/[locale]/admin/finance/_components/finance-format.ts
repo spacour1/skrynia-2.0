@@ -1,5 +1,7 @@
 import type { ReconciliationSnapshot } from "./types";
 import type { MoneyFormatter, WireMoneyCents } from "@/lib/currency";
+import type { Locale } from "@/i18n/config";
+import { formatDate as formatLocaleDate } from "@/lib/locale-format";
 
 export function latestSnapshotsByCurrency(snapshots: ReconciliationSnapshot[]) {
   const byCurrency = new Map<string, ReconciliationSnapshot>();
@@ -22,8 +24,8 @@ export function shortId(value: string) {
   return value.length > 12 ? `${value.slice(0, 8)}...${value.slice(-4)}` : value;
 }
 
-export function formatDate(value: string) {
-  return new Date(value).toLocaleString("ru-RU", {
+export function formatDate(value: string, locale: Locale) {
+  return formatLocaleDate(value, locale, {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",

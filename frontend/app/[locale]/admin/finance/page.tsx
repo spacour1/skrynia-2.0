@@ -17,6 +17,7 @@ import { ApiError, apiFetch } from "@/lib/api";
 import { sumMoneyCents, useMoney } from "@/lib/currency";
 import { RequireAuth } from "@/components/RequireAuth";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useLocale } from "@/lib/i18n";
 import { entryTypeLabel, formatDate, formatRevenue, latestSnapshotsByCurrency, refetchAll, shortId, transactionTypeLabel } from "./_components/finance-format";
 import { Delta, Direction, EmptyState, FinanceMetric, LedgerEntryCard, PendingOrderRow } from "./_components/finance-widgets";
 import type { Filters, LedgerEntry, Overview, PendingOrder, ReconciliationSnapshot, Transaction } from "./_components/types";
@@ -30,6 +31,7 @@ export default function AdminFinancePage() {
 }
 function AdminFinanceContent() {
   const money = useMoney();
+  const locale = useLocale();
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState<Filters>({ query: "", currency: "all", type: "all", status: "all" });
   const overview = useQuery({
@@ -238,7 +240,7 @@ function AdminFinanceContent() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-lg font-black">{snapshot.currency}</p>
-                    <p className="mt-1 text-xs text-muted">{formatDate(snapshot.createdAt)}</p>
+                    <p className="mt-1 text-xs text-muted">{formatDate(snapshot.createdAt, locale)}</p>
                   </div>
                   <StatusBadge status={snapshot.status} />
                 </div>
@@ -319,7 +321,7 @@ function AdminFinanceContent() {
             <tbody>
               {filteredTransactions.map((tx) => (
                 <tr key={tx.id} className="border-b border-line transition last:border-b-0 hover:bg-panel/60">
-                  <td>{formatDate(tx.createdAt)}</td>
+                  <td>{formatDate(tx.createdAt, locale)}</td>
                   <td>{tx.displayName ?? tx.email ?? "-"}</td>
                   <td>{transactionTypeLabel(tx.type)}</td>
                   <td><Direction direction={tx.direction} /></td>

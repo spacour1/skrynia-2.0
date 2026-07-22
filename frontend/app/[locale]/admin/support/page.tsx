@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useI18n } from "@/lib/i18n";
+import { formatDate } from "@/lib/locale-format";
 
 type Ticket = {
   id: string;
@@ -25,7 +26,7 @@ export default function AdminSupportPage() {
 }
 
 function AdminSupportContent() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const client = useQueryClient();
   const tickets = useQuery({
     queryKey: ["admin-support-tickets"],
@@ -50,7 +51,7 @@ function AdminSupportContent() {
               <div>
                 <p className="font-bold">{ticket.subject}</p>
                 <p className="mt-1 text-sm text-muted">
-                  {ticket.userDisplayName ?? ticket.email ?? t("admin.supportGuest")} · {ticket.priority} · {new Date(ticket.createdAt).toLocaleString()}
+                  {ticket.userDisplayName ?? ticket.email ?? t("admin.supportGuest")} · {ticket.priority} · {formatDate(ticket.createdAt, locale)}
                 </p>
               </div>
               <select

@@ -6,12 +6,15 @@
  * 3. No hardcoded Cyrillic UI strings in .ts/.tsx sources (comments stripped).
  *    Files listed in HARDCODED_BASELINE are legacy pages still awaiting conversion —
  *    they are reported as warnings, not errors, so new violations still fail CI.
+ * 4. Feature code must not hardcode regional locale identifiers or rely on the
+ *    browser default for Intl/toLocale formatting.
  *
  * Exit code 1 on any error, 0 otherwise.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import { findLocaleFormattingViolations } from "./i18n-source-guard";
 
 const ROOT = join(__dirname, "..");
 const LOCALES_DIR = join(ROOT, "i18n", "locales");
@@ -49,6 +52,10 @@ const HARDCODED_BASELINE = new Set(
     "components/ToastCenter.tsx",
     "lib/product-fields.ts"
   ].map((path) => path.split("/").join(sep))
+);
+
+const LOCALE_FORMATTING_ALLOWLIST = new Set(
+  ["i18n/config.ts", "lib/locale-format.ts"].map((path) => path.split("/").join(sep))
 );
 
 type Flat = Record<string, string>;
@@ -120,6 +127,7 @@ for (const key of referenceKeys) {
 console.log("Scanning for hardcoded Cyrillic UI strings...");
 
 const SCAN_DIRS = ["app", "components", "lib"];
+const LOCALE_FORMAT_SCAN_DIRS = [...SCAN_DIRS, "i18n"];
 const CYRILLIC = /[Ѐ-ӿ]/;
 
 function* walk(dir: string): Generator<string> {
@@ -157,6 +165,21 @@ for (const scanDir of SCAN_DIRS) {
       warn(`legacy hardcoded strings (${offendingLines.length} lines) in ${location} — pending conversion`);
     } else {
       error(`hardcoded UI string(s) in ${location} — move them to i18n/locales/*`);
+    }
+  }
+}
+
+// --- 4: active-locale formatting --------------------------------------------------------
+console.log("Scanning for hardcoded or browser-default locale formatting...");
+
+for (const scanDir of LOCALE_FORMAT_SCAN_DIRS) {
+  for (const file of walk(join(ROOT, scanDir))) {
+    const relativePath = relative(ROOT, file);
+    if (LOCALE_FORMATTING_ALLOWLIST.has(relativePath)) continue;
+    const source = stripComments(readFileSync(file, "utf8"));
+    const violations = findLocaleFormattingViolations(source);
+    for (const violation of violations) {
+      error(`${violation.kind} in ${relativePath}:${violation.line} (${violation.excerpt}) — pass the active app locale to a shared formatter`);
     }
   }
 }

@@ -1,8 +1,9 @@
 "use client";
 
 import { Coins } from "lucide-react";
-import { DISPLAY_CURRENCIES, isCurrencyCode, resolveIntlLocale, useCurrency } from "@/lib/currency";
+import { DISPLAY_CURRENCIES, isCurrencyCode, useCurrency } from "@/lib/currency";
 import { useLocale } from "@/lib/i18n";
+import { formatDate } from "@/lib/locale-format";
 
 export function CurrencySwitcher() {
   const { displayCurrency, rateDetails, setDisplayCurrency } = useCurrency();
@@ -25,7 +26,7 @@ export function CurrencySwitcher() {
           ))}
         </select>
       </label>
-      {rateDate ? <p className="px-1 text-[11px] font-semibold text-muted">Rate date: {new Date(rateDate).toLocaleDateString(resolveIntlLocale(locale))}</p> : null}
+      {rateDate ? <p className="px-1 text-[11px] font-semibold text-muted">Rate date: {formatDate(rateDate, locale)}</p> : null}
     </div>
   );
 }

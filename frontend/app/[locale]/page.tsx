@@ -30,6 +30,7 @@ import { firstProductMedia } from "../../lib/product-media";
 import { useAuth } from "../../lib/auth-store";
 import { SECTION_PATTERNS, getGameTileTheme, type CategoryTile, type GameTileThemeConfig } from "../../lib/game-catalog";
 import { useI18n } from "../../lib/i18n";
+import { formatDate, formatNumber } from "../../lib/locale-format";
 
 export default function HomePage() {
   const { t } = useI18n();
@@ -317,7 +318,7 @@ function SectionHeader({ title }: { title: string }) {
 }
 
 function PlatformsRow({ items }: { items: CategoryTile[] }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   return (
     <section className="space-y-2.5">
       <SectionHeader title={t("home.sections.platform")} />
@@ -334,7 +335,7 @@ function PlatformsRow({ items }: { items: CategoryTile[] }) {
               {/* Only rendered for real, backend-provided counts (see buildSectionTiles). */}
               {typeof item.lotCount === "number" && item.lotCount > 0 ? (
                 <span className="block truncate text-xs text-muted">
-                  {item.lotCount.toLocaleString("uk-UA")} {t("home.itemsLabel")}
+                  {formatNumber(item.lotCount, locale)} {t("home.itemsLabel")}
                 </span>
               ) : null}
             </span>
@@ -557,7 +558,7 @@ function TrustWidget() {
 }
 
 function RecentChatsWidget() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const router = useRouter();
   const user = useAuth((s) => s.user);
 
@@ -615,7 +616,7 @@ function RecentChatsWidget() {
                 {group.totalUnreadCount ? (
                   <span className="grid h-6 min-w-6 place-items-center rounded-full bg-action px-1 text-xs font-black text-stone-950">{group.totalUnreadCount}</span>
                 ) : (
-                  <span className="shrink-0 text-[11px] text-muted">{formatTime(group.lastMessageAt)}</span>
+                  <span className="shrink-0 text-[11px] text-muted">{formatTime(group.lastMessageAt, locale)}</span>
                 )}
               </button>
             );
@@ -677,7 +678,7 @@ function avatarGradient(index: number) {
   ][index % 4];
 }
 
-function formatTime(value?: string | null) {
+function formatTime(value: string | null | undefined, locale: string) {
   if (!value) return "";
-  return new Date(value).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
+  return formatDate(value, locale, { hour: "2-digit", minute: "2-digit" });
 }

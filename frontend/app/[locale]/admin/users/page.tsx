@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/api";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth-store";
+import { formatDate } from "@/lib/locale-format";
 
 type AdminUser = {
   id: string;
@@ -27,7 +28,7 @@ export default function AdminUsersPage() {
 
 function AdminUsersContent() {
   const client = useQueryClient();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { user: currentUser } = useAuth();
   const isAdmin = currentUser?.role === "admin";
   const users = useQuery({
@@ -113,7 +114,7 @@ function AdminUsersContent() {
                   {user.isBanned ? t("common.banned") : t("common.active")}
                   {isCurrentlyMuted(user) ? (
                     <span className="ml-2 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-black text-amber-600 dark:text-amber-300">
-                      muted до {new Date(user.mutedUntil!).toLocaleString("ru-RU")}
+                      muted до {formatDate(user.mutedUntil!, locale)}
                     </span>
                   ) : null}
                 </td>

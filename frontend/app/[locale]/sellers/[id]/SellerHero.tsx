@@ -5,6 +5,7 @@ import { BadgeCheck, Calendar, Clock, Heart, ImagePlus, Loader2, MessageCircle, 
 import { EmailNotVerifiedNotice } from "@/components/EmailNotVerifiedNotice";
 import { isEmailNotVerifiedError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { formatDate } from "@/lib/locale-format";
 import { SellerStatsGrid } from "./SellerStatsGrid";
 
 // Premium dark dungeon/gaming mood for sellers without a custom banner: gold glow
@@ -70,7 +71,7 @@ export function SellerHero({
 }) {
   const { t, locale } = useI18n();
   const avatarInputRef = useRef<HTMLInputElement>(null);
-  const memberSince = new Date(createdAt).toLocaleDateString(locale === "ua" ? "uk-UA" : locale === "ru" ? "ru-RU" : "en-US", {
+  const memberSince = formatDate(createdAt, locale, {
     year: "numeric",
     month: "short",
     day: "numeric"

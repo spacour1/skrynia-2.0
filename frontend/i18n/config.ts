@@ -17,6 +17,20 @@ export const localeToLang: Record<Locale, string> = {
   en: "en"
 };
 
+/** Regional locale identifiers used by Intl formatters. */
+export const localeToIntl: Record<Locale, string> = {
+  ua: "uk-UA",
+  ru: "ru-RU",
+  en: "en-US"
+};
+
+/** Open Graph uses underscores instead of the BCP 47 hyphens used by Intl. */
+export const localeToOpenGraph: Record<Locale, string> = {
+  ua: "uk_UA",
+  ru: "ru_RU",
+  en: "en_US"
+};
+
 export const localeLabels: Record<Locale, string> = {
   ua: "Українська",
   ru: "Русский",

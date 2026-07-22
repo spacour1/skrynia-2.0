@@ -4,6 +4,7 @@ import { useState, type ComponentType } from "react";
 import { ArrowDownCircle, ArrowUpCircle, CheckCircle2 } from "lucide-react";
 import { absMoneyCents, isZeroMoneyCents, subtractMoneyCents, sumMoneyCents, useMoney, type MoneyCents } from "@/lib/currency";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useLocale } from "@/lib/i18n";
 import { accountTypeLabel, directionLabel, entryTypeLabel, formatDate, shortId } from "./finance-format";
 import type { LedgerEntry, PendingOrder } from "./types";
 
@@ -30,6 +31,7 @@ export function FinanceMetric({
 
 export function LedgerEntryCard({ entry }: { entry: LedgerEntry }) {
   const money = useMoney();
+  const locale = useLocale();
   const debit = sumMoneyCents(entry.lines.map((line) => line.debitCents));
   const credit = sumMoneyCents(entry.lines.map((line) => line.creditCents));
   const balanced = debit === credit;
@@ -43,7 +45,7 @@ export function LedgerEntryCard({ entry }: { entry: LedgerEntry }) {
           </div>
           <p className="mt-1 truncate font-mono text-xs text-muted">{entry.idempotencyKey}</p>
           <p className="mt-1 text-xs text-muted">
-            {formatDate(entry.createdAt)} {entry.orderId ? `· заказ ${shortId(entry.orderId)}` : ""}
+            {formatDate(entry.createdAt, locale)} {entry.orderId ? `· заказ ${shortId(entry.orderId)}` : ""}
           </p>
         </div>
         <div className="grid min-w-[260px] grid-cols-3 gap-2 text-sm">
@@ -150,6 +152,7 @@ export function PendingOrderRow({
   isPending: boolean;
 }) {
   const money = useMoney();
+  const locale = useLocale();
   const [reference, setReference] = useState("");
   return (
     <article className="rounded-lg border border-line bg-surface/50 p-4 sm:flex sm:items-center sm:justify-between sm:gap-4">
@@ -158,7 +161,7 @@ export function PendingOrderRow({
         <p className="mt-1 text-xs text-muted">
           {order.buyerDisplayName} ({order.buyerEmail}) → {order.sellerDisplayName}
         </p>
-        <p className="mt-1 font-mono text-xs text-muted">{shortId(order.id)} · {formatDate(order.createdAt)}</p>
+        <p className="mt-1 font-mono text-xs text-muted">{shortId(order.id)} · {formatDate(order.createdAt, locale)}</p>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-0">
         <p className="font-black text-brand">{money(order.amountCents, order.currency)}</p>

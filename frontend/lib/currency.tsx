@@ -6,6 +6,7 @@ import { type Locale } from "../i18n/config";
 import { apiFetch } from "./api";
 import { useLocale } from "./i18n";
 import { usePathname } from "./navigation";
+import { formatNumber, formatNumberToParts } from "./locale-format";
 import { moneyCentsToBigInt, type MoneyCents } from "./money";
 
 export {
@@ -100,9 +101,8 @@ export function formatMoney({ cents, sourceCurrency, displayCurrency, rates, loc
   const absolute = converted < 0n ? -converted : converted;
   const whole = absolute / 100n;
   const fraction = (absolute % 100n).toString().padStart(2, "0");
-  const intlLocale = resolveIntlLocale(locale);
-  const integer = new Intl.NumberFormat(intlLocale, { maximumFractionDigits: 0 }).format(whole);
-  const decimal = new Intl.NumberFormat(intlLocale).formatToParts(1.1).find((part) => part.type === "decimal")?.value ?? ".";
+  const integer = formatNumber(whole, locale, { maximumFractionDigits: 0 });
+  const decimal = formatNumberToParts(1.1, locale).find((part) => part.type === "decimal")?.value ?? ".";
   return `${sign}${integer}${decimal}${fraction} ${CURRENCY_SYMBOLS[effectiveDisplay]}`;
 }
 
@@ -120,12 +120,6 @@ export function useMoney() {
 }
 
 export function isCurrencyCode(value: unknown): value is CurrencyCode { return value === "UAH" || value === "USD" || value === "EUR"; }
-export function resolveIntlLocale(locale: Locale | string) {
-  if (locale === "ua") return "uk-UA";
-  if (locale === "ru") return "ru-RU";
-  if (locale === "en") return "en-US";
-  return locale || "uk-UA";
-}
 
 function readStoredDisplayCurrency(): CurrencyCode | null {
   if (typeof window === "undefined") return null;

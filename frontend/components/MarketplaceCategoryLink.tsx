@@ -1,5 +1,9 @@
+"use client";
+
 import type { LucideIcon } from "lucide-react";
 import Link from "@/lib/navigation";
+import { useLocale } from "@/lib/i18n";
+import { formatNumber } from "@/lib/locale-format";
 
 type MarketplaceCategory = {
   slug: string;
@@ -17,6 +21,7 @@ export function MarketplaceCategoryLink({
   label: string;
   itemsLabel: string;
 }) {
+  const locale = useLocale();
   return (
     <Link
       href={`/marketplace?category=${encodeURIComponent(category.slug)}`}
@@ -28,7 +33,7 @@ export function MarketplaceCategoryLink({
       <span className="min-w-0">
         <span className="block truncate text-sm font-black text-ink">{label}</span>
         <span className="block truncate text-xs text-muted">
-          {category.activeProductCount.toLocaleString("uk-UA")} {itemsLabel}
+          {formatNumber(category.activeProductCount, locale)} {itemsLabel}
         </span>
       </span>
     </Link>

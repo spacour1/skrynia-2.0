@@ -8,6 +8,8 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { StatusBadge } from "@/components/StatusBadge";
 import { apiFetch, type Order } from "@/lib/api";
 import { sumMoneyCentsByCurrency, useMoney } from "@/lib/currency";
+import { useLocale } from "@/lib/i18n";
+import { formatDate as formatLocaleDate } from "@/lib/locale-format";
 
 const statusFilters = [
   ["all", "Все"],
@@ -29,6 +31,7 @@ export default function SellerSalesPage() {
 
 function SellerSalesContent() {
   const money = useMoney();
+  const locale = useLocale();
   const [status, setStatus] = useState("all");
   const [q, setQ] = useState("");
   const sales = useQuery({
@@ -120,7 +123,7 @@ function SellerSalesContent() {
 
               <div className="rounded-lg border border-line bg-panel/35 p-3">
                 <p className="text-xs font-bold uppercase text-muted">Дата</p>
-                <p className="mt-1 text-sm font-bold">{formatDate(order.createdAt)}</p>
+                <p className="mt-1 text-sm font-bold">{formatDate(order.createdAt, locale)}</p>
               </div>
 
               <div className="rounded-lg border border-brand/25 bg-brand/10 p-3 lg:text-right">
@@ -154,9 +157,9 @@ function Summary({ icon: Icon, label, value }: { icon: typeof Store; label: stri
   );
 }
 
-function formatDate(value?: string) {
+function formatDate(value: string | undefined, locale: string) {
   if (!value) return "-";
-  return new Date(value).toLocaleString("ru-RU", {
+  return formatLocaleDate(value, locale, {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",

@@ -31,6 +31,7 @@ import { redirectToMonobank, type MonobankCheckout } from "@/lib/monobank";
 import { ManualPaymentPanel } from "@/components/ManualPaymentPanel";
 import { redirectToWayforpay, type WayforpayCheckout } from "@/lib/wayforpay";
 import { captureEvent } from "@/lib/posthog";
+import { formatDate as formatLocaleDate } from "@/lib/locale-format";
 
 // The backend denies test-payment routes unless explicitly enabled, so never expose
 // the panel merely because this is a development build.
@@ -61,7 +62,7 @@ type OrderDetailResponse = {
 export default function OrderPage({ params }: { params: { id: string } }) {
   const money = useMoney();
   const user = useAuth((state) => state.user);
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const client = useQueryClient();
   const searchParams = useSearchParams();
   const [deliveryNote, setDeliveryNote] = useState("");
@@ -207,7 +208,7 @@ export default function OrderPage({ params }: { params: { id: string } }) {
             <InfoTile icon={UserRound} label="Покупатель" value={item.buyerDisplayName ?? "Покупатель"} />
             <InfoTile icon={UserRound} label="Продавец" value={item.sellerDisplayName ?? "Продавец"} />
             <InfoTile icon={CreditCard} label="Комиссия" value={money(fee, item.currency)} />
-            <InfoTile icon={Clock3} label="Создан" value={formatDate(item.createdAt)} />
+            <InfoTile icon={Clock3} label="Создан" value={formatDate(item.createdAt, locale)} />
             <InfoTile icon={ShieldCheck} label="Защита" value="Escrow активен" />
           </div>
         </section>
@@ -220,7 +221,7 @@ export default function OrderPage({ params }: { params: { id: string } }) {
             </div>
             {item.autoReleaseAt ? (
               <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-600 dark:text-amber-300">
-                Автовыплата: {formatDate(item.autoReleaseAt)}
+                Автовыплата: {formatDate(item.autoReleaseAt, locale)}
               </span>
             ) : null}
           </div>
@@ -266,7 +267,7 @@ export default function OrderPage({ params }: { params: { id: string } }) {
                     {event.body ? <p className="mt-1 text-sm leading-6 text-muted">{event.body}</p> : null}
                     {event.actorDisplayName ? <p className="mt-2 text-xs text-muted">Участник: {event.actorDisplayName}</p> : null}
                   </div>
-                  <p className="text-sm text-muted sm:text-right">{formatDate(event.createdAt)}</p>
+                  <p className="text-sm text-muted sm:text-right">{formatDate(event.createdAt, locale)}</p>
                 </div>
               ))
             ) : (
@@ -464,9 +465,9 @@ function ActionCard({ title, text, children }: { title: string; text: string; ch
   );
 }
 
-function formatDate(value?: string) {
+function formatDate(value: string | undefined, locale: string) {
   if (!value) return "Не указано";
-  return new Date(value).toLocaleString("ru-RU", {
+  return formatLocaleDate(value, locale, {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",

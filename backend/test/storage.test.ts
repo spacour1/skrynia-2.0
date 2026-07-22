@@ -5,13 +5,14 @@ import request from "supertest";
 import sharp from "sharp";
 import { createApp } from "../src/app.js";
 import { env } from "../src/config/env.js";
-import { pool } from "../src/db/pool.js";
+import { inTx, pool } from "../src/db/pool.js";
 import { issueSession } from "../src/modules/auth/session.service.js";
 import { sendMessage } from "../src/modules/chat/chat.service.js";
 import { processOutboxBatch } from "../src/modules/outbox/outbox.worker.js";
 import {
   buildMediaUrl,
-  cleanupTemporaryStorageObjects
+  cleanupTemporaryStorageObjects,
+  enqueueStorageDeletion
 } from "../src/modules/storage/storage.service.js";
 import { getRedis } from "../src/common/redis.js";
 import {
@@ -177,9 +178,11 @@ describe("owned processed storage", () => {
     );
 
     await expect(fs.stat(file)).resolves.toBeDefined();
-    await expect(
-      cleanupTemporaryStorageObjects({ olderThanHours: 1 })
-    ).resolves.toMatchObject({ deleted: 1, failed: 0 });
+    await expect(cleanupTemporaryStorageObjects({ olderThanHours: 1 })).resolves.toMatchObject({
+      queued: 1,
+      failed: 0
+    });
+    await processOutboxBatch({ workerId: "storage-cleanup-test" });
     await expect(fs.stat(file)).rejects.toMatchObject({ code: "ENOENT" });
 
     const stored = await pool.query<{ status: string; deletedAt: Date | null }>(
@@ -190,6 +193,394 @@ describe("owned processed storage", () => {
     );
     expect(stored.rows[0].status).toBe("deleted");
     expect(stored.rows[0].deletedAt).toBeInstanceOf(Date);
+  });
+
+  it("recovers a physical upload after DB finalization and intent writes fail", async () => {
+    const owner = await authedClient();
+    await pool.query(`
+      create or replace function test_fail_storage_upload_transition()
+      returns trigger as $$
+      begin
+        if old.status = 'uploading' then
+          raise exception 'storage upload transition failure';
+        end if;
+        return new;
+      end
+      $$ language plpgsql
+    `);
+    await pool.query(`
+      create trigger test_fail_storage_upload_transition
+      before update of status on storage_objects
+      for each row execute function test_fail_storage_upload_transition()
+    `);
+
+    let stored!: { id: string; objectKey: string; status: string };
+    try {
+      const response = await owner.upload("avatar", await png());
+      expect(response.status).toBe(500);
+
+      const result = await pool.query<typeof stored>(
+        `select id, object_key as "objectKey", status
+         from storage_objects
+         where owner_id = $1`,
+        [owner.userId]
+      );
+      stored = result.rows[0];
+      expect(stored.status).toBe("uploading");
+      await expect(
+        fs.stat(path.resolve(env.LOCAL_UPLOAD_DIR, ...stored.objectKey.split("/")))
+      ).resolves.toBeDefined();
+
+      const events = await pool.query<{ count: number }>(
+        `select count(*)::int as count
+         from domain_outbox
+         where event_key = $1`,
+        [`storage.delete:${stored.id}`]
+      );
+      expect(events.rows[0].count).toBe(0);
+    } finally {
+      await pool.query(`drop trigger if exists test_fail_storage_upload_transition on storage_objects`);
+      await pool.query(`drop function if exists test_fail_storage_upload_transition()`);
+    }
+
+    await pool.query(
+      `update storage_objects
+       set created_at = now() - interval '2 hours'
+       where id = $1`,
+      [stored.id]
+    );
+    await expect(cleanupTemporaryStorageObjects({ olderThanHours: 1 })).resolves.toMatchObject({
+      queued: 1,
+      failed: 0
+    });
+    expect(
+      (await pool.query<{ status: string }>(`select status from storage_objects where id = $1`, [stored.id]))
+        .rows[0].status
+    ).toBe("deleting");
+
+    await expect(
+      processOutboxBatch({ workerId: "storage-upload-recovery" })
+    ).resolves.toMatchObject({ processed: 1, failed: 0 });
+    await expect(
+      fs.stat(path.resolve(env.LOCAL_UPLOAD_DIR, ...stored.objectKey.split("/")))
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(
+      (await pool.query<{ status: string }>(`select status from storage_objects where id = $1`, [stored.id]))
+        .rows[0].status
+    ).toBe("deleted");
+  });
+
+  it("keeps failed provider deletion retryable and charged to quota", async () => {
+    const owner = await authedClient();
+    const response = await owner.upload("avatar", await png());
+    const stored = await pool.query<{ id: string; objectKey: string }>(
+      `update storage_objects
+       set size_bytes = $2, created_at = now() - interval '48 hours'
+       where id = $1
+       returning id, object_key as "objectKey"`,
+      [response.body.upload.id, env.STORAGE_TOTAL_QUOTA_BYTES_PER_USER]
+    );
+    const object = stored.rows[0];
+    const file = path.resolve(env.LOCAL_UPLOAD_DIR, ...object.objectKey.split("/"));
+    await inTx((client) => enqueueStorageDeletion(client, object.id));
+
+    await fs.unlink(file);
+    await fs.mkdir(file);
+    await expect(
+      processOutboxBatch({
+        workerId: "storage-delete-failure",
+        maxAttempts: 1,
+        baseBackoffMs: 10
+      })
+    ).resolves.toMatchObject({ processed: 0, failed: 1 });
+
+    const failed = await pool.query<{ objectStatus: string; eventStatus: string; attempts: number }>(
+      `select s.status as "objectStatus", o.status as "eventStatus", o.attempts
+       from storage_objects s
+       join domain_outbox o on o.event_key = 'storage.delete:' || s.id::text
+       where s.id = $1`,
+      [object.id]
+    );
+    expect(failed.rows[0]).toEqual({
+      objectStatus: "deleting",
+      eventStatus: "failed",
+      attempts: 1
+    });
+    const stillCharged = await owner.upload("avatar", await png());
+    expect(stillCharged.status).toBe(400);
+    expect(stillCharged.body.error.code).toBe("storage_quota_exceeded");
+
+    await expect(cleanupTemporaryStorageObjects()).resolves.toMatchObject({
+      queued: 1,
+      failed: 0
+    });
+    const revived = await pool.query<{ status: string; attempts: number }>(
+      `select status, attempts from domain_outbox where event_key = $1`,
+      [`storage.delete:${object.id}`]
+    );
+    expect(revived.rows[0]).toEqual({ status: "pending", attempts: 0 });
+
+    await fs.rmdir(file);
+    await fs.writeFile(file, "retry deletion target");
+    await expect(
+      processOutboxBatch({
+        workerId: "storage-delete-retry",
+        maxAttempts: 3,
+        baseBackoffMs: 10
+      })
+    ).resolves.toMatchObject({ processed: 1, failed: 0 });
+
+    const recovered = await pool.query<{ objectStatus: string; eventStatus: string; attempts: number }>(
+      `select s.status as "objectStatus", o.status as "eventStatus", o.attempts
+       from storage_objects s
+       join domain_outbox o on o.event_key = 'storage.delete:' || s.id::text
+       where s.id = $1`,
+      [object.id]
+    );
+    expect(recovered.rows[0]).toEqual({
+      objectStatus: "deleted",
+      eventStatus: "processed",
+      attempts: 1
+    });
+    await expect(fs.stat(file)).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await owner.upload("avatar", await png())).status).toBe(201);
+  });
+
+  it("treats an already-missing provider object as a successful idempotent delete", async () => {
+    const owner = await authedClient();
+    const response = await owner.upload("avatar", await png());
+    const stored = await pool.query<{ id: string; objectKey: string }>(
+      `select id, object_key as "objectKey"
+       from storage_objects
+       where id = $1`,
+      [response.body.upload.id]
+    );
+    const object = stored.rows[0];
+    const file = path.resolve(env.LOCAL_UPLOAD_DIR, ...object.objectKey.split("/"));
+    await inTx((client) => enqueueStorageDeletion(client, object.id));
+    await fs.unlink(file);
+
+    await expect(
+      processOutboxBatch({ workerId: "storage-delete-missing" })
+    ).resolves.toMatchObject({ processed: 1, failed: 0 });
+    const result = await pool.query<{ objectStatus: string; eventStatus: string }>(
+      `select s.status as "objectStatus", o.status as "eventStatus"
+       from storage_objects s
+       join domain_outbox o on o.event_key = 'storage.delete:' || s.id::text
+       where s.id = $1`,
+      [object.id]
+    );
+    expect(result.rows[0]).toEqual({
+      objectStatus: "deleted",
+      eventStatus: "processed"
+    });
+  });
+
+  it("fairly reconciles stale uploads alongside a backlog of terminal deletions", async () => {
+    const owner = await authedClient();
+    const deleting = await pool.query<{ id: string }>(
+      `insert into storage_objects(
+         owner_id, object_key, storage_driver, purpose, mime_type,
+         size_bytes, width, height, status, created_at
+       )
+       select $1, 'test/deleting-' || gs, 'local', 'avatar', 'image/webp',
+              1, 1, 1, 'deleting', now() - interval '48 hours'
+       from generate_series(1, 4) gs
+       returning id`,
+      [owner.userId]
+    );
+    for (const object of deleting.rows) {
+      await pool.query(
+        `insert into domain_outbox(
+           event_key, event_type, aggregate_type, aggregate_id, payload,
+           status, attempts, last_error
+         )
+         values ($1, 'storage.delete', 'storage_object', $2, $3, 'failed', 8, 'provider unavailable')`,
+        [
+          `storage.delete:${object.id}`,
+          object.id,
+          JSON.stringify({ storageObjectId: object.id })
+        ]
+      );
+    }
+    const uploading = await pool.query<{ id: string }>(
+      `insert into storage_objects(
+         owner_id, object_key, storage_driver, purpose, mime_type,
+         size_bytes, width, height, status, created_at
+       )
+       values ($1, 'test/stale-upload', 'local', 'avatar', 'image/webp',
+               1, 1, 1, 'uploading', now() - interval '2 hours')
+       returning id`,
+      [owner.userId]
+    );
+
+    await expect(
+      cleanupTemporaryStorageObjects({ olderThanHours: 1, batchSize: 2 })
+    ).resolves.toEqual({ claimed: 2, queued: 2, failed: 0 });
+
+    const uploadState = await pool.query<{ objectStatus: string; eventStatus: string }>(
+      `select s.status as "objectStatus", o.status as "eventStatus"
+       from storage_objects s
+       join domain_outbox o on o.aggregate_id = s.id::text and o.event_type = 'storage.delete'
+       where s.id = $1`,
+      [uploading.rows[0].id]
+    );
+    expect(uploadState.rows[0]).toEqual({
+      objectStatus: "deleting",
+      eventStatus: "pending"
+    });
+    const revived = await pool.query<{ count: number }>(
+      `select count(*)::int as count
+       from domain_outbox
+       where aggregate_id::uuid = any($1::uuid[])
+         and status = 'pending'`,
+      [deleting.rows.map((object) => object.id)]
+    );
+    expect(revived.rows[0].count).toBe(1);
+  });
+
+  it("does not enqueue a duplicate while an upload-recovery deletion is active", async () => {
+    const owner = await authedClient();
+    const object = await pool.query<{ id: string }>(
+      `insert into storage_objects(
+         owner_id, object_key, storage_driver, purpose, mime_type,
+         size_bytes, width, height, status, created_at
+       )
+       values ($1, 'test/late-upload', 'local', 'avatar', 'image/webp',
+               1, 1, 1, 'deleting', now() - interval '48 hours')
+       returning id`,
+      [owner.userId]
+    );
+    await pool.query(
+      `insert into domain_outbox(event_key, event_type, aggregate_type, aggregate_id, payload)
+       values ($1, 'storage.delete', 'storage_object', $2, $3)`,
+      [
+        `storage.delete:${object.rows[0].id}:upload-recovery`,
+        object.rows[0].id,
+        JSON.stringify({ storageObjectId: object.rows[0].id })
+      ]
+    );
+
+    await expect(cleanupTemporaryStorageObjects({ batchSize: 10 })).resolves.toEqual({
+      claimed: 0,
+      queued: 0,
+      failed: 0
+    });
+    const count = await pool.query<{ count: number }>(
+      `select count(*)::int as count
+       from domain_outbox
+       where aggregate_id = $1 and event_type = 'storage.delete'`,
+      [object.rows[0].id]
+    );
+    expect(count.rows[0].count).toBe(1);
+  });
+
+  it("revives a failed late-upload intent instead of a processed default event", async () => {
+    const owner = await authedClient();
+    const object = await pool.query<{ id: string }>(
+      `insert into storage_objects(
+         owner_id, object_key, storage_driver, purpose, mime_type,
+         size_bytes, width, height, status, created_at
+       )
+       values ($1, 'test/failed-late-upload', 'local', 'avatar', 'image/webp',
+               1, 1, 1, 'deleting', now() - interval '48 hours')
+       returning id`,
+      [owner.userId]
+    );
+    const defaultKey = `storage.delete:${object.rows[0].id}`;
+    const recoveryKey = `${defaultKey}:upload-recovery`;
+    await pool.query(
+      `insert into domain_outbox(
+         event_key, event_type, aggregate_type, aggregate_id, payload,
+         status, attempts, processed_at, last_error
+       )
+       values
+         ($1, 'storage.delete', 'storage_object', $3, $4, 'processed', 1, now(), null),
+         ($2, 'storage.delete', 'storage_object', $3, $4, 'failed', 8, null, 'provider unavailable')`,
+      [
+        defaultKey,
+        recoveryKey,
+        object.rows[0].id,
+        JSON.stringify({ storageObjectId: object.rows[0].id })
+      ]
+    );
+
+    await expect(cleanupTemporaryStorageObjects({ batchSize: 10 })).resolves.toEqual({
+      claimed: 1,
+      queued: 1,
+      failed: 0
+    });
+    const events = await pool.query<{ eventKey: string; status: string; attempts: number }>(
+      `select event_key as "eventKey", status, attempts
+       from domain_outbox
+       where aggregate_id = $1 and event_type = 'storage.delete'
+       order by event_key`,
+      [object.rows[0].id]
+    );
+    expect(events.rows).toEqual([
+      { eventKey: defaultKey, status: "processed", attempts: 1 },
+      { eventKey: recoveryKey, status: "pending", attempts: 0 }
+    ]);
+  });
+
+  it("reopens a confirmed deletion when a provider upload finishes late", async () => {
+    const owner = await authedClient();
+    const object = await pool.query<{ id: string; objectKey: string }>(
+      `insert into storage_objects(
+         owner_id, object_key, storage_driver, purpose, mime_type,
+         size_bytes, width, height, status, deleted_at
+       )
+       values ($1, 'test/late-provider-write', 'local', 'avatar', 'image/webp',
+               1, 1, 1, 'deleted', now())
+       returning id, object_key as "objectKey"`,
+      [owner.userId]
+    );
+    const file = path.resolve(
+      env.LOCAL_UPLOAD_DIR,
+      ...object.rows[0].objectKey.split("/")
+    );
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, "provider write completed after cleanup");
+
+    await inTx((client) =>
+      enqueueStorageDeletion(client, object.rows[0].id, {
+        reopenDeleted: true,
+        eventKey: `storage.delete:${object.rows[0].id}:upload-recovery`
+      })
+    );
+    const reopened = await pool.query<{
+      objectStatus: string;
+      deletedAt: Date | null;
+      eventStatus: string;
+    }>(
+      `select s.status as "objectStatus", s.deleted_at as "deletedAt",
+              o.status as "eventStatus"
+       from storage_objects s
+       join domain_outbox o on o.aggregate_id = s.id::text
+       where s.id = $1 and o.event_type = 'storage.delete'`,
+      [object.rows[0].id]
+    );
+    expect(reopened.rows[0]).toEqual({
+      objectStatus: "deleting",
+      deletedAt: null,
+      eventStatus: "pending"
+    });
+
+    await expect(
+      processOutboxBatch({ workerId: "storage-late-upload-recovery" })
+    ).resolves.toMatchObject({ processed: 1, failed: 0 });
+    await expect(fs.stat(file)).rejects.toMatchObject({ code: "ENOENT" });
+    const deleted = await pool.query<{ objectStatus: string; eventStatus: string }>(
+      `select s.status as "objectStatus", o.status as "eventStatus"
+       from storage_objects s
+       join domain_outbox o on o.aggregate_id = s.id::text
+       where s.id = $1 and o.event_type = 'storage.delete'`,
+      [object.rows[0].id]
+    );
+    expect(deleted.rows[0]).toEqual({
+      objectStatus: "deleted",
+      eventStatus: "processed"
+    });
   });
 
   it("attaches chat images by ID instead of accepting a client URL", async () => {

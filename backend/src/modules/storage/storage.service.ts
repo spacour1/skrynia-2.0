@@ -27,8 +27,10 @@ export const storagePurposes = [
 export type StoragePurpose = (typeof storagePurposes)[number];
 export type StorageDriver = "local" | "s3";
 export type StorageObjectStatus =
+  | "uploading"
   | "temporary"
   | "attached"
+  | "deleting"
   | "deleted"
   | "quarantined";
 
@@ -277,10 +279,11 @@ function quotaError(reason: string, message: string) {
 }
 
 /**
- * Live bytes (temporary + attached) drive the total quota; the daily window counts
- * everything created in the last 24h - deleting an object never refunds the day's
- * processing budget. Temporary objects count everywhere, so attach never needs a
- * byte re-check.
+ * Reserved/uploaded bytes drive the total quota until physical deletion is confirmed;
+ * the daily window counts everything created in the last 24h, so deletion never refunds
+ * the day's processing budget. `uploading` and `deleting` rows deliberately remain in
+ * both live counters: a crash cannot make reserved or potentially-still-present bytes
+ * disappear from accounting.
  */
 async function assertUploadQuota(
   client: DbClient,
@@ -294,9 +297,9 @@ async function assertUploadQuota(
     purposeCount: number;
   }>(
     `select
-       coalesce(sum(size_bytes) filter (where status in ('temporary', 'attached')), 0)::bigint as "totalBytes",
+       coalesce(sum(size_bytes) filter (where status in ('uploading', 'temporary', 'attached', 'deleting')), 0)::bigint as "totalBytes",
        coalesce(sum(size_bytes) filter (where created_at > now() - interval '24 hours'), 0)::bigint as "dailyBytes",
-       (count(*) filter (where purpose = $2 and status in ('temporary', 'attached')))::int as "purposeCount"
+       (count(*) filter (where purpose = $2 and status in ('uploading', 'temporary', 'attached', 'deleting')))::int as "purposeCount"
      from storage_objects
      where owner_id = $1`,
     [ownerId, purpose]
@@ -328,42 +331,60 @@ export async function createStorageUpload(input: {
   const storageDriver = env.STORAGE_DRIVER;
   const objectKey = newObjectKey(input.ownerId, input.purpose);
 
-  await writePhysicalObject(storageDriver, objectKey, image);
+  // Reserve quota and persist the object key before external storage I/O. If the
+  // process dies after PutObject/writeFile, the `uploading` row remains discoverable
+  // and the recurring cleanup can turn it into a durable delete intent.
+  const reserved = await inTx(async (client) => {
+    await client.query(`select pg_advisory_xact_lock(hashtextextended('storage_quota:' || $1, 0))`, [
+      input.ownerId
+    ]);
+    await assertUploadQuota(client, input.ownerId, input.purpose, image.buffer.length);
+    return client.query<StorageObject>(
+      `insert into storage_objects(
+         owner_id, object_key, storage_driver, purpose, mime_type,
+         size_bytes, width, height, status
+       )
+       values ($1, $2, $3, $4, $5, $6, $7, $8, 'uploading')
+       returning ${storageObjectColumns}`,
+      [
+        input.ownerId,
+        objectKey,
+        storageDriver,
+        input.purpose,
+        image.mimeType,
+        image.buffer.length,
+        image.width,
+        image.height
+      ]
+    );
+  });
+  const upload = reserved.rows[0];
+
   try {
-    const inserted = await inTx(async (client) => {
-      // Serialize per-owner: the advisory lock makes the quota re-check plus insert
-      // atomic, so parallel uploads cannot each pass the check and overshoot together.
-      await client.query(`select pg_advisory_xact_lock(hashtextextended('storage_quota:' || $1, 0))`, [
-        input.ownerId
-      ]);
-      await assertUploadQuota(client, input.ownerId, input.purpose, image.buffer.length);
-      return client.query<StorageObject>(
-        `insert into storage_objects(
-           owner_id, object_key, storage_driver, purpose, mime_type,
-           size_bytes, width, height
-         )
-         values ($1, $2, $3, $4, $5, $6, $7, $8)
-         returning ${storageObjectColumns}`,
-        [
-          input.ownerId,
-          objectKey,
-          storageDriver,
-          input.purpose,
-          image.mimeType,
-          image.buffer.length,
-          image.width,
-          image.height
-        ]
-      );
-    });
-    return inserted.rows[0];
+    await writePhysicalObject(storageDriver, objectKey, image);
+    const finalized = await pool.query<StorageObject>(
+      `update storage_objects
+       set status = 'temporary'
+       where id = $1 and status = 'uploading'
+       returning ${storageObjectColumns}`,
+      [upload.id]
+    );
+    if (!finalized.rows[0]) {
+      throw new Error(`Storage upload ${upload.id} lost its reservation before finalization`);
+    }
+    return finalized.rows[0];
   } catch (error) {
     try {
-      await deletePhysicalObject(storageDriver, objectKey);
-    } catch (cleanupError) {
+      await inTx((client) =>
+        enqueueStorageDeletion(client, upload.id, {
+          reopenDeleted: true,
+          eventKey: `storage.delete:${upload.id}:upload-recovery`
+        })
+      );
+    } catch (intentError) {
       logger.error(
-        { cleanupError, objectKey },
-        "storage_upload_rollback_cleanup_failed"
+        { intentError, storageObjectId: upload.id, objectKey },
+        "storage_upload_deletion_intent_failed"
       );
     }
     throw error;
@@ -422,15 +443,65 @@ export async function attachStorageObject(
 
 export async function enqueueStorageDeletion(
   client: Parameters<typeof enqueueDomainEvent>[0],
-  storageObjectId: string
+  storageObjectId: string,
+  options: { reopenDeleted?: boolean; eventKey?: string } = {}
 ) {
-  return enqueueDomainEvent(client, {
-    eventKey: `storage.delete:${storageObjectId}`,
+  const marked = await client.query<{ id: string }>(
+    `update storage_objects
+     set status = 'deleting', deleted_at = null
+     where id = $1 and (status != 'deleted' or $2)
+     returning id`,
+    [storageObjectId, options.reopenDeleted ?? false]
+  );
+  if (!marked.rows[0]) return null;
+
+  // A late provider write uses a distinct recovery key. If that event (or any other
+  // deletion intent for this object) exhausted its attempts, revive the failed intent
+  // itself instead of conflicting with an older, already-processed default key.
+  const revived = await client.query<{ id: string }>(
+    `with failed_event as (
+       select id
+       from domain_outbox
+       where event_type = 'storage.delete'
+         and aggregate_type = 'storage_object'
+         and aggregate_id = $1
+         and status = 'failed'
+       order by updated_at, id
+       limit 1
+       for update
+     )
+     update domain_outbox event
+     set status = 'pending', attempts = 0, available_at = now(),
+         locked_at = null, locked_by = null, processed_at = null,
+         last_error = null, updated_at = now()
+     from failed_event
+     where event.id = failed_event.id
+     returning event.id`,
+    [storageObjectId]
+  );
+  if (revived.rows[0]) return revived.rows[0];
+
+  const event = await enqueueDomainEvent(client, {
+    eventKey: options.eventKey ?? `storage.delete:${storageObjectId}`,
     eventType: "storage.delete",
     aggregateType: "storage_object",
     aggregateId: storageObjectId,
     payload: { storageObjectId }
   });
+
+  // Storage deletion is safe to repeat forever. The hourly reconciler revives a
+  // terminal event instead of leaving a physical object permanently charged to quota.
+  if (event.status === "failed") {
+    await client.query(
+      `update domain_outbox
+       set status = 'pending', attempts = 0, available_at = now(),
+           locked_at = null, locked_by = null, processed_at = null,
+           last_error = null, updated_at = now()
+       where id = $1 and status = 'failed'`,
+      [event.id]
+    );
+  }
+  return event;
 }
 
 export async function deleteStorageObject(storageObjectId: string) {
@@ -460,53 +531,79 @@ export async function cleanupTemporaryStorageObjects(
   const batchSize = Math.min(Math.max(options.batchSize ?? 100, 1), 500);
 
   const candidates = await pool.query<{ id: string }>(
-    `select id
-     from storage_objects
-     where status = 'temporary'
-       and created_at < now() - ($1 * interval '1 hour')
-     order by created_at
+    `with eligible as (
+       select id, created_at,
+              case when status in ('uploading', 'temporary') then 0 else 1 end as lane
+       from storage_objects
+       where (
+           status in ('uploading', 'temporary')
+           and created_at < now() - ($1 * interval '1 hour')
+         )
+         or (
+           status = 'deleting'
+           and not exists (
+             select 1
+             from domain_outbox event
+             where event.event_type = 'storage.delete'
+               and event.aggregate_type = 'storage_object'
+               and event.aggregate_id = storage_objects.id::text
+               and event.status in ('pending', 'processing')
+           )
+         )
+     ), ranked as (
+       select id, lane,
+              row_number() over (partition by lane order by created_at, id) as lane_position
+       from eligible
+     )
+     select id
+     from ranked
+     order by lane_position, lane
      limit $2`,
     [olderThanHours, batchSize]
   );
 
-  let deleted = 0;
+  let queued = 0;
   let failed = 0;
   for (const candidate of candidates.rows) {
     try {
-      const didDelete = await inTx(async (client) => {
-        const selected = await client.query<StorageObject>(
-          `select ${storageObjectColumns}
+      const didQueue = await inTx(async (client) => {
+        const selected = await client.query<{ id: string }>(
+          `select id
            from storage_objects
            where id = $1
-             and status = 'temporary'
-             and created_at < now() - ($2 * interval '1 hour')
+             and (
+               (
+                 status in ('uploading', 'temporary')
+                 and created_at < now() - ($2 * interval '1 hour')
+               )
+               or (
+                 status = 'deleting'
+                 and not exists (
+                   select 1
+                   from domain_outbox event
+                   where event.event_type = 'storage.delete'
+                     and event.aggregate_type = 'storage_object'
+                     and event.aggregate_id = storage_objects.id::text
+                     and event.status in ('pending', 'processing')
+                 )
+               )
+             )
            for update`,
           [candidate.id, olderThanHours]
         );
         const object = selected.rows[0];
         if (!object) return false;
-
-        // Keep the row locked while deleting so an attachment cannot race between the
-        // final status check and physical deletion. A crash rolls the row back to
-        // temporary; deleting the same key again is intentionally idempotent.
-        await deletePhysicalObject(object.storageDriver, object.objectKey);
-        await client.query(
-          `update storage_objects
-           set status = 'deleted', deleted_at = now()
-           where id = $1`,
-          [object.id]
-        );
-        return true;
+        return (await enqueueStorageDeletion(client, object.id)) !== null;
       });
-      if (didDelete) deleted += 1;
+      if (didQueue) queued += 1;
     } catch (error) {
       failed += 1;
       logger.error(
         { error, storageObjectId: candidate.id },
-        "temporary_storage_cleanup_failed"
+        "storage_cleanup_intent_failed"
       );
     }
   }
 
-  return { claimed: candidates.rows.length, deleted, failed };
+  return { claimed: candidates.rows.length, queued, failed };
 }

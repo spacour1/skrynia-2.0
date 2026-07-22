@@ -209,6 +209,22 @@ S3_SECRET_ACCESS_KEY=<iam-secret>
 - Object scanning (virus/malware scan) is a future hardening item. Do not assume uploaded content is safe.
 - Never make the S3 bucket public-write from the browser. All uploads go through the authenticated `/storage/upload` endpoint.
 
+### Durable storage-state migration rollout
+
+Migration `1784752500000_add-storage-operation-states.sql` adds the `uploading` and
+`deleting` recovery states used by API and outbox workers. Apply the migration before
+deploying the matching backend build, then restart API and worker replicas together;
+avoid a prolonged mixed-version rollout because older replicas do not include these
+reserved states in quota totals. Keep the domain outbox worker enabled so deletion
+intents retry provider failures. Before rolling back, stop writers and drain pending
+`storage.delete` events; the down migration maps any remaining operation rows to
+`quarantined`, preserving their object keys for manual cleanup instead of discarding
+recovery evidence.
+The replacement CHECK constraints are validated before the short constraint-name swap.
+The partial cleanup index is built transactionally, however, so on a very large
+`storage_objects` table schedule this migration in a maintenance window: PostgreSQL can
+block concurrent writes while that index is built.
+
 ---
 
 ## Production deployment checklist

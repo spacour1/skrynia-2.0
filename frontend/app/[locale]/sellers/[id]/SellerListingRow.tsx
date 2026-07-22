@@ -2,7 +2,8 @@
 
 import { Heart, Timer } from "lucide-react";
 import Link from "@/lib/navigation";
-import { money, type Product } from "@/lib/api";
+import { type Product } from "@/lib/api";
+import { useMoney } from "@/lib/currency";
 import { useI18n } from "@/lib/i18n";
 
 export function SellerListingRow({
@@ -25,6 +26,7 @@ export function SellerListingRow({
   onToggleFavorite: (product: Product) => void;
 }) {
   const { t } = useI18n();
+  const money = useMoney();
 
   const badges: string[] = [];
   if (product.gameName) badges.push(product.gameName);
@@ -77,7 +79,7 @@ export function SellerListingRow({
         </div>
       </div>
 
-      <p className="text-left text-lg font-black text-emerald-400 lg:text-right">{money(Number(product.priceCents), product.currency)}</p>
+      <p className="text-left text-lg font-black text-emerald-400 lg:text-right">{money(product.priceCents, product.currency)}</p>
 
       <button
         type="button"

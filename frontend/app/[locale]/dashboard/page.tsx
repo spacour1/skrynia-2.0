@@ -15,7 +15,8 @@ import {
   UserRound,
   WalletCards
 } from "lucide-react";
-import { apiFetch, money, type Order } from "@/lib/api";
+import { apiFetch, type Order } from "@/lib/api";
+import { useMoney, type WireMoneyCents } from "@/lib/currency";
 import { useAuth } from "@/lib/auth-store";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -23,8 +24,8 @@ import { RequireAuth } from "@/components/RequireAuth";
 type WalletResponse = {
   wallet: {
     currency: string;
-    availableCents: number;
-    escrowCents: number;
+    availableCents: WireMoneyCents;
+    escrowCents: WireMoneyCents;
   };
 };
 
@@ -37,6 +38,7 @@ export default function DashboardPage() {
 }
 
 function DashboardContent() {
+  const money = useMoney();
   const user = useAuth((state) => state.user);
   const orders = useQuery({
     queryKey: ["orders"],
@@ -140,6 +142,7 @@ function DashboardContent() {
 }
 
 function OrderRow({ order, userId }: { order: Order; userId: string }) {
+  const money = useMoney();
   const isBuyer = order.buyerId === userId;
   const partner = isBuyer ? order.sellerDisplayName : order.buyerDisplayName;
   const amount = money(order.amountCents ?? 0, order.currency);

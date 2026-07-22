@@ -21,7 +21,8 @@ import {
   WalletCards,
   X
 } from "lucide-react";
-import { apiFetch, money, type Game } from "@/lib/api";
+import { apiFetch, type Game } from "@/lib/api";
+import { useMoney, type WireMoneyCents } from "@/lib/currency";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
 import { captureEvent } from "@/lib/posthog";
@@ -34,12 +35,13 @@ import type { NotificationItem, SuggestProduct } from "./nav/types";
 type WalletResponse = {
   wallet?: {
     currency: string;
-    availableCents: number;
-    escrowCents: number;
+    availableCents: WireMoneyCents;
+    escrowCents: WireMoneyCents;
   } | null;
 };
 
 export function Nav() {
+  const money = useMoney();
   const { user, hydrated, logout } = useAuth();
   // Until we actually know (either the optimistic localStorage-cached profile already
   // landed, or hydrate()'s /auth/me call confirmed it), don't render the logged-out

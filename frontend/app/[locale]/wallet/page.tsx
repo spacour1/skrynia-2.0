@@ -6,7 +6,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RequireAuth } from "@/components/RequireAuth";
 import { EmailNotVerifiedNotice } from "@/components/EmailNotVerifiedNotice";
 import { PhoneNotVerifiedNotice } from "@/components/PhoneNotVerifiedNotice";
-import { ApiError, apiFetch, isEmailNotVerifiedError, isPhoneNotVerifiedError, money } from "@/lib/api";
+import { ApiError, apiFetch, isEmailNotVerifiedError, isPhoneNotVerifiedError } from "@/lib/api";
+import { sumMoneyCents, useMoney, type WireMoneyCents } from "@/lib/currency";
 import { useI18n } from "@/lib/i18n";
 import { redirectToLiqpay, type LiqpayCheckout } from "@/lib/liqpay";
 import { redirectToMonobank, type MonobankCheckout } from "@/lib/monobank";
@@ -15,15 +16,15 @@ import { redirectToWayforpay, type WayforpayCheckout } from "@/lib/wayforpay";
 type WalletItem = {
   id: string;
   currency: string;
-  availableCents: number;
-  escrowCents: number;
+  availableCents: WireMoneyCents;
+  escrowCents: WireMoneyCents;
 };
 
 type WalletTransaction = {
   id: string;
   type: string;
   direction: string;
-  amountCents: number;
+  amountCents: WireMoneyCents;
   currency: string;
   status: string;
   orderId?: string;
@@ -54,6 +55,7 @@ export default function WalletPage() {
 }
 
 function WalletContent() {
+  const money = useMoney();
   const client = useQueryClient();
   const { language, t } = useI18n();
   const [tab, setTab] = useState("all");
@@ -72,7 +74,7 @@ function WalletContent() {
 
   const transactions = wallet.data?.transactions ?? [];
   const wallets = wallet.data?.wallets ?? (wallet.data?.wallet ? [wallet.data.wallet] : []);
-  const primary = wallet.data?.wallet ?? wallets[0] ?? { currency: "UAH", availableCents: 0, escrowCents: 0 };
+  const primary = wallet.data?.wallet ?? wallets[0] ?? { currency: "UAH", availableCents: "0", escrowCents: "0" };
   const processingCents = sumTransactions(transactions.filter((tx) => tx.status !== "completed" && tx.status !== "succeeded"));
 
   const topupWithLiqpay = useMutation({
@@ -363,7 +365,7 @@ function BalanceCard({ icon: Icon, label, value, text, accent }: { icon: LucideI
 }
 
 function sumTransactions(transactions: WalletTransaction[]) {
-  return transactions.reduce((sum, tx) => sum + Number(tx.amountCents), 0);
+  return sumMoneyCents(transactions.map((tx) => tx.amountCents));
 }
 
 function labelTx(type: string, t: (key: string) => string) {

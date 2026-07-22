@@ -3,7 +3,8 @@
 import Link from "@/lib/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, AlertTriangle, Banknote, Flag, Headphones, ImageIcon, LayoutGrid, ListChecks, ShieldCheck, Users, WalletCards } from "lucide-react";
-import { apiFetch, money } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
+import { useMoney, type WireMoneyCents } from "@/lib/currency";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/auth-store";
@@ -13,14 +14,14 @@ type Overview = {
   products: number;
   openDisputes: number;
   ordersByStatus: { status: string; count: number }[];
-  revenue: { currency: string; revenueCents: number }[];
+  revenue: { currency: string; revenueCents: WireMoneyCents }[];
 };
 
 type Listing = {
   id: string;
   title: string;
   status: string;
-  priceCents: number;
+  priceCents: WireMoneyCents;
   currency: string;
   categoryName: string;
   sellerDisplayName: string;
@@ -30,7 +31,7 @@ type Transaction = {
   id: string;
   type: string;
   direction: string;
-  amountCents: number;
+  amountCents: WireMoneyCents;
   currency: string;
   displayName?: string;
   orderId?: string;
@@ -46,6 +47,7 @@ export default function AdminPage() {
 }
 
 function AdminContent() {
+  const money = useMoney();
   const client = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -180,7 +182,7 @@ function AdminContent() {
                     <td>{tx.displayName ?? "-"}</td>
                     <td>{tx.type.replace("_", " ")}</td>
                     <td>{tx.direction}</td>
-                    <td className="text-right">{money(Number(tx.amountCents), tx.currency)}</td>
+                    <td className="text-right">{money(tx.amountCents, tx.currency)}</td>
                     <td className="text-right">{new Date(tx.createdAt).toLocaleString("ru-RU")}</td>
                   </tr>
                 ))}
@@ -198,7 +200,7 @@ function AdminContent() {
               <div>
                 <p className="font-semibold">{listing.title}</p>
                 <p className="text-sm text-muted">
-                  {listing.sellerDisplayName} · {listing.categoryName} · {money(Number(listing.priceCents), listing.currency)}
+                  {listing.sellerDisplayName} · {listing.categoryName} · {money(listing.priceCents, listing.currency)}
                 </p>
               </div>
               <div className="flex items-center gap-2">

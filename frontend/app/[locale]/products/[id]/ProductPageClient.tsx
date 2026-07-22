@@ -21,7 +21,8 @@ import {
 import { ChatPanel } from "@/components/ChatPanel";
 import { EmailNotVerifiedNotice } from "@/components/EmailNotVerifiedNotice";
 import { ReportModal } from "@/components/ReportModal";
-import { apiFetch, isEmailNotVerifiedError, money, type Product } from "@/lib/api";
+import { apiFetch, isEmailNotVerifiedError, type Product } from "@/lib/api";
+import { calculateDiscountPercent, isPositiveMoneyCents, useMoney } from "@/lib/currency";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
 import { fieldLabel, formatFieldValue } from "@/lib/product-fields";
@@ -51,6 +52,7 @@ type ProductReview = {
 };
 
 export function ProductPageClient({ id }: { id: string }) {
+  const money = useMoney();
   const router = useRouter();
   const queryClient = useQueryClient();
   const user = useAuth((state) => state.user);
@@ -141,10 +143,7 @@ export function ProductPageClient({ id }: { id: string }) {
   const item = product.data.product;
   const reviews = product.data.reviews ?? [];
   const isOwn = isOwnProduct;
-  const discount =
-    item.oldPriceCents && item.oldPriceCents > item.priceCents
-      ? Math.round(((item.oldPriceCents - item.priceCents) / item.oldPriceCents) * 100)
-      : 0;
+  const discount = calculateDiscountPercent(item.priceCents, item.oldPriceCents);
   const metadata = item.metadata ?? {};
   // A lot created under a catalog-builder section carries its own field schema
   // (metadataFields, resolved against the schema version it was created under - see
@@ -201,7 +200,7 @@ export function ProductPageClient({ id }: { id: string }) {
 
             <div className="border-t border-line bg-panel/40 p-5 lg:border-l lg:border-t-0">
               <p className="text-sm text-muted">{t("product.lotPrice")}</p>
-              {item.oldPriceCents ? <p className="mt-2 text-sm font-semibold text-muted line-through">{money(item.oldPriceCents, item.currency)}</p> : null}
+              {item.oldPriceCents != null && isPositiveMoneyCents(item.oldPriceCents) ? <p className="mt-2 text-sm font-semibold text-muted line-through">{money(item.oldPriceCents, item.currency)}</p> : null}
               <p className="mt-1 text-3xl font-black text-brand">{money(item.priceCents, item.currency)}</p>
               <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
                 <MiniFact icon={PackageCheck} label={t("product.inStock")} value={`${item.stock} ${t("product.unitsShort")}`} />

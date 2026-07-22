@@ -1,5 +1,5 @@
 import { ChevronRight, Clock, Eye, Lock, Star, type LucideIcon } from "lucide-react";
-import { money } from "@/lib/api";
+import { calculateDiscountPercent, majorUnitsToMoneyCents, useMoney } from "@/lib/currency";
 import { deliveryTimes } from "./constants";
 import type { LotForm } from "./types";
 
@@ -18,9 +18,10 @@ export function PreviewCard({
   categoryName?: string;
   sellerName: string;
 }) {
-  const price = Number(form.price || 0);
-  const oldPrice = Number(form.oldPrice || 0);
-  const discount = oldPrice > price && price > 0 ? Math.round(((oldPrice - price) / oldPrice) * 100) : 0;
+  const money = useMoney();
+  const priceCents = parseFormMoney(form.price);
+  const oldPriceCents = parseFormMoney(form.oldPrice);
+  const discount = calculateDiscountPercent(priceCents, oldPriceCents);
   const title = form.title || "Название вашего лота";
   const subtitle = form.shortDescription || [gameName, sectionName, categoryName].filter(Boolean).join(" • ") || "Краткое преимущество появится здесь";
 
@@ -53,10 +54,10 @@ export function PreviewCard({
             <h3 className="mt-3 text-xl font-black leading-7 text-ink">{title}</h3>
             <p className="mt-3 line-clamp-2 text-sm text-muted">{subtitle}</p>
             <div className="mt-4">
-              <p className="text-2xl font-black text-ink">{money(Math.round(price * 100), form.currency)}</p>
-              {oldPrice > 0 ? (
+              <p className="text-2xl font-black text-ink">{money(priceCents, form.currency)}</p>
+              {oldPriceCents > 0n ? (
                 <p className="mt-1 text-sm text-muted">
-                  <span className="line-through">{money(Math.round(oldPrice * 100), form.currency)}</span>
+                  <span className="line-through">{money(oldPriceCents, form.currency)}</span>
                   {discount ? <span className="ml-2 rounded bg-rose-500/20 px-2 py-1 text-xs font-bold text-rose-300">-{discount}%</span> : null}
                 </p>
               ) : null}
@@ -81,6 +82,15 @@ export function PreviewCard({
       </article>
     </section>
   );
+}
+
+function parseFormMoney(value: string): bigint {
+  if (!value.trim()) return 0n;
+  try {
+    return majorUnitsToMoneyCents(value);
+  } catch {
+    return 0n;
+  }
 }
 
 function Badge({ icon: Icon, text }: { icon: LucideIcon; text: string }) {

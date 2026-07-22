@@ -6,7 +6,8 @@ import { useQuery } from "@tanstack/react-query";
 import { BarChart3, ChevronRight, Clock3, MessageCircle, PackageCheck, Search, Store } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { StatusBadge } from "@/components/StatusBadge";
-import { apiFetch, money, type Order } from "@/lib/api";
+import { apiFetch, type Order } from "@/lib/api";
+import { sumMoneyCentsByCurrency, useMoney } from "@/lib/currency";
 
 const statusFilters = [
   ["all", "Все"],
@@ -27,6 +28,7 @@ export default function SellerSalesPage() {
 }
 
 function SellerSalesContent() {
+  const money = useMoney();
   const [status, setStatus] = useState("all");
   const [q, setQ] = useState("");
   const sales = useQuery({
@@ -47,8 +49,10 @@ function SellerSalesContent() {
 
   const activeCount = orders.filter((order) => !["completed", "refunded"].includes(order.status)).length;
   const completedCount = orders.filter((order) => order.status === "completed").length;
-  const totalAmount = orders.reduce((sum, order) => sum + Number(order.amountCents ?? 0), 0);
-  const currency = orders[0]?.currency ?? "UAH";
+  const totals = sumMoneyCentsByCurrency(orders.map((order) => ({ currency: order.currency, cents: order.amountCents ?? "0" })));
+  const turnover = totals.size
+    ? Array.from(totals, ([currency, cents]) => money(cents, currency, { preserveCurrency: true })).join(" / ")
+    : money(0, "UAH", { preserveCurrency: true });
 
   return (
     <div className="mx-auto max-w-[1360px] space-y-5">
@@ -62,7 +66,7 @@ function SellerSalesContent() {
           <div className="grid grid-cols-3 gap-3 sm:min-w-[500px]">
             <Summary icon={Store} label="Всего" value={String(orders.length)} />
             <Summary icon={Clock3} label="Активные" value={String(activeCount)} />
-            <Summary icon={BarChart3} label="Оборот" value={money(totalAmount, currency)} />
+            <Summary icon={BarChart3} label="Оборот" value={turnover} />
           </div>
         </div>
 

@@ -1,8 +1,10 @@
+import type { WireMoneyCents } from "@/lib/currency";
+
 export type SellerProduct = {
   id: string;
   title: string;
   description: string;
-  priceCents: number;
+  priceCents: WireMoneyCents;
   currency: string;
   stock: number;
   status: string;
@@ -11,7 +13,7 @@ export type SellerProduct = {
   sectionName?: string;
   deliveryType?: string;
   productType?: string;
-  oldPriceCents?: number | null;
+  oldPriceCents?: WireMoneyCents | null;
   salesCount?: number;
   metadata?: Record<string, unknown>;
   media?: { id: string; url: string; type: string; status?: string }[];

@@ -1,5 +1,5 @@
-import { money } from "@/lib/api";
 import type { ReconciliationSnapshot } from "./types";
+import type { MoneyFormatter, WireMoneyCents } from "@/lib/currency";
 
 export function latestSnapshotsByCurrency(snapshots: ReconciliationSnapshot[]) {
   const byCurrency = new Map<string, ReconciliationSnapshot>();
@@ -9,9 +9,9 @@ export function latestSnapshotsByCurrency(snapshots: ReconciliationSnapshot[]) {
   return Array.from(byCurrency.values()).sort((a, b) => a.currency.localeCompare(b.currency));
 }
 
-export function formatRevenue(rows: { currency: string; revenueCents: number }[]) {
+export function formatRevenue(rows: { currency: string; revenueCents: WireMoneyCents }[], money: MoneyFormatter) {
   if (!rows.length) return "0";
-  return rows.map((row) => money(Number(row.revenueCents), row.currency)).join(" / ");
+  return rows.map((row) => money(row.revenueCents, row.currency)).join(" / ");
 }
 
 export function refetchAll(...queries: { refetch: () => unknown }[]) {

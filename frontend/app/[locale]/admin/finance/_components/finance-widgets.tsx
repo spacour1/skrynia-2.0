@@ -2,7 +2,7 @@
 
 import { useState, type ComponentType } from "react";
 import { ArrowDownCircle, ArrowUpCircle, CheckCircle2 } from "lucide-react";
-import { money } from "@/lib/api";
+import { absMoneyCents, isZeroMoneyCents, subtractMoneyCents, sumMoneyCents, useMoney, type MoneyCents } from "@/lib/currency";
 import { StatusBadge } from "@/components/StatusBadge";
 import { accountTypeLabel, directionLabel, entryTypeLabel, formatDate, shortId } from "./finance-format";
 import type { LedgerEntry, PendingOrder } from "./types";
@@ -29,8 +29,9 @@ export function FinanceMetric({
 }
 
 export function LedgerEntryCard({ entry }: { entry: LedgerEntry }) {
-  const debit = entry.lines.reduce((sum, line) => sum + Number(line.debitCents), 0);
-  const credit = entry.lines.reduce((sum, line) => sum + Number(line.creditCents), 0);
+  const money = useMoney();
+  const debit = sumMoneyCents(entry.lines.map((line) => line.debitCents));
+  const credit = sumMoneyCents(entry.lines.map((line) => line.creditCents));
   const balanced = debit === credit;
   return (
     <article className="rounded-lg border border-line bg-surface/50 p-4">
@@ -48,7 +49,7 @@ export function LedgerEntryCard({ entry }: { entry: LedgerEntry }) {
         <div className="grid min-w-[260px] grid-cols-3 gap-2 text-sm">
           <MiniTotal label="Дебет" value={money(debit, entry.currency)} />
           <MiniTotal label="Кредит" value={money(credit, entry.currency)} />
-          <MiniTotal label="Разница" value={money(Math.abs(debit - credit), entry.currency)} danger={!balanced} />
+          <MiniTotal label="Разница" value={money(absMoneyCents(debit - credit), entry.currency)} danger={!balanced} />
         </div>
       </div>
       <div className="table-shell mt-4 overflow-x-auto shadow-none">
@@ -71,8 +72,8 @@ export function LedgerEntryCard({ entry }: { entry: LedgerEntry }) {
                 </td>
                 <td>{accountTypeLabel(line.accountType)}</td>
                 <td className="font-mono text-xs text-muted">{line.userId ? shortId(line.userId) : "-"}</td>
-                <td className="text-right">{Number(line.debitCents) ? money(Number(line.debitCents), entry.currency) : "-"}</td>
-                <td className="text-right">{Number(line.creditCents) ? money(Number(line.creditCents), entry.currency) : "-"}</td>
+                <td className="text-right">{!isZeroMoneyCents(line.debitCents) ? money(line.debitCents, entry.currency) : "-"}</td>
+                <td className="text-right">{!isZeroMoneyCents(line.creditCents) ? money(line.creditCents, entry.currency) : "-"}</td>
               </tr>
             ))}
           </tbody>
@@ -91,27 +92,28 @@ export function Delta({
   rightLabel
 }: {
   label: string;
-  left: number;
-  right: number;
+  left: MoneyCents;
+  right: MoneyCents;
   currency: string;
   leftLabel: string;
   rightLabel: string;
 }) {
-  const difference = Math.abs(Number(left) - Number(right));
+  const money = useMoney();
+  const difference = absMoneyCents(subtractMoneyCents(left, right));
   return (
-    <div className={`rounded-lg border p-3 ${difference ? "border-rose-300 bg-rose-50 dark:border-rose-400/40 dark:bg-rose-400/10" : "border-line bg-card"}`}>
+    <div className={`rounded-lg border p-3 ${difference !== 0n ? "border-rose-300 bg-rose-50 dark:border-rose-400/40 dark:bg-rose-400/10" : "border-line bg-card"}`}>
       <p className="text-xs font-bold uppercase text-muted">{label}</p>
       <div className="mt-2 grid gap-1 text-sm">
         <p className="flex justify-between gap-2">
           <span className="text-muted">{leftLabel}</span>
-          <span className="font-semibold">{money(Number(left), currency)}</span>
+          <span className="font-semibold">{money(left, currency)}</span>
         </p>
         <p className="flex justify-between gap-2">
           <span className="text-muted">{rightLabel}</span>
-          <span className="font-semibold">{money(Number(right), currency)}</span>
+          <span className="font-semibold">{money(right, currency)}</span>
         </p>
       </div>
-      <p className={`mt-2 text-sm font-black ${difference ? "text-rose-600 dark:text-rose-300" : "text-emerald-600 dark:text-emerald-300"}`}>
+      <p className={`mt-2 text-sm font-black ${difference !== 0n ? "text-rose-600 dark:text-rose-300" : "text-emerald-600 dark:text-emerald-300"}`}>
         Разница {money(difference, currency)}
       </p>
     </div>
@@ -147,6 +149,7 @@ export function PendingOrderRow({
   onConfirm: (reference: string) => void;
   isPending: boolean;
 }) {
+  const money = useMoney();
   const [reference, setReference] = useState("");
   return (
     <article className="rounded-lg border border-line bg-surface/50 p-4 sm:flex sm:items-center sm:justify-between sm:gap-4">
@@ -158,7 +161,7 @@ export function PendingOrderRow({
         <p className="mt-1 font-mono text-xs text-muted">{shortId(order.id)} · {formatDate(order.createdAt)}</p>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-0">
-        <p className="font-black text-brand">{money(Number(order.amountCents), order.currency)}</p>
+        <p className="font-black text-brand">{money(order.amountCents, order.currency)}</p>
         <input className="app-input h-9 w-44" placeholder="Комментарий (необязательно)" value={reference} onChange={(event) => setReference(event.target.value)} />
         <button className="app-button" type="button" disabled={isPending} onClick={() => onConfirm(reference)}>
           <CheckCircle2 className="h-4 w-4" />

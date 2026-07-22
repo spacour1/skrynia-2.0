@@ -5,6 +5,7 @@ import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { defaultLocale, isLocale, locales } from "@/i18n/config";
 import { getT } from "@/i18n/dictionaries";
 import { ProductPageClient } from "./ProductPageClient";
+import { moneyCentsToMajorUnits } from "@/lib/money";
 
 type ProductResponse = { product: Product };
 
@@ -56,7 +57,7 @@ function buildProductJsonLd(product: Product) {
     offers: {
       "@type": "Offer",
       url: `${SITE_URL}/${defaultLocale}/products/${product.id}`,
-      price: (product.priceCents / 100).toFixed(2),
+      price: moneyCentsToMajorUnits(product.priceCents),
       priceCurrency: product.currency,
       availability: product.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock"
     },

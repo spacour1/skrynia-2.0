@@ -13,7 +13,8 @@ import {
   Search,
   WalletCards
 } from "lucide-react";
-import { ApiError, apiFetch, money } from "@/lib/api";
+import { ApiError, apiFetch } from "@/lib/api";
+import { sumMoneyCents, useMoney } from "@/lib/currency";
 import { RequireAuth } from "@/components/RequireAuth";
 import { StatusBadge } from "@/components/StatusBadge";
 import { entryTypeLabel, formatDate, formatRevenue, latestSnapshotsByCurrency, refetchAll, shortId, transactionTypeLabel } from "./_components/finance-format";
@@ -28,6 +29,7 @@ export default function AdminFinancePage() {
   );
 }
 function AdminFinanceContent() {
+  const money = useMoney();
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState<Filters>({ query: "", currency: "all", type: "all", status: "all" });
   const overview = useQuery({
@@ -110,19 +112,19 @@ function AdminFinanceContent() {
   }, [filters.currency, filters.query, filters.status, txs]);
 
   const totals = useMemo(() => {
-    const debitByCurrency = new Map<string, number>();
-    const creditByCurrency = new Map<string, number>();
+    const debitByCurrency = new Map<string, bigint>();
+    const creditByCurrency = new Map<string, bigint>();
     entries.forEach((entry) => {
-      const debit = entry.lines.reduce((sum, line) => sum + Number(line.debitCents), 0);
-      const credit = entry.lines.reduce((sum, line) => sum + Number(line.creditCents), 0);
-      debitByCurrency.set(entry.currency, (debitByCurrency.get(entry.currency) ?? 0) + debit);
-      creditByCurrency.set(entry.currency, (creditByCurrency.get(entry.currency) ?? 0) + credit);
+      const debit = sumMoneyCents(entry.lines.map((line) => line.debitCents));
+      const credit = sumMoneyCents(entry.lines.map((line) => line.creditCents));
+      debitByCurrency.set(entry.currency, (debitByCurrency.get(entry.currency) ?? 0n) + debit);
+      creditByCurrency.set(entry.currency, (creditByCurrency.get(entry.currency) ?? 0n) + credit);
     });
     return currencies.map((currency) => ({
       currency,
-      debit: debitByCurrency.get(currency) ?? 0,
-      credit: creditByCurrency.get(currency) ?? 0,
-      revenue: overview.data?.revenue.find((item) => item.currency === currency)?.revenueCents ?? 0
+      debit: debitByCurrency.get(currency) ?? 0n,
+      credit: creditByCurrency.get(currency) ?? 0n,
+      revenue: overview.data?.revenue.find((item) => item.currency === currency)?.revenueCents ?? "0"
     }));
   }, [currencies, entries, overview.data?.revenue]);
 
@@ -161,7 +163,7 @@ function AdminFinanceContent() {
         <FinanceMetric icon={CheckCircle2} label="Записи главной книги" value={entries.length} tone="ok" />
         <FinanceMetric icon={FileSearch} label="Строки журнала транзакций" value={txs.length} />
         <FinanceMetric icon={Scale} label="Проблемы сверки" value={mismatchCount} tone={mismatchCount ? "danger" : "ok"} />
-        <FinanceMetric icon={Banknote} label="Доход платформы" value={formatRevenue(overview.data?.revenue ?? [])} />
+        <FinanceMetric icon={Banknote} label="Доход платформы" value={formatRevenue(overview.data?.revenue ?? [], money)} />
       </section>
 
       <section className="app-card p-5">
@@ -246,7 +248,7 @@ function AdminFinanceContent() {
                   <Delta label="Доход" left={snapshot.platformRevenueCents} right={snapshot.ledgerRevenueCents} currency={snapshot.currency} leftLabel="платформа" rightLabel="главная книга" />
                   <div className="rounded-lg border border-line bg-card p-3">
                     <p className="text-xs font-bold uppercase text-muted">Клиринг провайдера</p>
-                    <p className="mt-2 text-lg font-black">{money(Number(snapshot.providerClearingCents), snapshot.currency)}</p>
+                    <p className="mt-2 text-lg font-black">{money(snapshot.providerClearingCents, snapshot.currency)}</p>
                     <p className="mt-1 text-xs text-muted">Актив на стороне провайдера до финального расчета</p>
                   </div>
                 </div>
@@ -323,7 +325,7 @@ function AdminFinanceContent() {
                   <td><Direction direction={tx.direction} /></td>
                   <td><StatusBadge status={tx.status} /></td>
                   <td className="font-mono text-xs text-muted">{tx.orderId ? shortId(tx.orderId) : "-"}</td>
-                  <td className="text-right font-semibold">{money(Number(tx.amountCents), tx.currency)}</td>
+                  <td className="text-right font-semibold">{money(tx.amountCents, tx.currency)}</td>
                 </tr>
               ))}
             </tbody>

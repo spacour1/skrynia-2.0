@@ -5,7 +5,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BadgePercent, Heart, PackageOpen, Star, Store, Timer } from "lucide-react";
 import { GameIcon } from "@/components/GameIcon";
 import { RequireAuth } from "@/components/RequireAuth";
-import { apiFetch, money, type Product } from "@/lib/api";
+import { apiFetch, type Product } from "@/lib/api";
+import { calculateDiscountPercent, isPositiveMoneyCents, useMoney } from "@/lib/currency";
 import { firstProductMedia } from "@/lib/product-media";
 import { showAppToast } from "@/lib/toast-events";
 import { useI18n } from "@/lib/i18n";
@@ -109,12 +110,10 @@ function FavoriteOfferRow({
   removing: boolean;
   onRemove: () => void;
 }) {
+  const money = useMoney();
   const { t } = useI18n();
   const imageUrl = firstProductMedia(product);
-  const discount =
-    product.oldPriceCents && Number(product.oldPriceCents) > Number(product.priceCents)
-      ? Math.round(((Number(product.oldPriceCents) - Number(product.priceCents)) / Number(product.oldPriceCents)) * 100)
-      : 0;
+  const discount = calculateDiscountPercent(product.priceCents, product.oldPriceCents);
 
   return (
     <article className="group relative grid gap-4 border-b border-line bg-card px-4 py-4 transition last:border-b-0 hover:bg-panel/55 md:grid-cols-[72px_minmax(0,1fr)_190px_130px_48px] md:items-center">
@@ -169,8 +168,8 @@ function FavoriteOfferRow({
       </Link>
 
       <div className="text-left md:text-right">
-        {product.oldPriceCents ? <p className="text-xs font-bold text-muted line-through">{money(Number(product.oldPriceCents), product.currency)}</p> : null}
-        <p className="text-xl font-black text-ink">{money(Number(product.priceCents), product.currency)}</p>
+        {product.oldPriceCents != null && isPositiveMoneyCents(product.oldPriceCents) ? <p className="text-xs font-bold text-muted line-through">{money(product.oldPriceCents, product.currency)}</p> : null}
+        <p className="text-xl font-black text-ink">{money(product.priceCents, product.currency)}</p>
         <p className="mt-1 inline-flex items-center gap-1 text-xs font-bold text-muted">
           <span className={`h-2.5 w-2.5 rounded-full ${product.sellerOnline === true ? "bg-emerald-400 shadow-[0_0_0_4px_rgba(52,211,153,0.16)]" : product.sellerOnline === false ? "bg-muted" : "bg-action/70"}`} />
           {product.sellerOnline == null

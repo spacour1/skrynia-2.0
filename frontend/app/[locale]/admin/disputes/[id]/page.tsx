@@ -3,7 +3,8 @@
 import Link from "@/lib/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useState } from "react";
-import { apiFetch, money } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
+import { useMoney, type WireMoneyCents } from "@/lib/currency";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useI18n } from "@/lib/i18n";
@@ -15,7 +16,7 @@ type DisputeDetail = {
   reason: string;
   resolution?: string;
   orderStatus: string;
-  amountCents: number;
+  amountCents: WireMoneyCents;
   currency: string;
   productTitle: string;
 };
@@ -37,6 +38,7 @@ export default function AdminDisputeDetailPage({ params }: { params: { id: strin
 }
 
 function AdminDisputeDetailContent({ params }: { params: { id: string } }) {
+  const money = useMoney();
   const client = useQueryClient();
   const { t } = useI18n();
   const [adminNote, setAdminNote] = useState("");

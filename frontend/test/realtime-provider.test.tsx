@@ -1,8 +1,10 @@
 import { act, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthStatus } from "@/lib/auth-store";
 import { useAuth } from "@/lib/auth-store";
 import { RealtimeProvider } from "@/components/RealtimeProvider";
+import { CurrencyProvider, useCurrency } from "@/lib/currency";
 import { renderWithProviders } from "./helpers/render";
 
 type FakeRealtimeInstance = {
@@ -22,6 +24,14 @@ vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
+    apiFetch: vi.fn(async () => ({
+      baseCurrency: "UAH",
+      rates: [
+        { code: "UAH", rateToUah: "1", source: "test", asOf: "2026-01-01", updatedAt: "2026-01-01" },
+        { code: "USD", rateToUah: "40", source: "test", asOf: "2026-01-01", updatedAt: "2026-01-01" },
+        { code: "EUR", rateToUah: "45", source: "test", asOf: "2026-01-01", updatedAt: "2026-01-01" }
+      ]
+    })),
     broadcastSessionEnded: vi.fn(),
     onAuthenticationRefreshed: vi.fn(() => () => undefined),
     onSessionEnded: vi.fn(() => () => undefined)
@@ -107,6 +117,37 @@ describe("RealtimeProvider auth lifecycle", () => {
 
     act(() => useAuth.getState().setAnonymous());
     expect(client.stop).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the same realtime client when the display currency changes", async () => {
+    const userInteraction = userEvent.setup();
+    useAuth.getState().setAuthenticated(user);
+
+    function CurrencyProbe() {
+      const { displayCurrency, setDisplayCurrency } = useCurrency();
+      return (
+        <button type="button" onClick={() => setDisplayCurrency("USD")}>
+          {displayCurrency}
+        </button>
+      );
+    }
+
+    renderWithProviders(
+      <CurrencyProvider>
+        <RealtimeProvider>
+          <CurrencyProbe />
+        </RealtimeProvider>
+      </CurrencyProvider>
+    );
+    const client = currentClient();
+
+    await userInteraction.click(screen.getByRole("button", { name: "UAH" }));
+
+    expect(await screen.findByRole("button", { name: "USD" })).toBeInTheDocument();
+    expect(realtimeMock.instances).toHaveLength(1);
+    expect(currentClient()).toBe(client);
+    expect(client.start).toHaveBeenCalledOnce();
+    expect(client.stop).not.toHaveBeenCalled();
   });
 
   it("revalidates a terminal auth rejection once and performs at most one recovery reconnect", async () => {

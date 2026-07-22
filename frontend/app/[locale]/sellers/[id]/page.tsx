@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@/lib/navigation";
 import { apiFetch, type Product, type User } from "@/lib/api";
+import type { WireMoneyCents } from "@/lib/currency";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
 import { showAppToast } from "@/lib/toast-events";
@@ -32,7 +33,7 @@ type SellerResponse = {
     completedOrders: number;
     disputedOrders: number;
     refundedOrders: number;
-    completedRevenueCents: string;
+    completedRevenueCents: WireMoneyCents;
     successRate: number | null;
     hasEnoughData: boolean;
   };

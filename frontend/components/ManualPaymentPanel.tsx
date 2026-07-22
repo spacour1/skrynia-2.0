@@ -3,18 +3,20 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Banknote, Check, Copy } from "lucide-react";
-import { ApiError, apiFetch, money } from "@/lib/api";
+import { ApiError, apiFetch } from "@/lib/api";
+import { useMoney, type WireMoneyCents } from "@/lib/currency";
 
 type ManualPaymentDetails = {
   cardNumber: string;
   receiverName: string;
   bank: string | null;
-  amountCents: number;
+  amountCents: WireMoneyCents;
   currency: string;
   comment: string;
 };
 
 export function ManualPaymentPanel({ orderId }: { orderId: string }) {
+  const money = useMoney();
   const details = useQuery({
     queryKey: ["manual-payment-details", orderId],
     queryFn: () => apiFetch<ManualPaymentDetails>(`/payments/orders/${orderId}/manual/details`)
@@ -32,7 +34,7 @@ export function ManualPaymentPanel({ orderId }: { orderId: string }) {
         Реквизиты для перевода
       </div>
       <div className="mt-3 grid gap-2 text-sm">
-        <CopyRow label="Сумма к переводу" value={money(d.amountCents, d.currency)} />
+        <CopyRow label="Сумма к переводу" value={money(d.amountCents, d.currency, { preserveCurrency: true })} />
         <CopyRow label="Номер карты" value={d.cardNumber} mono />
         <CopyRow label="Получатель" value={d.receiverName} />
         {d.bank ? <CopyRow label="Банк" value={d.bank} /> : null}

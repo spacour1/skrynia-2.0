@@ -1,15 +1,17 @@
+import type { WireMoneyCents } from "@/lib/currency";
+
 export type SuggestProduct = {
   id: string;
   title: string;
   description: string;
-  priceCents: number;
+  priceCents: WireMoneyCents;
   currency: string;
   productType?: string;
   deliveryType?: string;
   metadata?: Record<string, unknown>;
   media?: { id: string; url: string; type: string }[];
   isHot?: boolean;
-  oldPriceCents?: number | null;
+  oldPriceCents?: WireMoneyCents | null;
   gameSlug?: string;
   gameName?: string;
   categoryName?: string;

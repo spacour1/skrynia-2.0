@@ -3,7 +3,8 @@
 import type { ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { GameIcon } from "@/components/GameIcon";
-import { money, type Game } from "@/lib/api";
+import { type Game } from "@/lib/api";
+import { useMoney } from "@/lib/currency";
 import { useI18n } from "@/lib/i18n";
 import { firstProductMedia } from "@/lib/product-media";
 import type { SuggestProduct } from "./types";
@@ -26,6 +27,7 @@ export function SearchSuggest({
   onSearch: (query: string) => void;
 }) {
   const { t } = useI18n();
+  const money = useMoney();
   const hasResults = games.length || products.length;
 
   return (

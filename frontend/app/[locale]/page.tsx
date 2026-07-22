@@ -23,7 +23,8 @@ import {
 import { useRef } from "react";
 import { GameIcon } from "../../components/GameIcon";
 import { MarketplaceCategoryLink } from "@/components/MarketplaceCategoryLink";
-import { apiFetch, money, type ConversationGroup, type Game, type Product } from "../../lib/api";
+import { apiFetch, type ConversationGroup, type Game, type Product } from "../../lib/api";
+import { useMoney } from "../../lib/currency";
 import { firstProductMedia } from "../../lib/product-media";
 import { useAuth } from "../../lib/auth-store";
 import { SECTION_PATTERNS, getGameTileTheme, type CategoryTile, type GameTileThemeConfig } from "../../lib/game-catalog";
@@ -396,6 +397,7 @@ function CategoriesRow() {
 }
 
 function FreshOffers() {
+  const money = useMoney();
   const { t } = useI18n();
   const router = useRouter();
   const user = useAuth((s) => s.user);
@@ -469,7 +471,7 @@ function FreshOffers() {
                 <div className="p-3">
                   <h3 className="line-clamp-1 text-sm font-bold text-ink transition group-hover:text-brand">{product.title}</h3>
                   <div className="mt-1.5 flex items-center justify-between gap-2">
-                    <p className="text-sm font-black text-brand">{money(Number(product.priceCents), product.currency)}</p>
+                    <p className="text-sm font-black text-brand">{money(product.priceCents, product.currency)}</p>
                     {product.sellerDisplayName ? (
                       <p className="flex min-w-0 items-center gap-1 text-xs text-muted">
                         {rating > 0 ? (

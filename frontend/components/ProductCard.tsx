@@ -3,18 +3,16 @@
 import Link from "@/lib/navigation";
 import { BadgePercent, Star, Store, Timer } from "lucide-react";
 import type { Product } from "@/lib/api";
-import { money } from "@/lib/api";
+import { calculateDiscountPercent, isPositiveMoneyCents, useMoney } from "@/lib/currency";
 import { GameIcon } from "./GameIcon";
 import { firstProductMedia } from "@/lib/product-media";
 import { useI18n } from "@/lib/i18n";
 
 export function ProductCard({ product }: { product: Product }) {
+  const money = useMoney();
   const { t } = useI18n();
   const imageUrl = firstProductMedia(product);
-  const discount =
-    product.oldPriceCents && Number(product.oldPriceCents) > Number(product.priceCents)
-      ? Math.round(((Number(product.oldPriceCents) - Number(product.priceCents)) / Number(product.oldPriceCents)) * 100)
-      : 0;
+  const discount = calculateDiscountPercent(product.priceCents, product.oldPriceCents);
 
   return (
     <article className="interactive-card group relative overflow-hidden">
@@ -64,8 +62,8 @@ export function ProductCard({ product }: { product: Product }) {
           <span className="truncate">{product.sellerDisplayName}</span>
         </Link>
         <div className="text-right">
-          {product.oldPriceCents ? <p className="text-xs text-muted line-through">{money(Number(product.oldPriceCents), product.currency)}</p> : null}
-          <p className="font-extrabold text-ink">{money(Number(product.priceCents), product.currency)}</p>
+          {product.oldPriceCents != null && isPositiveMoneyCents(product.oldPriceCents) ? <p className="text-xs text-muted line-through">{money(product.oldPriceCents, product.currency)}</p> : null}
+          <p className="font-extrabold text-ink">{money(product.priceCents, product.currency)}</p>
           <p className="mt-1 flex items-center justify-end gap-1 text-xs text-muted">
             <Star className="h-3.5 w-3.5 fill-action text-action" />
             {Number(product.sellerRating ?? 0).toFixed(1)}

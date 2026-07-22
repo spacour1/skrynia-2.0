@@ -1,4 +1,5 @@
 import type { CatalogField } from "./catalog-api";
+import type { WireMoneyCents } from "./money";
 
 // Routed through the Next.js rewrite in next.config.mjs so the browser always talks to
 // its own origin — this keeps auth/CSRF cookies same-site even when the backend lives on
@@ -73,7 +74,7 @@ export type Product = {
   id: string;
   title: string;
   description: string;
-  priceCents: number;
+  priceCents: WireMoneyCents;
   currency: string;
   stock: number;
   status?: string;
@@ -101,7 +102,7 @@ export type Product = {
   deliveryTemplate?: string;
   deliveryType?: "manual" | "instant";
   productType?: "account" | "key" | "topup" | "boosting" | "service" | "item" | "currency";
-  oldPriceCents?: number | null;
+  oldPriceCents?: WireMoneyCents | null;
   salesCount?: number;
   isHot?: boolean;
   isRecommended?: boolean;
@@ -126,8 +127,8 @@ export type Order = {
   sellerDisplayName?: string;
   sellerAvatarUrl?: string | null;
   quantity: number;
-  amountCents?: number;
-  feeCents?: number;
+  amountCents?: WireMoneyCents;
+  feeCents?: WireMoneyCents;
   currency: string;
   deliveryNote?: string;
   autoReleaseAt?: string;
@@ -146,7 +147,7 @@ export type Conversation = {
   buyerAvatarUrl?: string | null;
   sellerDisplayName?: string;
   sellerAvatarUrl?: string | null;
-  amountCents?: number | null;
+  amountCents?: WireMoneyCents | null;
   currency?: string | null;
   lastMessageAt?: string | null;
   lastMessageBody?: string | null;
@@ -166,7 +167,7 @@ export type ConversationContext = {
   productTitle?: string | null;
   orderId?: string | null;
   orderStatus?: string | null;
-  amountCents?: number | null;
+  amountCents?: WireMoneyCents | null;
   currency?: string | null;
   unreadCount?: number;
   lastMessageAt?: string | null;
@@ -186,104 +187,6 @@ export type ConversationGroup = {
   lastMessageBody?: string | null;
   contexts: ConversationContext[];
 };
-
-export type CurrencyCode = "UAH" | "USD" | "EUR";
-
-export type CurrencyRate = {
-  code: CurrencyCode;
-  rateToUah: number;
-  source: string;
-  asOf: string;
-  updatedAt: string;
-};
-
-export type CurrencyRatesResponse = {
-  baseCurrency: CurrencyCode;
-  rates: CurrencyRate[];
-};
-
-// Labels are ISO-style English names; the UI shows only the currency code, so these
-// don't need per-locale translations.
-export const DISPLAY_CURRENCIES: { code: CurrencyCode; label: string; symbol: string }[] = [
-  { code: "UAH", label: "Hryvnia", symbol: "₴" },
-  { code: "USD", label: "Dollar", symbol: "$" },
-  { code: "EUR", label: "Euro", symbol: "€" }
-];
-
-export const DISPLAY_CURRENCY_EVENT = "display-currency-change";
-
-let currencyToUahRate: Record<CurrencyCode, number> = {
-  UAH: 1,
-  USD: 0,
-  EUR: 0
-};
-
-const currencySymbols: Record<CurrencyCode, string> = {
-  UAH: "₴",
-  USD: "$",
-  EUR: "€"
-};
-
-export function getDisplayCurrency(): CurrencyCode | null {
-  if (typeof window === "undefined") return null;
-  const stored = window.localStorage.getItem("displayCurrency");
-  return isCurrencyCode(stored) ? stored : null;
-}
-
-export function setDisplayCurrency(currency: CurrencyCode) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem("displayCurrency", currency);
-  window.dispatchEvent(new CustomEvent(DISPLAY_CURRENCY_EVENT, { detail: { currency } }));
-}
-
-export function setCurrencyRates(rates: CurrencyRate[]) {
-  const next = { ...currencyToUahRate };
-  for (const rate of rates) {
-    next[rate.code] = rate.rateToUah;
-  }
-  currencyToUahRate = next;
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent(DISPLAY_CURRENCY_EVENT, { detail: { rates } }));
-  }
-}
-
-export function convertMoneyCents(cents = 0, fromCurrency = "UAH", toCurrency: CurrencyCode) {
-  const from = isCurrencyCode(fromCurrency) ? fromCurrency : "UAH";
-  if (from === toCurrency) return cents;
-  if (!currencyToUahRate[from] || !currencyToUahRate[toCurrency]) return cents;
-  return Math.round((cents * currencyToUahRate[from]) / currencyToUahRate[toCurrency]);
-}
-
-export function money(cents?: number, currency = "UAH", options: { preserveCurrency?: boolean } = {}) {
-  const sourceCurrency = isCurrencyCode(currency) ? currency : "UAH";
-  const shouldPreserve = options.preserveCurrency ?? isAccountingPath();
-  const displayCurrency = shouldPreserve ? sourceCurrency : getDisplayCurrency() ?? sourceCurrency;
-  const value = displayCurrency === sourceCurrency ? cents ?? 0 : convertMoneyCents(cents ?? 0, sourceCurrency, displayCurrency);
-  const amount = new Intl.NumberFormat("ru-RU", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(value / 100);
-  return `${amount} ${currencySymbols[displayCurrency]}`;
-}
-
-function isCurrencyCode(value: unknown): value is CurrencyCode {
-  return value === "UAH" || value === "USD" || value === "EUR";
-}
-
-function isAccountingPath() {
-  if (typeof window === "undefined") return false;
-  // Strip the /ua|/ru|/en prefix so path checks keep working under locale routing.
-  const locale = currentPathLocale();
-  const pathname = locale ? window.location.pathname.slice(locale.length + 1) || "/" : window.location.pathname;
-  return [
-    "/admin",
-    "/dashboard",
-    "/orders",
-    "/wallet",
-    "/seller/earnings",
-    "/seller/sales"
-  ].some((path) => pathname.startsWith(path));
-}
 
 export class ApiError extends Error {
   constructor(

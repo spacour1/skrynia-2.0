@@ -17,7 +17,8 @@ import {
   Zap
 } from "lucide-react";
 import { GameIcon } from "@/components/GameIcon";
-import { apiFetch, money, type Game, type GameSection, type Product } from "@/lib/api";
+import { apiFetch, type Game, type GameSection, type Product } from "@/lib/api";
+import { calculateDiscountPercent, isPositiveMoneyCents, useMoney } from "@/lib/currency";
 import { catalogApi, type CatalogField } from "@/lib/catalog-api";
 import { buildCatalogGroups } from "@/lib/game-catalog";
 import { firstProductMedia } from "@/lib/product-media";
@@ -388,11 +389,9 @@ function OfferRow({
   liked: boolean;
   onToggleFavorite: (liked: boolean) => void;
 }) {
+  const money = useMoney();
   const { t } = useI18n();
-  const discount =
-    product.oldPriceCents && Number(product.oldPriceCents) > Number(product.priceCents)
-      ? Math.round(((Number(product.oldPriceCents) - Number(product.priceCents)) / Number(product.oldPriceCents)) * 100)
-      : 0;
+  const discount = calculateDiscountPercent(product.priceCents, product.oldPriceCents);
   const avatar = sellerAvatars[index % sellerAvatars.length];
   const image = firstProductMedia(product);
   // Real, schema-driven specs the seller actually entered for this lot (region, warranty,
@@ -459,8 +458,8 @@ function OfferRow({
         </Link>
 
         <div className="text-right">
-          {product.oldPriceCents ? <p className="text-xs font-bold text-muted line-through">{money(Number(product.oldPriceCents), product.currency)}</p> : null}
-          <p className="text-xl font-black text-brand">{money(Number(product.priceCents), product.currency)}</p>
+          {product.oldPriceCents != null && isPositiveMoneyCents(product.oldPriceCents) ? <p className="text-xs font-bold text-muted line-through">{money(product.oldPriceCents, product.currency)}</p> : null}
+          <p className="text-xl font-black text-brand">{money(product.priceCents, product.currency)}</p>
         </div>
 
         <button

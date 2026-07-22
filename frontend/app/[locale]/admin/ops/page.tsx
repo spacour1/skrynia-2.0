@@ -15,7 +15,8 @@ import {
   ShieldCheck,
   TimerReset
 } from "lucide-react";
-import { API_URL, apiFetch, money } from "@/lib/api";
+import { API_URL, apiFetch } from "@/lib/api";
+import { absMoneyCents, subtractMoneyCents, sumMoneyCents, useMoney, type WireMoneyCents } from "@/lib/currency";
 import { RequireAuth } from "@/components/RequireAuth";
 import { StatusBadge } from "@/components/StatusBadge";
 
@@ -46,14 +47,14 @@ type AuditLog = {
 type ReconciliationSnapshot = {
   id: string;
   currency: string;
-  walletAvailableCents: number;
-  walletEscrowCents: number;
-  ledgerPayableCents: number;
-  ledgerEscrowCents: number;
-  platformRevenueCents: number;
-  ledgerRevenueCents: number;
-  providerClearingCents: number;
-  differenceCents: number;
+  walletAvailableCents: WireMoneyCents;
+  walletEscrowCents: WireMoneyCents;
+  ledgerPayableCents: WireMoneyCents;
+  ledgerEscrowCents: WireMoneyCents;
+  platformRevenueCents: WireMoneyCents;
+  ledgerRevenueCents: WireMoneyCents;
+  providerClearingCents: WireMoneyCents;
+  differenceCents: WireMoneyCents;
   status: string;
   createdAt: string;
 };
@@ -71,8 +72,8 @@ type LedgerEntry = {
     accountName: string;
     accountType: string;
     userId?: string | null;
-    debitCents: number;
-    creditCents: number;
+    debitCents: WireMoneyCents;
+    creditCents: WireMoneyCents;
   }[];
 };
 
@@ -92,6 +93,7 @@ export default function AdminOpsPage() {
 }
 
 function AdminOpsContent() {
+  const money = useMoney();
   const queryClient = useQueryClient();
   const jobs = useQuery({
     queryKey: ["admin-jobs"],
@@ -226,10 +228,10 @@ function AdminOpsContent() {
                   <StatusBadge status={snapshot.status} />
                 </div>
                 <dl className="mt-3 grid gap-2 text-sm">
-                  <MetricLine label="Доступно в кошельках" value={money(Number(snapshot.walletAvailableCents), snapshot.currency)} />
-                  <MetricLine label="К выплате по книге" value={money(Number(snapshot.ledgerPayableCents), snapshot.currency)} />
-                  <MetricLine label="Разница эскроу" value={money(Math.abs(Number(snapshot.walletEscrowCents) - Number(snapshot.ledgerEscrowCents)), snapshot.currency)} />
-                  <MetricLine label="Итоговая разница" value={money(Number(snapshot.differenceCents), snapshot.currency)} strong />
+                  <MetricLine label="Доступно в кошельках" value={money(snapshot.walletAvailableCents, snapshot.currency)} />
+                  <MetricLine label="К выплате по книге" value={money(snapshot.ledgerPayableCents, snapshot.currency)} />
+                  <MetricLine label="Разница эскроу" value={money(absMoneyCents(subtractMoneyCents(snapshot.walletEscrowCents, snapshot.ledgerEscrowCents)), snapshot.currency)} />
+                  <MetricLine label="Итоговая разница" value={money(snapshot.differenceCents, snapshot.currency)} strong />
                 </dl>
               </div>
             ))}
@@ -287,8 +289,8 @@ function AdminOpsContent() {
           </div>
           <div className="mt-4 space-y-3">
             {ledger.data?.entries.slice(0, 8).map((entry) => {
-              const debit = entry.lines.reduce((sum, line) => sum + Number(line.debitCents), 0);
-              const credit = entry.lines.reduce((sum, line) => sum + Number(line.creditCents), 0);
+              const debit = sumMoneyCents(entry.lines.map((line) => line.debitCents));
+              const credit = sumMoneyCents(entry.lines.map((line) => line.creditCents));
               return (
                 <article key={entry.id} className="rounded-lg border border-line bg-surface/50 p-4">
                   <div className="flex items-start justify-between gap-3">

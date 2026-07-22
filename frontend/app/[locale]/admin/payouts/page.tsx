@@ -2,7 +2,8 @@
 
 import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch, money } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
+import { useMoney, type WireMoneyCents } from "@/lib/currency";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RequireAuth } from "@/components/RequireAuth";
 
@@ -11,7 +12,7 @@ type Payout = {
   userId: string;
   userDisplayName: string;
   userEmail: string;
-  amountCents: number;
+  amountCents: WireMoneyCents;
   currency: string;
   provider: string;
   destination: { method: string; accountNumber: string; holderName: string; bankName?: string };
@@ -30,6 +31,7 @@ export default function AdminPayoutsPage() {
 }
 
 function AdminPayoutsContent() {
+  const money = useMoney();
   const client = useQueryClient();
   const [notes, setNotes] = useState<Record<string, string>>({});
   const payouts = useQuery({

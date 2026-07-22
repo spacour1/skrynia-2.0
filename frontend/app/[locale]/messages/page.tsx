@@ -8,7 +8,8 @@ import { ArrowUpRight, ChevronDown, Flag, MessageCircle, Package, ReceiptText, S
 import { ChatPanel } from "@/components/ChatPanel";
 import { RequireAuth } from "@/components/RequireAuth";
 import { ReportModal } from "@/components/ReportModal";
-import { apiFetch, money, type ConversationContext, type ConversationGroup } from "@/lib/api";
+import { apiFetch, type ConversationContext, type ConversationGroup } from "@/lib/api";
+import { useMoney } from "@/lib/currency";
 import { useI18n } from "@/lib/i18n";
 
 const ACTIVE_ORDER_STATUSES = ["pending", "paid", "in_progress", "delivered", "disputed"];
@@ -23,6 +24,7 @@ export default function MessagesPage() {
 }
 
 function MessagesContent() {
+  const money = useMoney();
   const { t } = useI18n();
   const router = useRouter();
   const chatTabs: Array<[string, string]> = [

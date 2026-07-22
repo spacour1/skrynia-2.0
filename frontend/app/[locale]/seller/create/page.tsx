@@ -22,7 +22,8 @@ import {
 import { RequireAuth } from "@/components/RequireAuth";
 import { GameIcon } from "@/components/GameIcon";
 import { EmailNotVerifiedNotice } from "@/components/EmailNotVerifiedNotice";
-import { apiFetch, isEmailNotVerifiedError, money } from "@/lib/api";
+import { apiFetch, isEmailNotVerifiedError } from "@/lib/api";
+import { majorUnitsToMoneyCents, multiplyMoneyCentsByRatio, useMoney } from "@/lib/currency";
 import { captureEvent } from "@/lib/posthog";
 import { useAuth } from "@/lib/auth-store";
 import { catalogApi, type CatalogField, type PublicCatalogItem } from "@/lib/catalog-api";
@@ -68,6 +69,7 @@ export default function SellerCreatePage() {
 }
 
 function SellerCreateContent() {
+  const money = useMoney();
   const router = useRouter();
   const user = useAuth((state) => state.user);
   const [groupId, setGroupId] = useState("");
@@ -126,8 +128,15 @@ function SellerCreateContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSection?.id]);
 
-  const priceNumber = Number(price || 0);
-  const fee = Math.round(priceNumber * 0.025);
+  const priceCents = useMemo(() => {
+    if (!price.trim()) return null;
+    try {
+      return majorUnitsToMoneyCents(price);
+    } catch {
+      return null;
+    }
+  }, [price]);
+  const feeCents = priceCents == null ? 0n : multiplyMoneyCentsByRatio(priceCents, 25n, 1000n);
 
   useEffect(() => {
     setParams((current) => {
@@ -199,7 +208,7 @@ function SellerCreateContent() {
     if (!sectionId) return "Выберите тип предложения.";
     if (!title.trim()) return "Укажите название лота.";
     if (!description.trim()) return "Добавьте краткое описание.";
-    if (!priceNumber || priceNumber < 1) return "Введите цену.";
+    if (priceCents == null || priceCents < 100n) return "Введите цену.";
     for (const field of schemaFields) {
       if (field.required && isEmptyValue(params[field.key])) return `Заполните поле «${field.label}».`;
     }
@@ -237,8 +246,8 @@ function SellerCreateContent() {
               </nav>
             </div>
             <div className="text-right">
-              <p className="text-2xl font-black text-brand">{priceNumber ? money(priceNumber * 100, "UAH") : "0,00 UAH"}</p>
-              <p className="mt-1 text-xs text-muted">Комиссия 2.5% ({money(fee * 100, "UAH")})</p>
+              <p className="text-2xl font-black text-brand">{priceCents != null ? money(priceCents, "UAH") : "0,00 UAH"}</p>
+              <p className="mt-1 text-xs text-muted">Комиссия 2.5% ({money(feeCents, "UAH")})</p>
             </div>
           </div>
         </div>
@@ -448,8 +457,8 @@ function SellerCreateContent() {
                 <PreviewLine label="Тип предложения" value={selectedSection?.name ?? "Не выбран"} />
                 <PreviewLine label="Название лота" value={title || "Dota 2 аккаунт + 5500 MMR + 10K часов"} />
                 <PreviewLine label="Продавец" value={user?.displayName ?? "Seller"} />
-                <PreviewLine label="Цена" value={priceNumber ? money(priceNumber * 100, "UAH") : "1 499.00 UAH"} strong />
-                <PreviewLine label="Комиссия площадки" value={priceNumber ? money(fee * 100, "UAH") : "2.5%"} />
+                <PreviewLine label="Цена" value={priceCents != null ? money(priceCents, "UAH") : "1 499.00 UAH"} strong />
+                <PreviewLine label="Комиссия площадки" value={priceCents != null ? money(feeCents, "UAH") : "2.5%"} />
               </div>
             </div>
             <p className="mt-4 text-xs leading-5 text-muted">Предпросмотр носит ознакомительный характер. Итоговое отображение может отличаться.</p>

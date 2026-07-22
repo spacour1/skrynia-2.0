@@ -1,8 +1,10 @@
+import type { WireMoneyCents } from "@/lib/currency";
+
 export type Transaction = {
   id: string;
   type: string;
   direction: string;
-  amountCents: number;
+  amountCents: WireMoneyCents;
   currency: string;
   status: string;
   orderId?: string | null;
@@ -17,8 +19,8 @@ export type LedgerLine = {
   accountName: string;
   accountType: string;
   userId?: string | null;
-  debitCents: number;
-  creditCents: number;
+  debitCents: WireMoneyCents;
+  creditCents: WireMoneyCents;
 };
 
 export type LedgerEntry = {
@@ -34,25 +36,25 @@ export type LedgerEntry = {
 export type ReconciliationSnapshot = {
   id: string;
   currency: string;
-  walletAvailableCents: number;
-  walletEscrowCents: number;
-  ledgerPayableCents: number;
-  ledgerEscrowCents: number;
-  platformRevenueCents: number;
-  ledgerRevenueCents: number;
-  providerClearingCents: number;
-  differenceCents: number;
+  walletAvailableCents: WireMoneyCents;
+  walletEscrowCents: WireMoneyCents;
+  ledgerPayableCents: WireMoneyCents;
+  ledgerEscrowCents: WireMoneyCents;
+  platformRevenueCents: WireMoneyCents;
+  ledgerRevenueCents: WireMoneyCents;
+  providerClearingCents: WireMoneyCents;
+  differenceCents: WireMoneyCents;
   status: string;
   createdAt: string;
 };
 
 export type Overview = {
-  revenue: { currency: string; revenueCents: number }[];
+  revenue: { currency: string; revenueCents: WireMoneyCents }[];
 };
 
 export type PendingOrder = {
   id: string;
-  amountCents: number;
+  amountCents: WireMoneyCents;
   currency: string;
   createdAt: string;
   productTitle: string;

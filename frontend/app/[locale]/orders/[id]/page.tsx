@@ -20,7 +20,8 @@ import {
   UserRound,
   XCircle
 } from "lucide-react";
-import { apiFetch, money, type Order } from "@/lib/api";
+import { apiFetch, type Order } from "@/lib/api";
+import { useMoney } from "@/lib/currency";
 import { useAuth } from "@/lib/auth-store";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useI18n } from "@/lib/i18n";
@@ -31,11 +32,9 @@ import { ManualPaymentPanel } from "@/components/ManualPaymentPanel";
 import { redirectToWayforpay, type WayforpayCheckout } from "@/lib/wayforpay";
 import { captureEvent } from "@/lib/posthog";
 
-// Mirrors the backend's NODE_ENV/ENABLE_TEST_PAYMENTS gate: hidden by default on a
-// production build (Vercel always builds with NODE_ENV=production) unless the deployment
-// opts in via NEXT_PUBLIC_ENABLE_TEST_PAYMENTS, same as the backend's ENABLE_TEST_PAYMENTS.
-const SHOW_TEST_PAYMENTS_PANEL =
-  process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_ENABLE_TEST_PAYMENTS === "true";
+// The backend denies test-payment routes unless explicitly enabled, so never expose
+// the panel merely because this is a development build.
+const SHOW_TEST_PAYMENTS_PANEL = process.env.NEXT_PUBLIC_ENABLE_TEST_PAYMENTS === "true";
 
 const statusSteps = [
   { key: "pending", label: "Создан", text: "Заказ ожидает оплаты или подтверждения." },
@@ -60,6 +59,7 @@ type OrderDetailResponse = {
 };
 
 export default function OrderPage({ params }: { params: { id: string } }) {
+  const money = useMoney();
   const user = useAuth((state) => state.user);
   const { t } = useI18n();
   const client = useQueryClient();

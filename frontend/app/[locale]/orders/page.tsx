@@ -4,7 +4,8 @@ import Link from "@/lib/navigation";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Clock3, type LucideIcon, PackageCheck, Search, ShieldCheck, ShoppingBag, UserRound } from "lucide-react";
-import { apiFetch, money, type Order } from "@/lib/api";
+import { apiFetch, type Order } from "@/lib/api";
+import { sumMoneyCentsByCurrency, useMoney } from "@/lib/currency";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/auth-store";
@@ -28,6 +29,7 @@ export default function OrdersPage() {
 }
 
 function OrdersContent() {
+  const money = useMoney();
   const { t } = useI18n();
   const user = useAuth((state) => state.user);
   const [status, setStatus] = useState("all");
@@ -51,8 +53,10 @@ function OrdersContent() {
 
   const activeCount = list.filter((order) => !["completed", "refunded"].includes(order.status)).length;
   const completedCount = list.filter((order) => order.status === "completed").length;
-  const totalAmount = list.reduce((sum, order) => sum + Number(order.amountCents ?? 0), 0);
-  const currency = list[0]?.currency ?? "UAH";
+  const totals = sumMoneyCentsByCurrency(list.map((order) => ({ currency: order.currency, cents: order.amountCents ?? "0" })));
+  const turnover = totals.size
+    ? Array.from(totals, ([currency, cents]) => money(cents, currency, { preserveCurrency: true })).join(" / ")
+    : money(0, "UAH", { preserveCurrency: true });
 
   return (
     <div className="mx-auto max-w-[1440px] space-y-5">
@@ -66,7 +70,7 @@ function OrdersContent() {
           <div className="grid grid-cols-3 gap-3 sm:min-w-[520px]">
             <SummaryTile icon={PackageCheck} label={t("orders.totalLabel")} value={String(list.length)} />
             <SummaryTile icon={Clock3} label={t("orders.activeLabel")} value={String(activeCount)} />
-            <SummaryTile icon={ShieldCheck} label={t("orders.turnoverLabel")} value={money(totalAmount, currency)} />
+            <SummaryTile icon={ShieldCheck} label={t("orders.turnoverLabel")} value={turnover} />
           </div>
         </div>
 
@@ -116,6 +120,7 @@ function OrdersContent() {
 }
 
 function OrderCard({ order, currentUserId }: { order: Order; currentUserId?: string }) {
+  const money = useMoney();
   const { language, t } = useI18n();
   const title = order.productTitle ?? t("common.order");
   const amount = order.amountCents ?? 0;

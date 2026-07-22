@@ -1,6 +1,6 @@
 import { Trash2 } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
-import { money } from "@/lib/api";
+import { isPositiveMoneyCents, moneyCentsToMajorUnits, useMoney } from "@/lib/currency";
 import { productMediaUrls } from "@/lib/product-media";
 import { Input, Textarea } from "./form-kit";
 import type { EditProduct, SellerProduct } from "./types";
@@ -18,6 +18,7 @@ export function SellerListings({
   update: (input: { id: string; body: Record<string, unknown> }) => void;
   remove: (id: string) => void;
 }) {
+  const money = useMoney();
   return (
     <section className="rounded-lg border border-line bg-card p-5 shadow-soft">
       <h2 className="text-xl font-extrabold text-ink">Мои лоты</h2>
@@ -69,7 +70,7 @@ export function SellerListings({
                           </p>
                         </div>
                         <div className="text-right">
-                          {product.oldPriceCents ? <p className="text-xs text-muted line-through">{money(product.oldPriceCents, product.currency)}</p> : null}
+                          {product.oldPriceCents != null && isPositiveMoneyCents(product.oldPriceCents) ? <p className="text-xs text-muted line-through">{money(product.oldPriceCents, product.currency)}</p> : null}
                           <p className="font-extrabold text-ink">{money(product.priceCents, product.currency)}</p>
                           <StatusBadge status={product.status} />
                         </div>
@@ -91,7 +92,7 @@ export function SellerListings({
                           id: product.id,
                           title: product.title,
                           description: product.description,
-                          price: String(product.priceCents / 100),
+                          price: moneyCentsToMajorUnits(product.priceCents),
                           stock: product.stock
                         })
                       }

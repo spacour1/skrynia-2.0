@@ -50,6 +50,11 @@ const schema = z.object({
   STORAGE_PROCESSING_QUEUE_LIMIT: z.coerce.number().int().min(1).default(16),
   UPLOAD_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(20),
   UPLOAD_RATE_LIMIT_PER_IP: z.coerce.number().int().min(1).default(60),
+  // Per-connection WebSocket control-frame ceilings (message frames additionally have
+  // their own chat rate limit).
+  WS_MAX_FRAMES_PER_MIN: z.coerce.number().int().min(1).default(120),
+  WS_MAX_JOINS_PER_MIN: z.coerce.number().int().min(1).default(30),
+  WS_MAX_CONCURRENT_HANDLERS: z.coerce.number().int().min(1).default(8),
   SENTRY_DSN: z.string().optional(),
   SENTRY_RELEASE: z.string().optional(),
   SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).optional(),

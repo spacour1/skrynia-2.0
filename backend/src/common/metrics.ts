@@ -65,6 +65,12 @@ export const wsSlowClientsTotal = new client.Counter({
   help: "WebSocket clients closed because their outbound buffer exceeded the limit"
 });
 
+export const wsFramesRejectedTotal = new client.Counter({
+  name: "marketplace_ws_frames_rejected_total",
+  help: "WebSocket frames dropped by per-connection limits",
+  labelNames: ["reason"] as const
+});
+
 export const rateLimitHitsTotal = new client.Counter({
   name: "marketplace_rate_limit_hits_total",
   help: "Requests rejected by rate limiting (429)"

@@ -12,6 +12,7 @@ import { ApiError } from "../../common/errors.js";
 import {
   wsConnectionsActive,
   wsConnectionFailuresTotal,
+  wsFramesRejectedTotal,
   wsMessagesTotal,
   wsSlowClientsTotal
 } from "../../common/metrics.js";
@@ -46,6 +47,9 @@ type Client = WebSocket & {
   emailVerified?: boolean;
   rooms?: Set<string>;
   sentAt?: number[];
+  frameAt?: number[];
+  joinAt?: number[];
+  pendingHandlers?: number;
   isAlive?: boolean;
 };
 
@@ -154,6 +158,7 @@ const MAX_CONNECTIONS_PER_USER = 12;
 export const WS_CLOSE_SESSION_REVOKED = 4001;
 export const WS_CLOSE_USER_BANNED = 4003;
 export const WS_CLOSE_SLOW_CLIENT = 4008;
+export const WS_CLOSE_ABUSE = 4009;
 
 export function sendJson(client: WebSocket, payload: unknown) {
   if (client.readyState !== WebSocket.OPEN) return false;
@@ -285,6 +290,29 @@ function isSpam(client: Client) {
   client.sentAt = (client.sentAt ?? []).filter((ts) => now - ts < 60_000);
   if (client.sentAt.length >= 15) return true;
   client.sentAt.push(now);
+  return false;
+}
+
+/**
+ * Sliding one-minute window over ALL inbound frames (not only chat messages):
+ * join/leave floods and malformed spam consume CPU and DB checks too. Above the soft
+ * limit frames are dropped with an error; sustained abuse at twice the limit closes
+ * the connection.
+ */
+function trackFrame(client: Client): "ok" | "limited" | "abuse" {
+  const now = Date.now();
+  client.frameAt = (client.frameAt ?? []).filter((ts) => now - ts < 60_000);
+  client.frameAt.push(now);
+  if (client.frameAt.length > env.WS_MAX_FRAMES_PER_MIN * 2) return "abuse";
+  if (client.frameAt.length > env.WS_MAX_FRAMES_PER_MIN) return "limited";
+  return "ok";
+}
+
+function overJoinBudget(client: Client): boolean {
+  const now = Date.now();
+  client.joinAt = (client.joinAt ?? []).filter((ts) => now - ts < 60_000);
+  if (client.joinAt.length >= env.WS_MAX_JOINS_PER_MIN) return true;
+  client.joinAt.push(now);
   return false;
 }
 
@@ -446,6 +474,33 @@ export function attachWebSocketServer(server: http.Server) {
       sendJson(client, { type: "connected" });
 
       client.on("message", (raw) => {
+        // Frame budget and handler bound are checked synchronously, before any parsing
+        // or async work, so a flood cannot fan out into parallel DB checks.
+        const frameBudget = trackFrame(client);
+        if (frameBudget === "abuse") {
+          wsFramesRejectedTotal.labels("frame_flood_close").inc();
+          client.close(WS_CLOSE_ABUSE, "Too many frames");
+          return;
+        }
+        if (frameBudget === "limited") {
+          wsFramesRejectedTotal.labels("frame_flood").inc();
+          sendJson(client, {
+            type: "error",
+            code: "frame_rate_limited",
+            message: "Too many frames, slow down"
+          });
+          return;
+        }
+        if ((client.pendingHandlers ?? 0) >= env.WS_MAX_CONCURRENT_HANDLERS) {
+          wsFramesRejectedTotal.labels("handler_backlog").inc();
+          sendJson(client, {
+            type: "error",
+            code: "busy",
+            message: "Too many in-flight requests on this connection"
+          });
+          return;
+        }
+        client.pendingHandlers = (client.pendingHandlers ?? 0) + 1;
         void (async () => {
           let parsed: unknown;
           try {
@@ -480,9 +535,20 @@ export function attachWebSocketServer(server: http.Server) {
 
           if (msg.type === "join_conversation") {
             if (client.rooms?.has(msg.conversationId)) {
+              // Idempotent re-join: no membership change, no DB access re-check, and
+              // it does not consume the join budget.
               sendJson(client, {
                 type: "joined_conversation",
                 conversationId: msg.conversationId
+              });
+              return;
+            }
+            if (overJoinBudget(client)) {
+              wsFramesRejectedTotal.labels("join_flood").inc();
+              sendJson(client, {
+                type: "error",
+                code: "join_rate_limited",
+                message: "Too many join requests, slow down"
               });
               return;
             }
@@ -569,14 +635,18 @@ export function attachWebSocketServer(server: http.Server) {
                 sendError.status >= 500
             });
           }
-        })().catch((error) => {
-          logger.error({ error, userId: client.userId }, "ws_message_handler_failed");
-          sendJson(client, {
-            type: "error",
-            code: "internal_error",
-            message: "Could not process websocket message"
+        })()
+          .catch((error) => {
+            logger.error({ error, userId: client.userId }, "ws_message_handler_failed");
+            sendJson(client, {
+              type: "error",
+              code: "internal_error",
+              message: "Could not process websocket message"
+            });
+          })
+          .finally(() => {
+            client.pendingHandlers = Math.max(0, (client.pendingHandlers ?? 1) - 1);
           });
-        });
       });
 
       client.on("close", () => {

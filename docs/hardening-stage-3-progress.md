@@ -280,3 +280,50 @@ row.
 | `npx vitest run test/storage-quotas.test.ts test/upload-rate-limit.test.ts` | PASS, 8/8 |
 | `npx vitest run test/storage.test.ts test/product-media-transaction.test.ts` | PASS, 10/10 |
 | `cd backend && npm test` | PASS, 269/269 in 29 files |
+
+## Stage 5.2: websocket control-frame limits
+
+Status: complete.
+
+Commit: `fix(realtime): bound control frames and concurrent handlers`
+
+### Confirmed defect
+
+Only chat `message` frames had a rate limit (15/min). `join_conversation` /
+`leave_conversation` / malformed frames were unmetered, each `message` event spawned
+an unbounded async handler, and every fresh join ran a DB access check — a client
+could open one socket and fan out hundreds of parallel DB queries or grind CPU with
+control-frame floods.
+
+### Implementation
+
+- Per-connection sliding-window budget over ALL inbound frames
+  (`WS_MAX_FRAMES_PER_MIN`, default 120): above the limit frames are dropped with a
+  `frame_rate_limited` error; sustained abuse at twice the limit closes the socket
+  with new code `WS_CLOSE_ABUSE` (4009). Checked synchronously before parsing.
+- Separate join budget (`WS_MAX_JOINS_PER_MIN`, default 30). Idempotent re-joins of
+  an already-joined room answer immediately, never re-run the DB access check, and do
+  not consume the budget; membership stays a set, so a double join still needs one
+  leave.
+- Concurrent-handler bound (`WS_MAX_CONCURRENT_HANDLERS`, default 8): frames beyond
+  the in-flight handler cap are refused with a `busy` error before any async work,
+  which also caps pending DB access checks per connection.
+- Metric `ws_frames_rejected_total{reason}`; env passthrough in compose and both
+  example files.
+
+### Regression coverage (`backend/test/ws-limits.test.ts`, 4 tests, low ceilings)
+
+Join flood: 3 forbidden joins consume the budget, the 4th is refused by the limiter;
+frame flood: rate-limited errors then close 4009; duplicate join is idempotent and
+one leave fully removes membership (no broadcast leaks afterward); a normal
+reconnect can rejoin. Existing suites cover the room ceiling, ACK, and
+revocation-driven closes (28 neighboring tests re-run green).
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `cd backend && npm run lint` | PASS |
+| `npx vitest run test/ws-limits.test.ts` | PASS, 4/4 |
+| `npx vitest run test/ws-ticket.test.ts test/realtime-distribution.test.ts test/chat-service.test.ts` | PASS, 28/28 |
+| `cd backend && npm test` | PASS, 273/273 in 30 files |

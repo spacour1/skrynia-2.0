@@ -195,6 +195,59 @@ async function handleOrderCreated(event: DomainOutboxEvent) {
   await broadcastStoredMessages(payload.systemMessageIds);
 }
 
+async function handleOrderPaid(event: DomainOutboxEvent) {
+  const payload = orderTransitionPayload.parse(event.payload);
+  await Promise.all([
+    createOutboxNotification(event, {
+      userId: payload.sellerId,
+      type: "order_paid",
+      templateKey: "notifications.orderPaidSeller",
+      orderId: payload.orderId,
+      productId: payload.productId
+    }),
+    createOutboxNotification(event, {
+      userId: payload.buyerId,
+      type: "order_paid",
+      templateKey: "notifications.orderPaidBuyer",
+      orderId: payload.orderId,
+      productId: payload.productId
+    })
+  ]);
+  await invalidateOrderCaches({ ...payload, wallet: true });
+  const product = await pool.query<ProductCacheContext>(
+    `select id as "productId", seller_id as "sellerId", category_id as "categoryId",
+            game_id as "gameId", section_id as "sectionId"
+     from products where id = $1`,
+    [payload.productId]
+  );
+  if (product.rows[0]) {
+    await invalidateProductCaches(product.rows[0], { strict: true });
+  }
+  await Promise.all([
+    notifyOrderEvent(
+      payload.sellerId,
+      { type: "order_paid", orderId: payload.orderId },
+      { strict: true }
+    ),
+    notifyOrderEvent(
+      payload.buyerId,
+      { type: "order_paid", orderId: payload.orderId },
+      { strict: true }
+    )
+  ]);
+  await broadcastStoredMessages(payload.systemMessageIds);
+}
+
+async function handleOrderCanceled(event: DomainOutboxEvent) {
+  const payload = orderTransitionPayload.parse(event.payload);
+  await invalidateOrderCaches(payload);
+  await notifyOrderEvent(
+    payload.sellerId,
+    { type: "order_canceled", orderId: payload.orderId },
+    { strict: true }
+  );
+}
+
 async function handleOrderStarted(event: DomainOutboxEvent) {
   const payload = orderTransitionPayload.parse(event.payload);
   await createOutboxNotification(event, {
@@ -492,6 +545,10 @@ export async function handleDomainEvent(event: DomainOutboxEvent): Promise<void>
   switch (event.eventType) {
     case "order.created":
       return handleOrderCreated(event);
+    case "order.paid":
+      return handleOrderPaid(event);
+    case "order.canceled":
+      return handleOrderCanceled(event);
     case "order.started":
       return handleOrderStarted(event);
     case "order.delivered":

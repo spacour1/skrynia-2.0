@@ -6,6 +6,7 @@ import { outboxOldestPendingAgeSeconds } from "../src/common/metrics.js";
 import { getRedis } from "../src/common/redis.js";
 import { inTx, pool } from "../src/db/pool.js";
 import { issueSession } from "../src/modules/auth/session.service.js";
+import { lockEscrow } from "../src/modules/orders/ledger.service.js";
 import { enqueueDomainEvent } from "../src/modules/outbox/outbox.service.js";
 import {
   processOutboxBatch,
@@ -14,6 +15,8 @@ import {
 } from "../src/modules/outbox/outbox.worker.js";
 import {
   closeDb,
+  createConversation,
+  createOrder,
   createProduct,
   createUser,
   resetDb
@@ -185,6 +188,58 @@ describe("transactional domain outbox", () => {
       [sellerId]
     );
     expect(notificationCount.rows[0].count).toBe(1);
+  });
+
+  it("delivers a paid intent once even when the outbox event is replayed", async () => {
+    const sellerId = await createUser();
+    const buyerId = await createUser();
+    const productId = await createProduct(sellerId, { priceCents: 2000 });
+    const orderId = await createOrder(buyerId, sellerId, productId, { amountCents: 2000 });
+    await createConversation(buyerId, sellerId, productId, orderId);
+
+    await lockEscrow(orderId, buyerId, "mock");
+
+    const event = await pool.query<{ id: string }>(
+      `select id from domain_outbox where event_key = $1 and status = 'pending'`,
+      [`order.paid:${orderId}`]
+    );
+    expect(event.rows).toHaveLength(1);
+    const notificationsBefore = await pool.query(
+      `select id from notifications where order_id = $1 and type = 'order_paid'`,
+      [orderId]
+    );
+    expect(notificationsBefore.rows).toHaveLength(0);
+
+    expect(await processOutboxBatch({ workerId: "paid-delivery" })).toEqual({
+      claimed: 1,
+      processed: 1,
+      failed: 0
+    });
+    const notifications = await pool.query(
+      `select user_id as "userId", event_key as "eventKey"
+       from notifications
+       where order_id = $1 and type = 'order_paid'
+       order by user_id`,
+      [orderId]
+    );
+    expect(notifications.rows).toHaveLength(2);
+    expect(new Set(notifications.rows.map((row) => row.userId))).toEqual(
+      new Set([buyerId, sellerId])
+    );
+
+    await pool.query(
+      `update domain_outbox
+       set status = 'pending', attempts = 0, available_at = now(), processed_at = null,
+           locked_at = null, locked_by = null
+       where id = $1`,
+      [event.rows[0].id]
+    );
+    expect((await processOutboxBatch({ workerId: "paid-replay" })).processed).toBe(1);
+    const repeated = await pool.query(
+      `select id from notifications where order_id = $1 and type = 'order_paid'`,
+      [orderId]
+    );
+    expect(repeated.rows).toHaveLength(2);
   });
 
   it("lets only one of two workers claim the same event", async () => {

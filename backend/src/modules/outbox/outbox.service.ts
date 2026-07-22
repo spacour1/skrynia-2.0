@@ -2,6 +2,8 @@ import type pg from "pg";
 
 export const domainEventTypes = [
   "order.created",
+  "order.paid",
+  "order.canceled",
   "order.started",
   "order.delivered",
   "order.completed",

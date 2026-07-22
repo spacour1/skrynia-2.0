@@ -8,7 +8,6 @@ import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { enqueueJob, getJobQueue } from "../jobs/queue.js";
 import { lockEscrow } from "../orders/ledger.service.js";
-import { announceOrderPaid } from "../payments/payments.routes.js";
 import { paymentAttemptsTotal } from "../../common/metrics.js";
 import { logger } from "../../common/logger.js";
 import {
@@ -276,14 +275,15 @@ router.post(
 
     let updated;
     try {
-      updated = await lockEscrow(orderId, order.buyer_id, "manual", reference);
+      updated = await lockEscrow(orderId, order.buyer_id, "manual", reference, {
+        actorId: req.user.id
+      });
       paymentAttemptsTotal.labels("manual", "captured").inc();
     } catch (error) {
       paymentAttemptsTotal.labels("manual", "failed").inc();
       logger.warn({ orderId, error }, "manual_payment_confirm_failed");
       throw badRequest("Could not confirm this order's payment");
     }
-    await announceOrderPaid(updated, req.user.id);
     res.json({ order: updated });
   })
 );

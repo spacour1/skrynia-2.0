@@ -11,11 +11,12 @@ const router = Router();
 
 /**
  * A buyer's own card/Monobank/wallet test panel — never a real payment. Stays available
- * outside production (or behind ENABLE_TEST_PAYMENTS for a staging demo) so the full
- * order/escrow flow can be exercised without a FOP or real gateway credentials.
+ * available automatically only under NODE_ENV=test. Development/staging demos must
+ * opt in explicitly with ENABLE_TEST_PAYMENTS so a non-production deployment cannot
+ * silently expose a free escrow path.
  */
 function assertTestPaymentsEnabled() {
-  if (env.NODE_ENV === "production" && !env.ENABLE_TEST_PAYMENTS) {
+  if (env.NODE_ENV !== "test" && !env.ENABLE_TEST_PAYMENTS) {
     throw forbidden("Test payments are disabled on this server");
   }
 }

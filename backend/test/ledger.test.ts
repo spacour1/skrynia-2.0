@@ -3,6 +3,7 @@ import { pool } from "../src/db/pool.js";
 import { lockEscrow, releaseEscrow, refundEscrow } from "../src/modules/orders/ledger.service.js";
 import {
   closeDb,
+  createConversation,
   createOrder,
   createProduct,
   createUser,
@@ -75,6 +76,94 @@ describe("lockEscrow", () => {
     expect(updated.status).toBe("delivered");
     expect(updated.delivery_note).toBe("SECRET-KEY-123");
     expect(updated.auto_release_at).not.toBeNull();
+  });
+
+  it("commits the paid event, system message, and outbox intent with the capture", async () => {
+    const seller = await createUser();
+    const buyer = await createUser();
+    const productId = await createProduct(seller, { priceCents: 2000 });
+    const orderId = await createOrder(buyer, seller, productId, { amountCents: 2000 });
+    const conversationId = await createConversation(buyer, seller, productId, orderId);
+
+    await lockEscrow(orderId, buyer, "mock");
+
+    const event = await pool.query(
+      `select actor_id as "actorId", type, metadata
+       from order_events where order_id = $1 and type = 'paid'`,
+      [orderId]
+    );
+    expect(event.rows).toHaveLength(1);
+    expect(event.rows[0]).toMatchObject({ actorId: buyer, type: "paid" });
+    expect(event.rows[0].metadata.provider).toBe("mock");
+
+    const message = await pool.query(
+      `select id, system_type as "systemType"
+       from messages where conversation_id = $1 and system_type = 'payment_received'`,
+      [conversationId]
+    );
+    expect(message.rows).toHaveLength(1);
+
+    const outbox = await pool.query(
+      `select event_key as "eventKey", event_type as "eventType", payload, status
+       from domain_outbox where event_key = $1`,
+      [`order.paid:${orderId}`]
+    );
+    expect(outbox.rows).toHaveLength(1);
+    expect(outbox.rows[0]).toMatchObject({
+      eventKey: `order.paid:${orderId}`,
+      eventType: "order.paid",
+      status: "pending"
+    });
+    expect(outbox.rows[0].payload.systemMessageIds).toEqual([message.rows[0].id]);
+  });
+
+  it("rolls back the capture when its durable paid intent cannot be stored", async () => {
+    const seller = await createUser();
+    const buyer = await createUser();
+    const productId = await createProduct(seller, { priceCents: 2000, stock: 5 });
+    const orderId = await createOrder(buyer, seller, productId, { amountCents: 2000 });
+    const conversationId = await createConversation(buyer, seller, productId, orderId);
+
+    await pool.query(`drop trigger if exists test_fail_paid_outbox on domain_outbox`);
+    await pool.query(`drop function if exists test_fail_paid_outbox_insert()`);
+    await pool.query(`
+      create function test_fail_paid_outbox_insert() returns trigger as $$
+      begin
+        if new.event_type = 'order.paid' then
+          raise exception 'paid outbox unavailable';
+        end if;
+        return new;
+      end;
+      $$ language plpgsql
+    `);
+    await pool.query(`
+      create trigger test_fail_paid_outbox
+      before insert on domain_outbox
+      for each row execute function test_fail_paid_outbox_insert()
+    `);
+
+    try {
+      await expect(lockEscrow(orderId, buyer, "mock")).rejects.toThrow("paid outbox unavailable");
+    } finally {
+      await pool.query(`drop trigger if exists test_fail_paid_outbox on domain_outbox`);
+      await pool.query(`drop function if exists test_fail_paid_outbox_insert()`);
+    }
+
+    expect((await getOrder(orderId)).status).toBe("pending");
+    expect(Number((await getProduct(productId)).stock)).toBe(5);
+    expect(Number((await getWallet(seller)).escrow_cents)).toBe(0);
+    expect(
+      (await pool.query(`select id from ledger_entries where order_id = $1`, [orderId])).rows
+    ).toHaveLength(0);
+    expect(
+      (await pool.query(`select id from order_events where order_id = $1`, [orderId])).rows
+    ).toHaveLength(0);
+    expect(
+      (await pool.query(`select id from messages where conversation_id = $1`, [conversationId])).rows
+    ).toHaveLength(0);
+    expect(
+      (await pool.query(`select id from domain_outbox where aggregate_id = $1`, [orderId])).rows
+    ).toHaveLength(0);
   });
 
   it("rejects paying an order that is not pending, preventing a double capture", async () => {

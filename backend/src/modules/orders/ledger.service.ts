@@ -17,6 +17,8 @@ import { enqueueDomainEvent } from "../outbox/outbox.service.js";
 import { platformFeeCents } from "../../domain/money.js";
 import type { OrderStatus } from "../../domain/enums.js";
 import { canTransitionOrder } from "./order-transitions.js";
+import { recordOrderEvent } from "./order-events.service.js";
+import { createOrderSystemMessage } from "../chat/system-messages.service.js";
 
 type OrderRow = {
   id: string;
@@ -47,6 +49,11 @@ export type ReleaseEscrowOptions = {
   ) => Promise<{ systemMessageIds?: string[] } | void>;
 };
 
+export type LockEscrowOptions = {
+  /** Defaults to the buyer; manual admin confirmation supplies the reviewing admin. */
+  actorId?: string;
+};
+
 export async function ensureWallet(client: DbClient, userId: string, currency: string) {
   const wallet = await client.query<{ id: string }>(
     `insert into wallets(user_id, currency)
@@ -66,7 +73,8 @@ export async function lockEscrow(
   orderId: string,
   buyerId: string,
   providerName: PaymentProviderName,
-  externalReference?: string
+  externalReference?: string,
+  options: LockEscrowOptions = {}
 ) {
   // maxAttempts: 1 - this transaction calls provider.capture() (an external payment
   // side effect) while holding the row lock; an automatic retry would repeat that
@@ -165,6 +173,41 @@ export async function lockEscrow(
         env.AUTO_RELEASE_HOURS
       ]
     );
+
+    // The paid timeline row, system message and durable delivery intent belong to the
+    // same transaction as the money/status mutation. A process crash after COMMIT can
+    // now delay delivery, but cannot permanently lose evidence or notifications.
+    await recordOrderEvent(
+      {
+        orderId: order.id,
+        actorId: options.actorId ?? order.buyer_id,
+        type: "paid",
+        templateKey: "orderEvents.paid",
+        metadata: { provider: payment.provider }
+      },
+      client
+    );
+    const message = await createOrderSystemMessage(
+      {
+        orderId: order.id,
+        type: "payment_received",
+        bodyKey: "system.paymentReceived"
+      },
+      client
+    );
+    await enqueueDomainEvent(client, {
+      eventKey: `order.paid:${order.id}`,
+      eventType: "order.paid",
+      aggregateType: "order",
+      aggregateId: order.id,
+      payload: {
+        orderId: order.id,
+        buyerId: order.buyer_id,
+        sellerId: order.seller_id,
+        productId: order.product_id,
+        systemMessageIds: message ? [message.id] : []
+      }
+    });
 
     await cacheDel(
       `user:${order.buyer_id}:wallet`,

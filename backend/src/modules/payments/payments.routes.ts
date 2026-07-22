@@ -2,16 +2,20 @@ import { Router } from "express";
 import express from "express";
 import { z } from "zod";
 import { pool } from "../../db/pool.js";
-import { asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
+import {
+  ApiError,
+  asyncHandler,
+  badRequest,
+  forbidden,
+  notFound,
+  serviceUnavailable
+} from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { env } from "../../config/env.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { lockEscrow } from "../orders/ledger.service.js";
-import { recordOrderEvent } from "../orders/order-events.service.js";
-import { notifyOrderEvent } from "../chat/ws.service.js";
-import { createNotification, notifyAdmins } from "../notifications/notifications.service.js";
-import { postOrderSystemMessage } from "../chat/chat.service.js";
+import { notifyAdmins } from "../notifications/notifications.service.js";
 import { t } from "../../i18n/t.js";
 import { paymentAttemptsTotal } from "../../common/metrics.js";
 import { webhookRateLimit } from "../../common/middleware/security.js";
@@ -42,29 +46,41 @@ const walletTopupSchema = z.object({
   amount: z.string()
 });
 
-export async function announceOrderPaid(order: { id: string; buyer_id: string; seller_id: string; payment_provider: string }, actorId: string) {
-  notifyOrderEvent(order.seller_id, { type: "order_paid", orderId: order.id });
-  notifyOrderEvent(order.buyer_id, { type: "order_paid", orderId: order.id });
-  await createNotification({
-    userId: order.seller_id,
-    type: "order_paid",
-    templateKey: "notifications.orderPaidSeller",
-    orderId: order.id
-  });
-  await createNotification({
-    userId: order.buyer_id,
-    type: "order_paid",
-    templateKey: "notifications.orderPaidBuyer",
-    orderId: order.id
-  });
-  await recordOrderEvent({
-    orderId: order.id,
-    actorId,
-    type: "paid",
-    templateKey: "orderEvents.paid",
-    metadata: { provider: order.payment_provider }
-  });
-  await postOrderSystemMessage(order.id, "payment_received", "system.paymentReceived");
+type ConfirmedWebhookProvider = "liqpay" | "monobank" | "wayforpay";
+
+function isTerminalWebhookOutcome(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status >= 400 && error.status < 500;
+}
+
+async function persistConfirmedWebhookOutcome<T>(input: {
+  provider: ConfirmedWebhookProvider;
+  subject: { orderId?: string; topupId?: string };
+  operation: () => Promise<T>;
+}): Promise<T | null> {
+  try {
+    const result = await input.operation();
+    paymentAttemptsTotal.labels(input.provider, "captured").inc();
+    return result;
+  } catch (error) {
+    paymentAttemptsTotal.labels(input.provider, "failed").inc();
+    if (isTerminalWebhookOutcome(error)) {
+      // A duplicate delivery or another terminal business state cannot become
+      // payable again. ACK it so the provider does not retry forever.
+      logger.warn(
+        { provider: input.provider, ...input.subject, code: error.code },
+        "payment_webhook_terminal_outcome"
+      );
+      return null;
+    }
+
+    // A confirmed payment that could not be recorded because DB/infrastructure is
+    // unavailable must be redelivered. Keep the internal exception in logs only.
+    logger.error(
+      { provider: input.provider, ...input.subject, error },
+      "payment_webhook_persistence_failed"
+    );
+    throw serviceUnavailable("Payment confirmation is temporarily unavailable");
+  }
 }
 
 router.post(
@@ -88,7 +104,6 @@ router.post(
       reference: updated.payment_reference,
       status: "captured" as const
     };
-    await announceOrderPaid(updated, req.user.id);
     res.json({ order: updated, payment });
   })
 );
@@ -320,28 +335,21 @@ router.post(
     const orderRow = await pool.query(`select id, buyer_id from orders where id = $1`, [callback.order_id]);
     const order = orderRow.rows[0];
     if (order) {
-      try {
-        const updated = await lockEscrow(order.id, order.buyer_id, "liqpay", reference);
-        paymentAttemptsTotal.labels("liqpay", "captured").inc();
-        await announceOrderPaid(updated, order.buyer_id);
-      } catch (error) {
-        // Order is no longer pending (already captured by an earlier delivery of this
-        // same webhook, or otherwise no longer payable) - acknowledge so LiqPay stops retrying.
-        paymentAttemptsTotal.labels("liqpay", "failed").inc();
-        logger.warn({ orderId: order.id, error }, "liqpay_callback_capture_skipped");
-      }
+      await persistConfirmedWebhookOutcome({
+        provider: "liqpay",
+        subject: { orderId: order.id },
+        operation: () => lockEscrow(order.id, order.buyer_id, "liqpay", reference)
+      });
       return res.status(200).send("ok");
     }
 
     const topupRow = await pool.query(`select id from wallet_topups where id = $1`, [callback.order_id]);
     if (topupRow.rows[0]) {
-      try {
-        await completeWalletTopup(callback.order_id, "liqpay", reference);
-        paymentAttemptsTotal.labels("liqpay", "captured").inc();
-      } catch (error) {
-        paymentAttemptsTotal.labels("liqpay", "failed").inc();
-        logger.warn({ topupId: callback.order_id, error }, "liqpay_callback_topup_skipped");
-      }
+      await persistConfirmedWebhookOutcome({
+        provider: "liqpay",
+        subject: { topupId: callback.order_id },
+        operation: () => completeWalletTopup(callback.order_id, "liqpay", reference)
+      });
       return res.status(200).send("ok");
     }
 
@@ -371,26 +379,21 @@ router.post(
     const orderRow = await pool.query(`select id, buyer_id from orders where id = $1`, [invoice.reference]);
     const order = orderRow.rows[0];
     if (order) {
-      try {
-        const updated = await lockEscrow(order.id, order.buyer_id, "monobank", invoice.invoiceId);
-        paymentAttemptsTotal.labels("monobank", "captured").inc();
-        await announceOrderPaid(updated, order.buyer_id);
-      } catch (error) {
-        paymentAttemptsTotal.labels("monobank", "failed").inc();
-        logger.warn({ orderId: order.id, error }, "monobank_callback_capture_skipped");
-      }
+      await persistConfirmedWebhookOutcome({
+        provider: "monobank",
+        subject: { orderId: order.id },
+        operation: () => lockEscrow(order.id, order.buyer_id, "monobank", invoice.invoiceId)
+      });
       return res.status(200).send("ok");
     }
 
     const topupRow = await pool.query(`select id from wallet_topups where id = $1`, [invoice.reference]);
     if (topupRow.rows[0]) {
-      try {
-        await completeWalletTopup(invoice.reference, "monobank", invoice.invoiceId);
-        paymentAttemptsTotal.labels("monobank", "captured").inc();
-      } catch (error) {
-        paymentAttemptsTotal.labels("monobank", "failed").inc();
-        logger.warn({ topupId: invoice.reference, error }, "monobank_callback_topup_skipped");
-      }
+      await persistConfirmedWebhookOutcome({
+        provider: "monobank",
+        subject: { topupId: invoice.reference },
+        operation: () => completeWalletTopup(invoice.reference!, "monobank", invoice.invoiceId)
+      });
       return res.status(200).send("ok");
     }
 
@@ -418,24 +421,19 @@ router.post(
       const orderRow = await pool.query(`select id, buyer_id from orders where id = $1`, [orderReference]);
       const order = orderRow.rows[0];
       if (order) {
-        try {
-          const updated = await lockEscrow(order.id, order.buyer_id, "wayforpay", orderReference);
-          paymentAttemptsTotal.labels("wayforpay", "captured").inc();
-          await announceOrderPaid(updated, order.buyer_id);
-        } catch (error) {
-          paymentAttemptsTotal.labels("wayforpay", "failed").inc();
-          logger.warn({ orderId: order.id, error }, "wayforpay_callback_capture_skipped");
-        }
+        await persistConfirmedWebhookOutcome({
+          provider: "wayforpay",
+          subject: { orderId: order.id },
+          operation: () => lockEscrow(order.id, order.buyer_id, "wayforpay", orderReference)
+        });
       } else {
         const topupRow = await pool.query(`select id from wallet_topups where id = $1`, [orderReference]);
         if (topupRow.rows[0]) {
-          try {
-            await completeWalletTopup(orderReference, "wayforpay", orderReference);
-            paymentAttemptsTotal.labels("wayforpay", "captured").inc();
-          } catch (error) {
-            paymentAttemptsTotal.labels("wayforpay", "failed").inc();
-            logger.warn({ topupId: orderReference, error }, "wayforpay_callback_topup_skipped");
-          }
+          await persistConfirmedWebhookOutcome({
+            provider: "wayforpay",
+            subject: { topupId: orderReference },
+            operation: () => completeWalletTopup(orderReference, "wayforpay", orderReference)
+          });
         }
       }
     }

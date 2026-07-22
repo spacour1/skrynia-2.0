@@ -27,6 +27,7 @@ import {
   runIdempotentTransaction
 } from "../idempotency/idempotency.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
+import { mapOrderRowDto } from "./orders.dto.js";
 
 const router = Router();
 
@@ -150,7 +151,7 @@ router.post(
 
         return {
           statusCode: 201,
-          body: { order: createdOrder, conversationId },
+          body: { order: mapOrderRowDto(createdOrder), conversationId },
           resourceId: createdOrder.id as string
         };
       }
@@ -303,7 +304,7 @@ router.post(
       });
       return updatedOrder;
     });
-    res.json({ order });
+    res.json({ order: mapOrderRowDto(order) });
   })
 );
 
@@ -368,7 +369,7 @@ router.post(
       });
       return updatedOrder;
     });
-    res.json({ order });
+    res.json({ order: mapOrderRowDto(order) });
   })
 );
 
@@ -408,7 +409,7 @@ router.post(
         return { systemMessageIds: message ? [message.id] : [] };
       }
     });
-    res.json({ order: updated });
+    res.json({ order: mapOrderRowDto(updated) });
   })
 );
 

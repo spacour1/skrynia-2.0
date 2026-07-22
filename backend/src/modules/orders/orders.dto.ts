@@ -1,9 +1,8 @@
 /**
- * `lockEscrow`/`releaseEscrow`/`refundEscrow` return the raw `orders` row (`returning *`,
- * snake_case) for their own internal callers. This mapper is for the one place that row
- * crosses into an HTTP response outside `orders.routes.ts` itself (the admin dispute
- * resolve endpoint) - keeps the private repository-layer shape unchanged while the wire
- * contract stays camelCase.
+ * Order mutations use raw `orders` rows internally so transaction code can keep matching
+ * PostgreSQL column names. Every raw row must pass through this mapper before crossing an
+ * HTTP boundary so the public contract stays camelCase and timestamps are stable ISO
+ * strings.
  */
 export type RawOrderRow = {
   id: string;
@@ -26,6 +25,14 @@ export type RawOrderRow = {
   updated_at: Date | string;
 };
 
+function toIsoString(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function toNullableIsoString(value: Date | string | null): string | null {
+  return value === null ? null : toIsoString(value);
+}
+
 export function mapOrderRowDto(row: RawOrderRow) {
   return {
     id: row.id,
@@ -40,11 +47,11 @@ export function mapOrderRowDto(row: RawOrderRow) {
     paymentProvider: row.payment_provider,
     paymentReference: row.payment_reference,
     deliveryNote: row.delivery_note,
-    autoReleaseAt: row.auto_release_at,
-    paidAt: row.paid_at,
-    deliveredAt: row.delivered_at,
-    completedAt: row.completed_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
+    autoReleaseAt: toNullableIsoString(row.auto_release_at),
+    paidAt: toNullableIsoString(row.paid_at),
+    deliveredAt: toNullableIsoString(row.delivered_at),
+    completedAt: toNullableIsoString(row.completed_at),
+    createdAt: toIsoString(row.created_at),
+    updatedAt: toIsoString(row.updated_at)
   };
 }

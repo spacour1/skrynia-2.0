@@ -27,6 +27,7 @@ type RealtimeClientOptions = {
   setTimer?: (callback: () => void, delayMs: number) => TimerHandle;
   clearTimer?: (timer: TimerHandle) => void;
   ackTimeoutMs?: number;
+  onTerminalAuthenticationFailure?: () => void;
 };
 
 type PendingMessage = {
@@ -55,6 +56,7 @@ export class RealtimeClient {
   private readonly setTimer: (callback: () => void, delayMs: number) => TimerHandle;
   private readonly clearTimer: (timer: TimerHandle) => void;
   private readonly ackTimeoutMs: number;
+  private readonly onTerminalAuthenticationFailure?: () => void;
   private readonly eventListeners = new Set<(event: RealtimeEvent) => void>();
   private readonly stateListeners = new Set<() => void>();
   private readonly roomReferences = new Map<string, number>();
@@ -65,6 +67,7 @@ export class RealtimeClient {
   private connectInFlight: Promise<WebSocket> | null = null;
   private enabled = false;
   private terminal = false;
+  private terminalAuthenticationRevalidationRequested = false;
   private visible = true;
   private online = true;
   private generation = 0;
@@ -79,6 +82,7 @@ export class RealtimeClient {
     this.setTimer = options.setTimer ?? ((callback, delayMs) => setTimeout(callback, delayMs));
     this.clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer));
     this.ackTimeoutMs = options.ackTimeoutMs ?? 15_000;
+    this.onTerminalAuthenticationFailure = options.onTerminalAuthenticationFailure;
   }
 
   getSnapshot = () => this.snapshot;
@@ -101,6 +105,7 @@ export class RealtimeClient {
     if (this.enabled) return;
     this.enabled = true;
     this.terminal = false;
+    this.terminalAuthenticationRevalidationRequested = false;
     this.generation += 1;
     this.updateSnapshot({ status: "idle", reconnectAttempt: 0, error: null });
     void this.connect();
@@ -114,6 +119,7 @@ export class RealtimeClient {
     }
     this.enabled = false;
     this.terminal = false;
+    this.terminalAuthenticationRevalidationRequested = false;
     this.generation += 1;
     this.clearReconnectTimer();
     const socket = this.socket;
@@ -243,6 +249,7 @@ export class RealtimeClient {
 
   private handleOpen(socket: WebSocket, generation: number) {
     if (socket !== this.socket || generation !== this.generation) return;
+    this.terminalAuthenticationRevalidationRequested = false;
     this.updateSnapshot({ status: "connected", reconnectAttempt: 0, error: null });
     for (const conversationId of this.roomReferences.keys()) {
       this.sendControl({ type: "join_conversation", conversationId });
@@ -300,6 +307,7 @@ export class RealtimeClient {
         reconnectAttempt: this.snapshot.reconnectAttempt,
         error: new RealtimeMessageError(event.reason || "Realtime session rejected", false, "session_rejected")
       });
+      this.requestTerminalAuthenticationRevalidation();
       return;
     }
     this.scheduleReconnect();
@@ -324,6 +332,9 @@ export class RealtimeClient {
         reconnectAttempt: this.snapshot.reconnectAttempt,
         error: normalized
       });
+      if (normalized.status === 401 || normalized.status === 403) {
+        this.requestTerminalAuthenticationRevalidation();
+      }
       return;
     }
     this.scheduleReconnect(normalized.status === 429 ? normalized.retryAfterMs : undefined, normalized);
@@ -398,6 +409,21 @@ export class RealtimeClient {
     if (!this.reconnectTimer) return;
     this.clearTimer(this.reconnectTimer);
     this.reconnectTimer = null;
+  }
+
+  private requestTerminalAuthenticationRevalidation() {
+    if (
+      this.terminalAuthenticationRevalidationRequested ||
+      !this.onTerminalAuthenticationFailure
+    ) {
+      return;
+    }
+    this.terminalAuthenticationRevalidationRequested = true;
+    try {
+      this.onTerminalAuthenticationFailure();
+    } catch (error) {
+      console.error("Realtime authentication revalidation failed", error);
+    }
   }
 
   private updateSnapshot(snapshot: RealtimeSnapshot) {

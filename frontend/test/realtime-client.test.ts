@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   RealtimeClient,
   RealtimeMessageError
@@ -111,6 +111,27 @@ it("a 401 ticket error stops reconnecting", async () => {
   expect(attempts).toBe(1);
   expect(scheduler.delays).toEqual([]);
   expect(client.getSnapshot().status).toBe("stopped");
+});
+
+it("requests one auth revalidation across repeated terminal ticket rejection", async () => {
+  const revalidate = vi.fn();
+  let attempts = 0;
+  const client = new RealtimeClient({
+    openSocket: async () => {
+      attempts += 1;
+      throw ticketError(401);
+    },
+    onTerminalAuthenticationFailure: revalidate
+  });
+
+  client.start();
+  await flushPromises();
+  expect(revalidate).toHaveBeenCalledOnce();
+
+  client.refreshAuthentication();
+  await flushPromises();
+  expect(attempts).toBe(2);
+  expect(revalidate).toHaveBeenCalledOnce();
 });
 
 it("a 429 ticket error honors Retry-After", async () => {

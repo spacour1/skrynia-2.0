@@ -5,6 +5,7 @@ import {
   type ReactNode,
   useContext,
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore
 } from "react";
@@ -18,15 +19,66 @@ import {
 const RealtimeContext = createContext<RealtimeClient | null>(null);
 
 export function RealtimeProvider({ children }: { children: ReactNode }) {
-  const [client] = useState(() => new RealtimeClient());
+  const mountedRef = useRef(true);
+  const revalidationInFlightRef = useRef(false);
+  const [client] = useState(() => {
+    let instance: RealtimeClient;
+    instance = new RealtimeClient({
+      onTerminalAuthenticationFailure: () => {
+        if (revalidationInFlightRef.current) return;
+        revalidationInFlightRef.current = true;
+        void useAuth.getState().hydrate()
+          .then((nextStatus) => {
+            if (
+              mountedRef.current &&
+              nextStatus === "authenticated" &&
+              useAuth.getState().user &&
+              instance.getSnapshot().status === "stopped"
+            ) {
+              instance.refreshAuthentication();
+            }
+          })
+          .finally(() => {
+            revalidationInFlightRef.current = false;
+          });
+      }
+    });
+    return instance;
+  });
   const userId = useAuth((state) => state.user?.id);
-  const hydrated = useAuth((state) => state.hydrated);
+  const status = useAuth((state) => state.status);
+  const activeUserIdRef = useRef<string | null>(null);
+  const previousStatusRef = useRef(status);
 
   useEffect(() => {
-    if (hydrated && userId) client.start();
-    else client.stop();
-    return () => client.stop();
-  }, [client, hydrated, userId]);
+    const previousStatus = previousStatusRef.current;
+    previousStatusRef.current = status;
+
+    if (userId && (status === "authenticated" || status === "degraded")) {
+      const switchedUser = Boolean(activeUserIdRef.current && activeUserIdRef.current !== userId);
+      const recoveredTerminalConnection =
+        status === "authenticated" &&
+        previousStatus === "degraded" &&
+        client.getSnapshot().status === "stopped";
+      activeUserIdRef.current = userId;
+      if (switchedUser || recoveredTerminalConnection) client.refreshAuthentication();
+      else client.start();
+      return;
+    }
+
+    if (status === "anonymous" || !userId) {
+      activeUserIdRef.current = null;
+      client.stop();
+    }
+  }, [client, status, userId]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      client.stop();
+    };
+  }, [client]);
 
   useEffect(() => {
     const syncVisibility = () => client.setVisible(document.visibilityState !== "hidden");

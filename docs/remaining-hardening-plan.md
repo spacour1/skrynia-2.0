@@ -1,89 +1,103 @@
 # Remaining production-hardening plan
 
-Status after the `fix/production-hardening` branch (P0 complete). Every item below was
-scoped in the hardening audit but deliberately deferred; nothing here blocks the P0
-guarantees already merged. Work top-to-bottom.
+Stages 0–7 are complete at baseline `36ea677`. This document contains only the
+remaining work, in execution order. It does not certify production readiness.
 
-## Done in this branch (P0)
+## Stage 8 — frontend test foundation
 
-| # | Item | Commit |
-| - | ---- | ------ |
-| 1 | Schema reconciliation + clean-DB contract tests | `fix(db): reconcile application schema...` |
-| 2 | Audit log stops storing request bodies; redactor; history purge | `fix(security): stop persisting request bodies...` |
-| 3 | Public product detail restricted (active + non-banned seller; owner/staff preview) | `fix(marketplace): restrict public product detail...` |
-| 4 | One-time WS tickets + Origin allowlist + maxPayload + per-user cap | `fix(auth): add one-time websocket authentication tickets...` |
-| 5 | Password change rotates a full new session (refresh survives) | `fix(auth): rotate a full new session...` |
-| 6 | Product + media atomic transaction | `fix(marketplace): make product create/update and media replacement atomic` |
-| 7 | Dispute open transactional/idempotent; resolve single-shot state machine | `fix(orders): make dispute open transactional...` |
+1. Add a frontend test runner and React Testing Library setup without replacing the
+   existing realtime-client test.
+2. Cover focused user-visible contracts: authentication hydration/degraded state,
+   retry states, currency-draft preservation, category filter navigation, and product
+   links that remain accessible and open in a new tab.
+3. Keep tests deterministic: mock network boundaries, do not require a live backend for
+   component tests, and run them in CI.
 
-Test suite: 162 backend tests green; suite-level auth rate limits raised in test/setup.ts
-(no test asserts 429s; production limits unchanged).
+## Stage 9 — frontend reliability
 
-## P1 — reliability
+1. Temporary API 500/network/429 failures must render a degraded state and preserve an
+   existing authenticated user instead of treating the failure as logout.
+2. Retry must restore failed data without losing in-progress drafts; a currency change
+   must not reset a draft through an application remount.
+3. Category links must encode a real marketplace filter. Product cards must be semantic
+   links, keyboard-accessible, and safe to open in another tab.
+4. Add UI tests before treating these behaviours as complete.
 
-1. **Transactional outbox (`domain_outbox`)** — table + FOR UPDATE SKIP LOCKED worker with
-   exponential backoff; write events inside business transactions with stable keys
-   (`order:{id}:created`, ...). Migrate side effects (notifications, WS, BullMQ, cache
-   invalidation) out of HTTP handlers, starting with order lifecycle, messages, disputes,
-   moderation actions. Deduplicate notifications by event_key. Do NOT move money logic.
-2. **WebSocket Redis pub/sub distribution** — realtime event bus envelope
-   (id/type/scope/targetId/payload/sourceInstanceId); `notifyOrderEvent` /
-   `broadcastConversation` publish globally, replicas fan out locally. Degrade without
-   crashing when Redis is down. PresenceService with TTL/heartbeat ephemeral keys instead
-   of local-map `isUserOnline`. Backpressure: check `bufferedAmount`, drop slow clients,
-   metric for drops.
-3. **Idempotency of business operations** — `Idempotency-Key` for order creation
-   (request-hash table, conflict on mismatched body, parallel-safe); `clientMessageId`
-   with `(sender_id, client_message_id)` unique for chat send (HTTP + WS) plus frontend
-   retry reuse; review endpoint returns existing review on retry instead of 500 on unique
-   violation.
-4. **Seller statistics** — current single JOIN with SUMs multiplies aggregates; rewrite
-   with per-domain CTEs (product/order/favorite/review stats), return
-   `hasEnoughData: false` instead of fake 100% success rate; SQL integration tests with
-   multi-product/multi-order fixtures.
-5. **Storage ownership** — `storage_objects` table (owner, object_key, purpose, status
-   temporary/attached/deleted), attach-by-id instead of привязки чужих URL; orphan cleanup
-   job; upload quotas; image re-encode pipeline (sharp) + EXIF strip; store `object_key`
-   not full URL, build public URLs via `MEDIA_PUBLIC_BASE_URL`; S3 client singleton.
-6. **API contracts** — DTO mappers so no snake_case leaks (dispute detail endpoint
-   currently returns raw `d.*`); centralize Order/Product/Dispute/Role/DeliveryType enums
-   shared with frontend; document the order state machine (initial status `pending`).
+## Stage 10 — production runtime and operations
 
-## Follow-up: remaining fixed-limit admin listings
+1. Add API/worker runtime entry points and ensure workers are explicitly enabled only
+   where intended.
+2. Implement graceful SIGTERM/SIGINT shutdown in dependency order: stop HTTP intake,
+   close WebSockets, stop BullMQ/outbox work, then Redis and PostgreSQL pools.
+3. Keep migrations as a release/deployment step, not an API process startup side effect.
+4. Complete `/health/live` and `/health/ready` semantics with bounded dependency checks.
+5. Verify Docker healthchecks, non-root runtime user, restart behaviour, and shutdown
+   under Compose. Record only commands that were actually run.
 
-`admin-finance.routes.ts` (transactions/ledger/reconciliation snapshots),
-`admin-ops.routes.ts` (media, listings), and the admin "all orders" view in
-`orders.routes.ts` still use a fixed `limit N` with no cursor. `backend/src/common/pagination.ts`
-(added in the cycle-3 pagination stage) applies directly — same
-`parseCursorPage`/`keysetWhereClause`/`buildNextCursor` pattern already used by
-`GET /disputes` and `GET /admin/audit`.
+## Stage 11 — CI gates
 
-## P2 — product/ops polish
+1. Add the frontend test job from stage 8.
+2. Add clean-database migration smoke followed by schema-contract coverage.
+3. Add Docker build/config checks, dependency/audit policy, and secret scanning.
+4. Add Playwright only after the isolated environment in stage 12 exists; keep traces
+   and screenshots as failure artifacts.
 
-1. **Search** — pg_trgm + unaccent migration, normalized search vector across
-   title/description/game/aliases; ranking exact > prefix > alias > trigram > FTS;
-   verify with EXPLAIN ANALYZE; UA/RU/EN test queries (already partially covered by
-   catalog aliases in /suggest).
-2. **Frontend reliability** — authStatus degraded state (network/5xx must not clear the
-   cached user); currency store without full-app remount via React key; homepage category
-   cards navigate to real catalog filters; product cards as links (keyboard/new-tab);
-   error/retry states on main queries; locale-aware date/number formatting; SSR/initialData
-   for homepage data.
-3. **E2E (Playwright)** — smoke: register → create product → visible publicly → favorite →
-   chat → order lifecycle (test payments mock) → review → block hides product.
-4. **CI** — add clean-migration smoke (create empty DB + migrate + run schema-contract
-   tests), frontend tests job, docker build smoke, npm audit gate, secret scanning.
-5. **Ops** — graceful shutdown (SIGTERM: HTTP → WS → BullMQ → Redis → PG); /health/live +
-   /health/ready; separate `start:api` / `start:worker` entrypoints; migrations as a
-   release step instead of on every container start (dev compose already runs them at
-   start; production images must not); Docker non-root user + healthcheck; outbox/WS/pool
-   metrics.
+## Stage 12 — Playwright E2E
 
-## Known constraints
+### Environment
 
-- Test suite requires the dev docker stack (postgres:5432, redis:6379) running; suite
-  re-runs previously flaked on 429s — fixed via test-env rate-limit overrides.
-- `docker-compose.dev.yml` uses stock node images with volume mounts; there is no
-  production Dockerfile build smoke yet (see P2/Ops).
-- External integrations (LiqPay/Monobank/WayForPay callbacks, Resend, Twilio, Telegram)
-  are exercised only through existing mocks; no live calls were made.
+1. Add `@playwright/test`, a Playwright configuration, E2E fixtures, and a dedicated
+   Compose environment with clean PostgreSQL, Redis, API, worker/outbox, and frontend.
+2. Use a distinct Compose project/ports/volume and unique data per run; never point E2E
+   at the developer or production database.
+3. Provide deterministic verified seller, buyer, and admin fixtures (or a controlled
+   registration/verification bootstrap).
+4. Limit payment-simulation routes to explicit test mode. They are currently available
+   in all non-production environments, which is too broad for this stage.
+
+### Required browser flows
+
+1. Golden marketplace: registration, seller listing/public visibility, favorite, chat
+   message and ACK, idempotent order creation, mock payment, start/deliver/confirm,
+   completed order, and replay-safe review.
+2. Dispute: use a separate paid order, open dispute, seller response, admin detail and
+   resolution, predictable repeated resolution, immutable original reason, and
+   post-resolution participant-message rule. Add participant dispute-message UI if the
+   intended flow must be browser-only.
+3. Moderation/cache: warm anonymous list/detail, block, prove list/detail no longer
+   resolve, prove owner/admin preview rule, then unblock/reactivate and verify cache
+   invalidation.
+4. Session security: two browser contexts and sockets; password change must rotate the
+   caller, revoke the other HTTP session/refresh token, close its socket, reject old
+   password, and accept the new one.
+5. Frontend reliability: transient API/network failure, recovery through retry, draft
+   survival during currency change, real category filter, and new-tab product link.
+
+## Stage 13 — multilingual typo-tolerant search
+
+1. Add a migration for `pg_trgm` and `unaccent`; check extension availability with the
+   target PostgreSQL provider before rollout.
+2. Build a maintained denormalized product search representation. It must include title,
+   description, game name and catalog aliases, category, section, product type, server,
+   and platform. Do not use a generated column with joined-table subqueries.
+3. Normalize case, accents, spaces, and hyphens; store Cyrillic/Latin variants as catalog
+   aliases rather than hardcoding them in query SQL.
+4. Use indexed search and deterministic relevance tiers: exact normalized title, title
+   prefix, exact game alias, exact game name, trigram similarity, full-text, popularity,
+   then recency. Popularity/recency must not outrank exact matches.
+5. Backfill aliases and fixtures for: `контр страйк`, `counter strike`, `cs2`, `кс2`,
+   `valorant`, `валик`, `roblox`, `роблокс`, `аккаунт`, `акаунт`, `boost`, and `буст`.
+   Assert a first relevant game/product rather than an entire brittle result ordering.
+6. Add a realistic load fixture (tens of thousands of products where practical) and
+   record `EXPLAIN ANALYZE`: planning/execution time, rows scanned, index use, sequential
+   scans, and short/typo/common-query behaviour.
+7. For large production tables, use a safe rollout: batched backfill, concurrent index
+   creation outside a transaction where required, documented lock risk, and rollback
+   limits.
+
+## Ongoing constraints
+
+- Do not integrate or call real payment providers. Playwright and integration tests use
+  the mock payment flow only.
+- All migrations require a timestamped SQL file, safe rollout notes, and relevant tests.
+- Do not claim a check passed unless it was run and completed successfully.

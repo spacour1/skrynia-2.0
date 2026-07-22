@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowUpRight, ChevronDown, Flag, MessageCircle, Package, ReceiptText, Search, UserRound } from "lucide-react";
 import { ChatPanel } from "@/components/ChatPanel";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { RequireAuth } from "@/components/RequireAuth";
 import { ReportModal } from "@/components/ReportModal";
 import { apiFetch, type ConversationContext, type ConversationGroup } from "@/lib/api";
@@ -141,6 +142,17 @@ function MessagesContent() {
         </div>
 
         <div className="max-h-[calc(100vh-350px)] min-h-[420px] overflow-y-auto p-2">
+          {conversations.isLoading && !conversations.data ? (
+            <div className="grid min-h-[240px] place-items-center p-6 text-center text-sm text-muted">
+              {t("common.loading")}
+            </div>
+          ) : null}
+          {conversations.error && !conversations.data ? (
+            <QueryErrorState className="min-h-[240px]" onRetry={() => void conversations.refetch()} />
+          ) : null}
+          {conversations.error && conversations.data ? (
+            <QueryErrorState className="mb-2" stale onRetry={() => void conversations.refetch()} />
+          ) : null}
           {filtered.map((group, index) => {
             const expanded = hasSearch || expandedGroupIds.has(group.peerUserId);
             // Collapsed groups show the open chat if it belongs here, so collapsing never
@@ -218,7 +230,7 @@ function MessagesContent() {
               </article>
             );
           })}
-          {!filtered.length ? (
+          {!conversations.isLoading && !conversations.error && !filtered.length ? (
             <div className="grid min-h-[240px] place-items-center p-6 text-center">
               <div>
                 <MessageCircle className="mx-auto h-10 w-10 text-muted" />

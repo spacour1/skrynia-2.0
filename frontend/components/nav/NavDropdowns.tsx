@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronRight, Languages, LogOut, Settings, UserCircle, type LucideIcon } from "lucide-react";
 import { CurrencySwitcher } from "@/components/CurrencySwitcher";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { localeLabels, locales } from "@/i18n/config";
 import { useI18n } from "@/lib/i18n";
 import type { NotificationItem } from "./types";
@@ -86,14 +87,20 @@ export function NotificationDropdown({
   items,
   unreadCount,
   loading,
+  error,
+  stale,
   onOpen,
-  onReadAll
+  onReadAll,
+  onRetry
 }: {
   items: NotificationItem[];
   unreadCount: number;
   loading: boolean;
+  error: boolean;
+  stale: boolean;
   onOpen: (item: NotificationItem) => void;
   onReadAll: () => void;
+  onRetry: () => void;
 }) {
   const { language, t } = useI18n();
   return (
@@ -110,8 +117,10 @@ export function NotificationDropdown({
         ) : null}
       </div>
       <div className="max-h-[460px] overflow-y-auto p-2">
-        {loading ? <p className="px-3 py-4 text-sm text-muted">{t("nav.loadingNotifications")}</p> : null}
-        {!loading && !items.length ? (
+        {loading && !items.length ? <p className="px-3 py-4 text-sm text-muted">{t("nav.loadingNotifications")}</p> : null}
+        {error ? <QueryErrorState className="min-h-[180px]" onRetry={onRetry} /> : null}
+        {stale ? <QueryErrorState className="mb-2" stale onRetry={onRetry} /> : null}
+        {!loading && !error && !items.length ? (
           <div className="grid min-h-[180px] place-items-center text-center">
             <p className="max-w-[240px] text-sm leading-6 text-muted">{t("nav.noNotifications")}</p>
           </div>

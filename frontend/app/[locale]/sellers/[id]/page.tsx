@@ -7,6 +7,7 @@ import { apiFetch, type Product, type User } from "@/lib/api";
 import type { WireMoneyCents } from "@/lib/currency";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { showAppToast } from "@/lib/toast-events";
 import { uploadImage } from "@/lib/storage";
 import { EditSellerBannerModal } from "./EditSellerBannerModal";
@@ -160,7 +161,7 @@ export default function SellerPage({ params }: { params: { id: string } }) {
     });
   }, [products, activeTab, t]);
 
-  if (seller.isLoading) {
+  if (seller.isLoading && seller.data === undefined) {
     return (
       <div className="w-full max-w-none space-y-3">
         <div className="app-card h-[290px] animate-pulse bg-panel/40" />
@@ -169,9 +170,10 @@ export default function SellerPage({ params }: { params: { id: string } }) {
     );
   }
 
-  if (seller.isError || !seller.data) {
-    return <p className="w-full max-w-none text-rose-600">{t("orders.notFound")}</p>;
+  if (seller.isError && seller.data === undefined) {
+    return <QueryErrorState className="w-full max-w-none" onRetry={() => void seller.refetch()} />;
   }
+  if (!seller.data) return null;
 
   const { user, stats } = seller.data;
   const reviews = seller.data.reviews ?? [];
@@ -231,6 +233,7 @@ export default function SellerPage({ params }: { params: { id: string } }) {
 
   return (
     <div className="w-full max-w-none space-y-3">
+      {seller.isError ? <QueryErrorState stale onRetry={() => void seller.refetch()} /> : null}
       <SellerHero
         displayName={user.displayName}
         avatarUrl={user.avatarUrl}

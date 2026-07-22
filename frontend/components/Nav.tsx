@@ -284,8 +284,11 @@ export function Nav() {
                   items={notifications.data?.notifications ?? []}
                   unreadCount={notifications.data?.unreadCount ?? 0}
                   loading={notifications.isLoading}
+                  error={Boolean(notifications.error && !notifications.data)}
+                  stale={Boolean(notifications.error && notifications.data)}
                   onOpen={openNotification}
                   onReadAll={markAllNotificationsRead}
+                  onRetry={() => void notifications.refetch()}
                 />
               ) : null}
             </div>

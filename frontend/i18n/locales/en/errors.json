@@ -1,5 +1,8 @@
 {
   "errors": {
+    "queryUnavailable": "Could not load this data. Check your connection and try again.",
+    "retry": "Try again",
+    "staleData": "Saved data is shown. Refresh is temporarily unavailable.",
     "email_not_verified": "Please verify your email to continue",
     "phone_not_verified": "Please verify your phone number first",
     "requestFailed": "Request failed. Please try again.",

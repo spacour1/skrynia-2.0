@@ -23,6 +23,7 @@ import {
 import { useRef } from "react";
 import { GameIcon } from "../../components/GameIcon";
 import { MarketplaceCategoryLink } from "@/components/MarketplaceCategoryLink";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { apiFetch, type ConversationGroup, type Game, type Product } from "../../lib/api";
 import { useMoney } from "../../lib/currency";
 import { firstProductMedia } from "../../lib/product-media";
@@ -56,14 +57,21 @@ export default function HomePage() {
         <Hero />
 
         <section id="game-catalog" className="space-y-6 scroll-mt-28">
-          {games.isLoading ? (
+          {games.isLoading && games.data === undefined ? (
             <RowSkeleton />
-          ) : (
+          ) : games.isError && games.data === undefined ? (
+            <QueryErrorState onRetry={() => void games.refetch()} />
+          ) : games.data ? (
             <>
-              <CategoryCarousel title={t("home.sections.popular")} items={popularGames} />
+              {games.isError ? <QueryErrorState stale onRetry={() => void games.refetch()} /> : null}
+              {popularGames.length ? (
+                <CategoryCarousel title={t("home.sections.popular")} items={popularGames} />
+              ) : games.isSuccess ? (
+                <p className="rounded-xl border border-line bg-card px-6 py-10 text-center text-sm text-muted">{t("home.emptyOffers")}</p>
+              ) : null}
               {platformGames.length ? <PlatformsRow items={platformGames} /> : null}
             </>
-          )}
+          ) : null}
           <CategoriesRow />
           <FreshOffers />
         </section>
@@ -371,12 +379,16 @@ function CategoriesRow() {
   });
   const list = categories.data?.categories ?? [];
 
-  if (categories.isLoading) return <RowSkeleton />;
-  if (!list.length) return null;
+  if (categories.isLoading && categories.data === undefined) return <RowSkeleton />;
+  if (categories.isError && categories.data === undefined) {
+    return <QueryErrorState onRetry={() => void categories.refetch()} />;
+  }
+  if (categories.isSuccess && !list.length) return null;
 
   return (
     <section className="space-y-2.5">
       <SectionHeader title={t("home.sections.categories")} />
+      {categories.isError ? <QueryErrorState stale onRetry={() => void categories.refetch()} /> : null}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {list.map((category) => {
           const Icon = CATEGORY_ICONS[category.slug] ?? Swords;
@@ -440,14 +452,18 @@ function FreshOffers() {
   return (
     <section className="space-y-2.5">
       <SectionHeader title={t("home.sections.fresh")} />
-      {products.isLoading ? (
+      {products.isLoading && products.data === undefined ? (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
           {Array.from({ length: 6 }).map((_, index) => (
             <div key={index} className="h-[176px] animate-pulse rounded-xl border border-line bg-card shadow-soft" />
           ))}
         </div>
+      ) : products.isError && products.data === undefined ? (
+        <QueryErrorState onRetry={() => void products.refetch()} />
       ) : offers.length ? (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+        <>
+          {products.isError ? <QueryErrorState stale onRetry={() => void products.refetch()} /> : null}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
           {offers.map((product) => {
             const image = firstProductMedia(product);
             const liked = favorites.has(product.id);
@@ -500,15 +516,18 @@ function FreshOffers() {
               </article>
             );
           })}
-        </div>
-      ) : (
+          </div>
+        </>
+      ) : products.isError ? (
+        <QueryErrorState stale onRetry={() => void products.refetch()} />
+      ) : products.isSuccess ? (
         <div className="grid place-items-center rounded-xl border border-line bg-card px-6 py-12 text-center shadow-soft">
           <div>
             <PackageCheck className="mx-auto h-9 w-9 text-muted" />
             <p className="mt-3 text-sm font-bold text-muted">{t("home.emptyOffers")}</p>
           </div>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -564,14 +583,18 @@ function RecentChatsWidget() {
         ) : null}
       </div>
 
-      {conversations.isLoading ? (
+      {conversations.isLoading && conversations.data === undefined ? (
         <div className="space-y-2">
           {Array.from({ length: 3 }).map((_, index) => (
             <div key={index} className="h-14 animate-pulse rounded-lg bg-panel" />
           ))}
         </div>
+      ) : conversations.isError && conversations.data === undefined ? (
+        <QueryErrorState className="min-h-[150px]" onRetry={() => void conversations.refetch()} />
       ) : visible.length ? (
-        <div className="space-y-2">
+        <>
+          {conversations.isError ? <QueryErrorState stale onRetry={() => void conversations.refetch()} /> : null}
+          <div className="space-y-2">
           {visible.map((group, index) => {
             const conversationId = group.contexts[0]?.conversationId;
             return (
@@ -604,8 +627,11 @@ function RecentChatsWidget() {
           >
             {t("home.recentChats.viewAll")}
           </button>
-        </div>
-      ) : (
+          </div>
+        </>
+      ) : conversations.isError ? (
+        <QueryErrorState stale onRetry={() => void conversations.refetch()} />
+      ) : conversations.isSuccess ? (
         <div className="grid place-items-center py-6 text-center">
           <div>
             <MessageCircle className="mx-auto h-9 w-9 text-muted" />
@@ -619,7 +645,7 @@ function RecentChatsWidget() {
             </button>
           </div>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }

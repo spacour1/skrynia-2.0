@@ -17,6 +17,7 @@ import {
   Zap
 } from "lucide-react";
 import { GameIcon } from "@/components/GameIcon";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { apiFetch, type Game, type GameSection, type Product } from "@/lib/api";
 import { calculateDiscountPercent, isPositiveMoneyCents, useMoney } from "@/lib/currency";
 import { catalogApi, type CatalogField } from "@/lib/catalog-api";
@@ -174,6 +175,13 @@ export function GameCatalogClient({ slug }: { slug: string }) {
     setMetaFilters({});
   }
 
+  if (gameDetail.isLoading && gameDetail.data === undefined) {
+    return <div className="h-64 animate-pulse rounded-xl border border-line bg-panel" />;
+  }
+  if (gameDetail.isError && gameDetail.data === undefined) {
+    return <QueryErrorState onRetry={() => void gameDetail.refetch()} />;
+  }
+
   return (
     <div className="mx-auto max-w-[1380px] space-y-5 text-ink">
       <nav className="flex items-center gap-1.5 text-xs font-bold text-muted">
@@ -187,6 +195,8 @@ export function GameCatalogClient({ slug }: { slug: string }) {
         <ChevronRight className="h-3 w-3 text-muted/70" />
         <span className="truncate text-ink">{game?.name ?? slug}</span>
       </nav>
+
+      {gameDetail.isError ? <QueryErrorState stale onRetry={() => void gameDetail.refetch()} /> : null}
 
       {game?.banner || game?.backgroundImage ? (
         <div className="relative h-[150px] overflow-hidden rounded-xl border border-line md:h-[210px]">
@@ -320,6 +330,16 @@ export function GameCatalogClient({ slug }: { slug: string }) {
                 </FilterBlock>
               ) : null}
 
+              {selectedSectionObj && sectionSchema.isError ? (
+                <div className="p-4">
+                  <QueryErrorState
+                    stale={sectionSchema.data !== undefined}
+                    className="min-h-[140px]"
+                    onRetry={() => void sectionSchema.refetch()}
+                  />
+                </div>
+              ) : null}
+
               <div className="p-4">
                 <button
                   className="flex h-12 w-full items-center justify-center gap-2 rounded-lg border border-line bg-panel/60 text-sm font-black text-ink transition hover:border-brand/50 hover:text-brand"
@@ -336,8 +356,14 @@ export function GameCatalogClient({ slug }: { slug: string }) {
 
         <main className="min-w-0 space-y-5">
           <section className="overflow-hidden rounded-lg border border-line bg-card">
-            {products.isLoading ? <div className="p-10 text-center text-sm font-bold text-muted">{t("catalog.loadingOffers")}</div> : null}
-            {!products.isLoading && !visibleList.length ? (
+            {products.isLoading && products.data === undefined ? <div className="p-10 text-center text-sm font-bold text-muted">{t("catalog.loadingOffers")}</div> : null}
+            {products.isError && products.data === undefined ? (
+              <QueryErrorState className="m-4" onRetry={() => void products.refetch()} />
+            ) : null}
+            {products.isError && products.data !== undefined ? (
+              <QueryErrorState stale className="m-4" onRetry={() => void products.refetch()} />
+            ) : null}
+            {products.isSuccess && !visibleList.length ? (
               <div className="grid min-h-[260px] place-items-center p-10 text-center">
                 <div>
                   <Filter className="mx-auto h-10 w-10 text-muted" />
@@ -502,10 +528,19 @@ function RelatedGames({ currentSlug }: { currentSlug: string }) {
     return (group?.games ?? all).filter((game) => game.slug !== currentSlug).slice(0, 8);
   }, [games.data, currentSlug]);
 
-  if (!related.length) return null;
+  if (games.isLoading && games.data === undefined) {
+    return <div className="h-28 animate-pulse rounded-lg border border-line bg-panel" />;
+  }
+  if (games.isError && games.data === undefined) {
+    return <QueryErrorState className="min-h-[120px]" onRetry={() => void games.refetch()} />;
+  }
+  if (!related.length) {
+    return games.isError ? <QueryErrorState stale onRetry={() => void games.refetch()} /> : null;
+  }
 
   return (
     <section className="rounded-lg border border-line bg-card p-4 shadow-soft">
+      {games.isError ? <QueryErrorState stale className="mb-3" onRetry={() => void games.refetch()} /> : null}
       <h2 className="mb-3 text-sm font-black text-ink">{t("catalog.relatedTitle")}</h2>
       <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 lg:grid-cols-8">
         {related.map((game) => (

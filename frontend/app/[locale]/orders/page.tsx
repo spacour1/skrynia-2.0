@@ -8,6 +8,7 @@ import { apiFetch, type Order } from "@/lib/api";
 import { sumMoneyCentsByCurrency, useMoney } from "@/lib/currency";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RequireAuth } from "@/components/RequireAuth";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
 
@@ -101,8 +102,10 @@ function OrdersContent() {
       </section>
 
       <section className="space-y-3">
-        {orders.isLoading ? <div className="app-card p-8 text-center text-muted">{t("orders.loadingOrders")}</div> : null}
-        {!orders.isLoading && !filtered.length ? (
+        {orders.isLoading && !orders.data ? <div className="app-card p-8 text-center text-muted">{t("orders.loadingOrders")}</div> : null}
+        {orders.error && !orders.data ? <QueryErrorState onRetry={() => void orders.refetch()} /> : null}
+        {orders.error && orders.data ? <QueryErrorState stale onRetry={() => void orders.refetch()} /> : null}
+        {!orders.isLoading && !orders.error && !filtered.length ? (
           <div className="app-card grid min-h-[240px] place-items-center p-8 text-center">
             <div>
               <ShoppingBag className="mx-auto h-10 w-10 text-muted" />

@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { ChatPanel } from "@/components/ChatPanel";
 import { EmailNotVerifiedNotice } from "@/components/EmailNotVerifiedNotice";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { ReportModal } from "@/components/ReportModal";
 import { apiFetch, isEmailNotVerifiedError, type Product } from "@/lib/api";
 import { calculateDiscountPercent, isPositiveMoneyCents, useMoney } from "@/lib/currency";
@@ -137,8 +138,11 @@ export function ProductPageClient({ id }: { id: string }) {
 
   const buyError = buySecurely.error;
 
-  if (product.isLoading) return <p className="text-muted">{t("common.loading")}</p>;
-  if (!product.data) return <p className="text-rose-600">{t("home.noListings")}</p>;
+  if (product.isLoading && product.data === undefined) return <p className="text-muted">{t("common.loading")}</p>;
+  if (product.isError && product.data === undefined) {
+    return <QueryErrorState onRetry={() => void product.refetch()} />;
+  }
+  if (!product.data) return null;
 
   const item = product.data.product;
   const reviews = product.data.reviews ?? [];
@@ -170,7 +174,9 @@ export function ProductPageClient({ id }: { id: string }) {
   ].filter(Boolean) as string[];
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+    <>
+      {product.isError ? <QueryErrorState stale className="mb-5" onRetry={() => void product.refetch()} /> : null}
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
       <main className="space-y-5">
         <section className="app-card overflow-hidden">
           <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -442,7 +448,8 @@ export function ProductPageClient({ id }: { id: string }) {
       </aside>
 
       {reportOpen ? <ReportModal kind="user" targetId={item.sellerId} onClose={() => setReportOpen(false)} /> : null}
-    </div>
+      </div>
+    </>
   );
 }
 

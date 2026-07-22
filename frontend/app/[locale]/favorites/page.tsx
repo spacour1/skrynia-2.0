@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "@/lib/navigation";
-import { useRouter } from "@/lib/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BadgePercent, Heart, PackageOpen, Star, Store, Timer } from "lucide-react";
 import { GameIcon } from "@/components/GameIcon";
@@ -110,7 +109,6 @@ function FavoriteOfferRow({
   removing: boolean;
   onRemove: () => void;
 }) {
-  const router = useRouter();
   const { t } = useI18n();
   const imageUrl = firstProductMedia(product);
   const discount =
@@ -119,18 +117,8 @@ function FavoriteOfferRow({
       : 0;
 
   return (
-    <article
-      className="group grid cursor-pointer gap-4 border-b border-line bg-card px-4 py-4 transition last:border-b-0 hover:bg-panel/55 md:grid-cols-[72px_minmax(0,1fr)_190px_130px_48px] md:items-center"
-      role="link"
-      tabIndex={0}
-      onClick={() => router.push(`/products/${product.id}`)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          router.push(`/products/${product.id}`);
-        }
-      }}
-    >
+    <article className="group relative grid gap-4 border-b border-line bg-card px-4 py-4 transition last:border-b-0 hover:bg-panel/55 md:grid-cols-[72px_minmax(0,1fr)_190px_130px_48px] md:items-center">
+      <Link href={`/products/${product.id}`} aria-label={product.title} className="focus-ring absolute inset-0 z-10 rounded-[inherit]" />
       <div className="h-16 w-16 overflow-hidden rounded-xl border border-line bg-panel">
         {imageUrl ? (
           <img className="h-full w-full object-cover" src={imageUrl} alt="" />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "@/lib/navigation";
+import Link, { useRouter } from "@/lib/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronLeft,
@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useRef } from "react";
 import { GameIcon } from "../../components/GameIcon";
+import { MarketplaceCategoryLink } from "@/components/MarketplaceCategoryLink";
 import { apiFetch, money, type ConversationGroup, type Game, type Product } from "../../lib/api";
 import { firstProductMedia } from "../../lib/product-media";
 import { useAuth } from "../../lib/auth-store";
@@ -29,7 +30,6 @@ import { SECTION_PATTERNS, getGameTileTheme, type CategoryTile, type GameTileThe
 import { useI18n } from "../../lib/i18n";
 
 export default function HomePage() {
-  const router = useRouter();
   const { t } = useI18n();
 
   const games = useQuery({
@@ -49,10 +49,6 @@ export default function HomePage() {
     gamesList.filter((game) => (game.catalogType ? game.catalogType === "platform" : SECTION_PATTERNS.platform.test(`${game.slug} ${game.name} ${game.publisher ?? ""}`)))
   );
 
-  function selectGame(slug: string) {
-    router.push(`/games/${slug}`);
-  }
-
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
       <main className="min-w-0 space-y-6 pb-4">
@@ -63,8 +59,8 @@ export default function HomePage() {
             <RowSkeleton />
           ) : (
             <>
-              <CategoryCarousel title={t("home.sections.popular")} items={popularGames} onSelect={selectGame} />
-              {platformGames.length ? <PlatformsRow items={platformGames} onSelect={selectGame} /> : null}
+              <CategoryCarousel title={t("home.sections.popular")} items={popularGames} />
+              {platformGames.length ? <PlatformsRow items={platformGames} /> : null}
             </>
           )}
           <CategoriesRow />
@@ -166,7 +162,7 @@ function Benefit({ title, text, icon: Icon }: { title: string; text: string; ico
   );
 }
 
-function CategoryCarousel({ title, items, onSelect, compact }: { title: string; items: CategoryTile[]; onSelect: (slug: string) => void; compact?: boolean }) {
+function CategoryCarousel({ title, items, compact }: { title: string; items: CategoryTile[]; compact?: boolean }) {
   const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -197,10 +193,10 @@ function CategoryCarousel({ title, items, onSelect, compact }: { title: string; 
           const theme = getGameTileTheme(item.slug, item.name);
           const tile = item.image ? { ...theme, image: item.image } : theme;
           return (
-            <button
+            <Link
               key={item.id}
+              href={`/games/${item.slug}`}
               className="group/tile relative aspect-[2.42/1] basis-[78%] shrink-0 snap-start overflow-hidden rounded-lg bg-[#03070d] text-left shadow-[0_12px_26px_rgba(0,0,0,0.24)] transition duration-300 hover:-translate-y-0.5 hover:shadow-lift sm:basis-[calc((100%_-_24px)/3)] lg:basis-[calc((100%_-_48px)/5)]"
-              onClick={() => onSelect(item.slug)}
               title={item.name}
             >
               <GameTileBackdrop name={item.name} slug={item.slug} tile={tile} compact={Boolean(compact)} />
@@ -218,7 +214,7 @@ function CategoryCarousel({ title, items, onSelect, compact }: { title: string; 
                   </span>
                 </div>
               ) : null}
-            </button>
+            </Link>
           );
         })}
       </div>
@@ -311,17 +307,17 @@ function SectionHeader({ title }: { title: string }) {
   );
 }
 
-function PlatformsRow({ items, onSelect }: { items: CategoryTile[]; onSelect: (slug: string) => void }) {
+function PlatformsRow({ items }: { items: CategoryTile[] }) {
   const { t } = useI18n();
   return (
     <section className="space-y-2.5">
       <SectionHeader title={t("home.sections.platform")} />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {items.slice(0, 5).map((item) => (
-          <button
+          <Link
             key={item.id}
+            href={`/games/${item.slug}`}
             className="flex items-center gap-3 rounded-xl border border-line bg-card p-3 text-left shadow-soft transition hover:-translate-y-0.5 hover:border-brand/60"
-            onClick={() => onSelect(item.slug)}
           >
             <GameIcon name={item.name} slug={item.slug} className="h-10 w-10 shrink-0 rounded-lg" />
             <span className="min-w-0">
@@ -333,7 +329,7 @@ function PlatformsRow({ items, onSelect }: { items: CategoryTile[]; onSelect: (s
                 </span>
               ) : null}
             </span>
-          </button>
+          </Link>
         ))}
       </div>
     </section>
@@ -385,21 +381,13 @@ function CategoriesRow() {
           const Icon = CATEGORY_ICONS[category.slug] ?? Swords;
           const labelKey = CATEGORY_LABEL_KEYS[category.slug];
           return (
-            <a
+            <MarketplaceCategoryLink
               key={category.id}
-              href="#game-catalog"
-              className="flex items-center gap-3 rounded-xl border border-line bg-card p-3 shadow-soft transition hover:-translate-y-0.5 hover:border-brand/60"
-            >
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-brand/40 bg-brand/10 text-brand">
-                <Icon className="h-5 w-5" />
-              </span>
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-black text-ink">{labelKey ? t(`home.categories.${labelKey}`) : category.name}</span>
-                <span className="block truncate text-xs text-muted">
-                  {category.activeProductCount.toLocaleString("uk-UA")} {t("home.itemsLabel")}
-                </span>
-              </span>
-            </a>
+              category={category}
+              Icon={Icon}
+              label={labelKey ? t(`home.categories.${labelKey}`) : category.name}
+              itemsLabel={t("home.itemsLabel")}
+            />
           );
         })}
       </div>
@@ -465,9 +453,9 @@ function FreshOffers() {
             return (
               <article
                 key={product.id}
-                className="group cursor-pointer overflow-hidden rounded-xl border border-line bg-card shadow-soft transition hover:-translate-y-0.5 hover:border-brand/60"
-                onClick={() => router.push(`/products/${product.id}`)}
+                className="group relative overflow-hidden rounded-xl border border-line bg-card shadow-soft transition hover:-translate-y-0.5 hover:border-brand/60"
               >
+                <Link href={`/products/${product.id}`} aria-label={product.title} className="block focus-ring rounded-[inherit]">
                 <div className="relative aspect-[16/10] overflow-hidden">
                   {image ? (
                     <img className="h-full w-full object-cover transition duration-300 group-hover:scale-105" src={image} alt="" loading="lazy" draggable={false} />
@@ -477,18 +465,6 @@ function FreshOffers() {
                   <span className={`absolute left-2 top-2 rounded-md px-2 py-0.5 text-[10px] font-black uppercase ${product.isHot ? "bg-action text-stone-950" : "bg-brand text-stone-950"}`}>
                     {product.isHot ? t("home.badges.top") : t("home.badges.new")}
                   </span>
-                  <button
-                    type="button"
-                    className={`absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-black/45 backdrop-blur transition hover:text-brand ${liked ? "text-brand" : "text-white/80"}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      toggleFavorite(product.id);
-                    }}
-                    aria-label={t("home.favorite")}
-                    title={t("home.favorite")}
-                  >
-                    <Heart className={`h-3.5 w-3.5 ${liked ? "fill-brand" : ""}`} />
-                  </button>
                 </div>
                 <div className="p-3">
                   <h3 className="line-clamp-1 text-sm font-bold text-ink transition group-hover:text-brand">{product.title}</h3>
@@ -509,6 +485,16 @@ function FreshOffers() {
                     ) : null}
                   </div>
                 </div>
+                </Link>
+                <button
+                  type="button"
+                  className={`absolute right-2 top-2 z-10 grid h-7 w-7 place-items-center rounded-full bg-black/45 backdrop-blur transition hover:text-brand ${liked ? "text-brand" : "text-white/80"}`}
+                  onClick={() => toggleFavorite(product.id)}
+                  aria-label={t("home.favorite")}
+                  title={t("home.favorite")}
+                >
+                  <Heart className={`h-3.5 w-3.5 ${liked ? "fill-brand" : ""}`} />
+                </button>
               </article>
             );
           })}

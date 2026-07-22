@@ -1,7 +1,7 @@
 "use client";
 
 import { Heart, Timer } from "lucide-react";
-import { useRouter } from "@/lib/navigation";
+import Link from "@/lib/navigation";
 import { money, type Product } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
@@ -24,7 +24,6 @@ export function SellerListingRow({
   favoritePending: boolean;
   onToggleFavorite: (product: Product) => void;
 }) {
-  const router = useRouter();
   const { t } = useI18n();
 
   const badges: string[] = [];
@@ -34,23 +33,9 @@ export function SellerListingRow({
   if (product.server) badges.push(product.server);
   if (product.platform) badges.push(product.platform);
 
-  function open() {
-    router.push(`/products/${product.id}`);
-  }
-
   return (
-    <article
-      className="group grid cursor-pointer grid-cols-1 items-center gap-3 rounded-xl border border-line/70 bg-card px-4 py-2.5 transition hover:border-brand/60 lg:grid-cols-[minmax(0,1fr)_240px_140px_40px] lg:gap-4"
-      role="link"
-      tabIndex={0}
-      onClick={open}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          open();
-        }
-      }}
-    >
+    <article className="group relative grid grid-cols-1 items-center gap-3 rounded-xl border border-line/70 bg-card px-4 py-2.5 transition hover:border-brand/60 lg:grid-cols-[minmax(0,1fr)_240px_140px_40px] lg:gap-4">
+      <Link href={`/products/${product.id}`} aria-label={product.title} className="focus-ring absolute inset-0 z-10 rounded-[inherit]" />
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-muted">
           {product.deliveryType === "instant" ? (
@@ -96,13 +81,10 @@ export function SellerListingRow({
 
       <button
         type="button"
-        className="ml-auto grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line text-muted transition hover:border-rose-400/60 hover:text-rose-400 disabled:opacity-50 lg:ml-0"
+        className="relative z-20 ml-auto grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line text-muted transition hover:border-rose-400/60 hover:text-rose-400 disabled:opacity-50 lg:ml-0"
         disabled={favoritePending}
         aria-label={isFavorite ? t("product.removeFavorite") : t("product.addFavorite")}
-        onClick={(event) => {
-          event.stopPropagation();
-          onToggleFavorite(product);
-        }}
+        onClick={() => onToggleFavorite(product)}
       >
         <Heart className={`h-4 w-4 ${isFavorite ? "fill-current text-rose-400" : ""}`} />
       </button>

@@ -388,7 +388,6 @@ function OfferRow({
   liked: boolean;
   onToggleFavorite: (liked: boolean) => void;
 }) {
-  const router = useRouter();
   const { t } = useI18n();
   const discount =
     product.oldPriceCents && Number(product.oldPriceCents) > Number(product.priceCents)
@@ -401,18 +400,8 @@ function OfferRow({
   const specs = (product.cardMetadata ?? []).filter((spec) => spec.value != null && spec.value !== "").slice(0, 4);
 
   return (
-    <article
-      className="group relative cursor-pointer border-b border-line bg-card transition hover:bg-panel/40"
-      role="link"
-      tabIndex={0}
-      onClick={() => router.push(`/products/${product.id}`)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          router.push(`/products/${product.id}`);
-        }
-      }}
-    >
+    <article className="group relative border-b border-line bg-card transition hover:bg-panel/40">
+      <Link href={`/products/${product.id}`} aria-label={product.title} className="focus-ring absolute inset-0 z-10 rounded-[inherit]" />
       <div className="relative grid gap-4 px-4 py-4 md:grid-cols-[64px_minmax(0,1fr)_190px_120px_44px] md:items-center lg:px-6">
         <div className="relative hidden h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-line md:block">
           {image ? (
@@ -497,7 +486,6 @@ function OfferRow({
 
 function RelatedGames({ currentSlug }: { currentSlug: string }) {
   const { t } = useI18n();
-  const router = useRouter();
   const games = useQuery({
     queryKey: ["games"],
     queryFn: () => apiFetch<{ games: Game[] }>("/marketplace/games"),
@@ -522,16 +510,15 @@ function RelatedGames({ currentSlug }: { currentSlug: string }) {
       <h2 className="mb-3 text-sm font-black text-ink">{t("catalog.relatedTitle")}</h2>
       <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 lg:grid-cols-8">
         {related.map((game) => (
-          <button
+          <Link
             key={game.id}
-            type="button"
+            href={`/games/${game.slug}`}
             className="group flex flex-col items-center gap-2 rounded-xl border border-line bg-panel/40 p-2.5 text-center transition hover:-translate-y-0.5 hover:border-brand/60"
-            onClick={() => router.push(`/games/${game.slug}`)}
             title={game.name}
           >
             <GameIcon name={game.name} slug={game.slug} className="h-11 w-11" />
             <span className="line-clamp-2 min-h-[28px] text-[11px] font-bold leading-[14px] text-ink transition group-hover:text-brand">{game.name}</span>
-          </button>
+          </Link>
         ))}
       </div>
     </section>

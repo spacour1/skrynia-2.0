@@ -10,14 +10,14 @@ import type { AuthedRequest } from "../../common/types.js";
 import { DISPUTE_DECISIONS, type OrderStatus } from "../../domain/enums.js";
 import { recordOrderEvent } from "../orders/order-events.service.js";
 import { canTransitionOrder } from "../orders/order-transitions.js";
-import { getMessages } from "../chat/chat.service.js";
+import { getMessagePage } from "../chat/chat.service.js";
 import { createOrderSystemMessage } from "../chat/system-messages.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
 import {
   createDisputeMessage,
   getOrderDispute,
   hideDisputeMessage,
-  listDisputeMessages
+  listDisputeMessagePage
 } from "./dispute-messages.service.js";
 import { resolveDisputeResolution, type DisputeResolutionResult } from "./dispute-resolution.service.js";
 import { mapOrderRowDto } from "../orders/orders.dto.js";
@@ -170,8 +170,9 @@ router.get(
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
-    const messages = await listDisputeMessages(id, req.user);
-    res.json({ messages });
+    const { limit, cursor } = parseCursorPage(req.query, { defaultLimit: 50 });
+    const page = await listDisputeMessagePage(id, req.user, { limit, cursor });
+    res.json(page);
   })
 );
 
@@ -268,12 +269,18 @@ router.get(
     // Order chat lives on conversation_id, not the legacy messages.order_id column - a
     // dispute must look the conversation up by order_id first, then read messages by
     // conversation_id, the same way the regular chat endpoints do.
-    const messages = dispute.rows[0].conversationId
-      ? await getMessages(dispute.rows[0].conversationId, { limit: 200, viewerIsAdmin: true })
-      : [];
-    const disputeMessages = await listDisputeMessages(id, req.user);
+    const messagePage = dispute.rows[0].conversationId
+      ? await getMessagePage(dispute.rows[0].conversationId, { limit: 100, viewerIsAdmin: true })
+      : { messages: [], nextCursor: null };
+    const disputeMessagePage = await listDisputeMessagePage(id, req.user, { limit: 100 });
 
-    res.json({ dispute: dispute.rows[0], messages, disputeMessages });
+    res.json({
+      dispute: dispute.rows[0],
+      messages: messagePage.messages,
+      messageNextCursor: messagePage.nextCursor,
+      disputeMessages: disputeMessagePage.messages,
+      disputeMessageNextCursor: disputeMessagePage.nextCursor
+    });
   })
 );
 

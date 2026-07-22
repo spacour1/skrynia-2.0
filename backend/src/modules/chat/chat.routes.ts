@@ -8,14 +8,15 @@ import type { AuthedRequest } from "../../common/types.js";
 import {
   assertConversationAccess,
   getExistingProductConversation,
-  getGroupedUserConversations,
-  getMessages,
+  getGroupedUserConversationPage,
+  getMessagePage,
   getOrCreateDirectConversation,
   getOrCreateProductConversation,
-  getUserConversations,
+  getUserConversationPage,
   markConversationRead,
   sendMessageIdempotently
 } from "./chat.service.js";
+import { decodeCursor, parseCursorPage } from "../../common/pagination.js";
 
 const router = Router();
 
@@ -28,7 +29,10 @@ const sendMessageSchema = z.object({
 
 const listMessagesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
-  before: z.string().datetime().optional()
+  before: z.string().datetime().optional(),
+  cursor: z.string().max(512).optional()
+}).refine((query) => !(query.before && query.cursor), {
+  message: "Use either before or cursor, not both"
 });
 
 async function getActiveProduct(productId: string) {
@@ -48,8 +52,8 @@ router.get(
   "/conversations",
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const conversations = await getUserConversations(req.user.id, req.user.role);
-    res.json({ conversations });
+    const page = parseCursorPage(req.query, { defaultLimit: 100 });
+    res.json(await getUserConversationPage(req.user.id, req.user.role, page));
   })
 );
 
@@ -57,8 +61,8 @@ router.get(
   "/conversations/grouped",
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const groups = await getGroupedUserConversations(req.user.id, req.user.role);
-    res.json({ groups });
+    const page = parseCursorPage(req.query, { defaultLimit: 100 });
+    res.json(await getGroupedUserConversationPage(req.user.id, req.user.role, page));
   })
 );
 
@@ -69,13 +73,14 @@ router.get(
     const conversationId = z.string().uuid().parse(req.params.conversationId);
     const query = listMessagesQuerySchema.parse(req.query);
     await assertConversationAccess(conversationId, req.user.id, req.user.role);
-    const messages = await getMessages(conversationId, {
+    const page = await getMessagePage(conversationId, {
       limit: query.limit,
       before: query.before,
+      cursor: query.cursor ? decodeCursor(query.cursor) : null,
       viewerIsAdmin: req.user.role === "admin"
     });
     await markConversationRead(conversationId, req.user.id);
-    res.json({ messages });
+    res.json(page);
   })
 );
 

@@ -4,6 +4,7 @@ import { pool } from "../../db/pool.js";
 import { asyncHandler, notFound } from "../../common/errors.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { recordModerationAction } from "../reports/reports.service.js";
+import { parseOffsetPage } from "../../common/pagination.js";
 
 const router = Router();
 
@@ -11,8 +12,10 @@ router.get(
   "/reports",
   asyncHandler(async (req: AuthedRequest, res) => {
     const status = z.enum(["pending", "in_review", "resolved", "rejected"]).optional().parse(req.query.status);
+    const { page, limit, offset } = parseOffsetPage(req.query, { defaultLimit: 100 });
     const userReports = await pool.query(
-      `select ur.id, 'user' as kind, ur.reason, ur.description, ur.status, ur.priority,
+      `select * from (
+       select ur.id, 'user' as kind, ur.reason, ur.description, ur.status, ur.priority,
               ur.moderator_note as "moderatorNote", ur.created_at as "createdAt", ur.resolved_at as "resolvedAt",
               ur.reporter_id as "reporterId", reporter.display_name as "reporterDisplayName",
               ur.reported_user_id as "reportedUserId", reported.display_name as "reportedDisplayName",
@@ -31,11 +34,14 @@ router.get(
        join users reporter on reporter.id = mr.reporter_id
        join users reported on reported.id = mr.reported_user_id
        where coalesce($1, mr.status) = mr.status
-       order by priority desc, "createdAt" desc
-       limit 300`,
-      [status ?? null]
+       ) reports
+       order by case when priority = 'high' then 1 else 0 end desc,
+                "createdAt" desc, kind desc, id desc
+       limit $2 offset $3`,
+      [status ?? null, limit + 1, offset]
     );
-    res.json({ reports: userReports.rows });
+    const hasMore = userReports.rows.length > limit;
+    res.json({ reports: userReports.rows.slice(0, limit), page, hasMore });
   })
 );
 

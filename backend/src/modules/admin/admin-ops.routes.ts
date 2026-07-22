@@ -26,6 +26,10 @@ router.get(
   "/media",
   asyncHandler(async (req: AuthedRequest, res) => {
     const status = z.enum(["pending", "approved", "rejected"]).optional().parse(req.query.status);
+    const { limit, cursor } = parseCursorPage(req.query, { defaultLimit: 100 });
+    const values: unknown[] = [status ?? null];
+    const cursorWhere = keysetWhereClause(values, cursor, "pm.created_at", "pm.id");
+    values.push(limit);
     const result = await pool.query(
       `select pm.id, pm.url, pm.type, pm.sort_order as "sortOrder", pm.status, pm.created_at as "createdAt",
               p.id as "productId", p.title as "productTitle",
@@ -34,11 +38,12 @@ router.get(
        join products p on p.id = pm.product_id
        join users u on u.id = p.seller_id
        where coalesce($1, pm.status) = pm.status
-       order by pm.created_at desc
-       limit 200`,
-      [status ?? null]
+       ${cursorWhere ? `and ${cursorWhere}` : ""}
+       order by pm.created_at desc, pm.id desc
+       limit $${values.length}`,
+      values
     );
-    res.json({ media: result.rows });
+    res.json({ media: result.rows, nextCursor: buildNextCursor(result.rows, limit) });
   })
 );
 
@@ -145,7 +150,11 @@ router.post(
 
 router.get(
   "/listings",
-  asyncHandler(async (_req: AuthedRequest, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { limit, cursor } = parseCursorPage(req.query, { defaultLimit: 100 });
+    const values: unknown[] = [];
+    const cursorWhere = keysetWhereClause(values, cursor, "p.created_at", "p.id");
+    values.push(limit);
     const result = await pool.query(
       `select p.id, p.title, p.status, p.price_cents as "priceCents", p.currency,
               p.created_at as "createdAt", c.name as "categoryName",
@@ -157,10 +166,12 @@ router.get(
        left join game_sections gs on gs.id = p.section_id
        join users u on u.id = p.seller_id
        where p.status != 'deleted'
-       order by p.created_at desc
-       limit 300`
+       ${cursorWhere ? `and ${cursorWhere}` : ""}
+       order by p.created_at desc, p.id desc
+       limit $${values.length}`,
+      values
     );
-    res.json({ listings: result.rows });
+    res.json({ listings: result.rows, nextCursor: buildNextCursor(result.rows, limit) });
   })
 );
 
@@ -240,7 +251,11 @@ router.patch(
 router.get(
   "/orders/pending",
   adminOnly,
-  asyncHandler(async (_req: AuthedRequest, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { limit, cursor } = parseCursorPage(req.query, { defaultLimit: 100 });
+    const values: unknown[] = [];
+    const cursorWhere = keysetWhereClause(values, cursor, "o.created_at", "o.id");
+    values.push(limit);
     const result = await pool.query(
       `select o.id, o.amount_cents as "amountCents", o.currency, o.created_at as "createdAt",
               p.title as "productTitle",
@@ -251,10 +266,12 @@ router.get(
        join users buyer on buyer.id = o.buyer_id
        join users seller on seller.id = o.seller_id
        where o.status = 'pending'
-       order by o.created_at desc
-       limit 200`
+       ${cursorWhere ? `and ${cursorWhere}` : ""}
+       order by o.created_at desc, o.id desc
+       limit $${values.length}`,
+      values
     );
-    res.json({ orders: result.rows });
+    res.json({ orders: result.rows, nextCursor: buildNextCursor(result.rows, limit) });
   })
 );
 

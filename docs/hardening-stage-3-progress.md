@@ -225,6 +225,16 @@ insert is rolled back before the retry (verified through a unique-constraint pro
 | `npx vitest run test/ledger.test.ts test/test-payments.test.ts` | PASS, 16/16 |
 | `cd backend && npm test` | PASS, 261/261 in 27 files |
 
+### Retry trace-correlation follow-up (2026-07-23)
+
+Retry and exhausted warn logs now always carry one stable `traceId`. HTTP work gets
+the request trace through `AsyncLocalStorage`; background work gets a transaction
+trace generated once before the attempt loop. Concurrent request scopes are isolated,
+so retry lines cannot inherit another request's ID. The existing caller audit remains
+valid: provider capture is still explicitly non-retrying and no provider behavior was
+changed. Added regressions cover scoped retry/exhaustion logs and two concurrent
+request traces, plus a standalone async-context isolation test.
+
 ## Stage 5.1: upload quotas and processing bounds
 
 Status: complete.
@@ -376,7 +386,7 @@ gap-free across a page boundary with tied timestamps; a garbage cursor on
 | `npx vitest run test/dispute-consistency.test.ts test/audit-redaction.test.ts` | PASS, 11/11 |
 | `cd backend && npm test` | PASS, 281/281 in 31 files |
 
-### Remaining constraint
+### Historical remaining constraint (resolved below)
 
 `admin-finance.routes.ts` (transactions/ledger/reconciliation), `admin-ops.routes.ts`
 (media, listings), and the admin "all orders" view in `orders.routes.ts` still use a
@@ -384,6 +394,23 @@ fixed limit with no cursor. They were left unchanged in this pass to keep the di
 scoped to the two clearest defects (a truly unbounded list and a hard growth ceiling
 with no way to page past it); the same `pagination.ts` helper applies directly if
 these need the same treatment later.
+
+### Pagination remediation follow-up (2026-07-23)
+
+The fixed-limit constraint above is resolved. The shared cursor now validates both a
+timestamp and UUID id, accepts per-endpoint bounded defaults, and is applied to orders,
+raw/grouped conversations, chat messages, dispute messages, admin users, media,
+listings, pending orders, transactions, ledger entries, reconciliation snapshots and
+exports, payouts, audit, and disputes. JSON contracts retain their existing arrays and
+add `nextCursor`; embedded participant/admin dispute message arrays expose explicit
+message cursor fields rather than truncating silently. Chat's legacy `before` parameter
+remains accepted, while new responses use the lossless `(created_at, id)` cursor.
+
+Admin reports retain priority ordering through bounded `page`/`limit` pagination and
+add `page`/`hasMore`; the total order is high-priority first, then creation time, kind,
+and id. Regression coverage verifies maximum limits, tied timestamps without loss,
+participant ownership, bounded embedded dispute history, all admin list SQL paths,
+and stable report priority/user ordering.
 
 ## Stage 6: centralize marketplace response contracts (partial)
 

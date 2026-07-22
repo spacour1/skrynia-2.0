@@ -1,7 +1,9 @@
 import pg from "pg";
+import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
 import { logger } from "../common/logger.js";
 import { transactionRetryExhaustedTotal, transactionRetryTotal } from "../common/metrics.js";
+import { currentTraceId } from "../common/trace-context.js";
 
 export const pool = new pg.Pool({
   connectionString: env.DATABASE_URL,
@@ -53,6 +55,9 @@ export async function inSerializableTx<T>(
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
   const baseDelayMs = options.baseDelayMs ?? 20;
   const maxDelayMs = options.maxDelayMs ?? 200;
+  // HTTP work inherits the request trace; background work still gets one stable
+  // transaction trace shared by every attempt, rather than unrelated log lines.
+  const traceId = currentTraceId() ?? randomUUID();
 
   for (let attempt = 1; ; attempt += 1) {
     try {
@@ -62,7 +67,10 @@ export async function inSerializableTx<T>(
       if (!code) throw error;
       if (attempt >= maxAttempts) {
         transactionRetryExhaustedTotal.labels(code).inc();
-        logger.warn({ code, attempt, maxAttempts }, "serializable_tx_retries_exhausted");
+        logger.warn(
+          { traceId, code, attempt, maxAttempts },
+          "serializable_tx_retries_exhausted"
+        );
         throw error;
       }
       transactionRetryTotal.labels(code).inc();
@@ -70,7 +78,10 @@ export async function inSerializableTx<T>(
       // from re-colliding in lockstep.
       const cap = Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
       const delayMs = Math.round(cap * (0.5 + Math.random() * 0.5));
-      logger.warn({ code, attempt, delayMs }, "serializable_tx_retry");
+      logger.warn(
+        { traceId, code, attempt, maxAttempts, delayMs },
+        "serializable_tx_retry"
+      );
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }

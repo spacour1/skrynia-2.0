@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { inSerializableTx, pool } from "../src/db/pool.js";
 import { getRedis } from "../src/common/redis.js";
+import { logger } from "../src/common/logger.js";
+import { runWithTraceId } from "../src/common/trace-context.js";
 import { closeDb, resetDb } from "./fixtures.js";
 
 beforeEach(resetDb);
@@ -106,5 +108,68 @@ describe("inSerializableTx retry", () => {
       )
     ).rejects.toThrow(/40001/);
     expect(attempts).toBe(1);
+  });
+
+  it("includes the active request trace in retry and exhaustion logs", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+    let retryAttempts = 0;
+
+    await runWithTraceId("trace-retry", () =>
+      inSerializableTx(
+        async () => {
+          retryAttempts += 1;
+          if (retryAttempts === 1) throw pgError("40001");
+        },
+        { baseDelayMs: 1, maxDelayMs: 1 }
+      )
+    );
+
+    await expect(
+      runWithTraceId("trace-exhausted", () =>
+        inSerializableTx(
+          async () => {
+            throw pgError("40P01");
+          },
+          { maxAttempts: 1 }
+        )
+      )
+    ).rejects.toThrow(/40P01/);
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ traceId: "trace-retry", code: "40001" }),
+      "serializable_tx_retry"
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ traceId: "trace-exhausted", code: "40P01" }),
+      "serializable_tx_retries_exhausted"
+    );
+    warn.mockRestore();
+  });
+
+  it("does not mix retry log traces between concurrent requests", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+    const attempts = new Map<string, number>();
+
+    await Promise.all(
+      ["trace-concurrent-a", "trace-concurrent-b"].map((traceId) =>
+        runWithTraceId(traceId, () =>
+          inSerializableTx(
+            async () => {
+              const attempt = (attempts.get(traceId) ?? 0) + 1;
+              attempts.set(traceId, attempt);
+              if (attempt === 1) throw pgError("40001");
+            },
+            { baseDelayMs: 1, maxDelayMs: 1 }
+          )
+        )
+      )
+    );
+
+    const retryTraces = warn.mock.calls
+      .filter((call) => call[1] === "serializable_tx_retry")
+      .map((call) => (call[0] as { traceId?: string }).traceId);
+    expect(retryTraces).toEqual(expect.arrayContaining(["trace-concurrent-a", "trace-concurrent-b"]));
+    expect(retryTraces).toHaveLength(2);
+    warn.mockRestore();
   });
 });

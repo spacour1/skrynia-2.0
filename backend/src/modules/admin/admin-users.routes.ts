@@ -12,6 +12,7 @@ import {
   loadSellerProductCacheContexts
 } from "../marketplace/marketplace-cache.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
+import { buildNextCursor, keysetWhereClause, parseCursorPage } from "../../common/pagination.js";
 
 const router = Router();
 const adminOnly = requireRole("admin");
@@ -38,15 +39,21 @@ router.get(
 
 router.get(
   "/users",
-  asyncHandler(async (_req: AuthedRequest, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { limit, cursor } = parseCursorPage(req.query, { defaultLimit: 100 });
+    const values: unknown[] = [];
+    const where = keysetWhereClause(values, cursor, "created_at", "id");
+    values.push(limit);
     const result = await pool.query(
       `select id, email, display_name as "displayName", role, is_banned as "isBanned",
               muted_until as "mutedUntil", created_at as "createdAt"
        from users
-       order by created_at desc
-       limit 200`
+       ${where ? `where ${where}` : ""}
+       order by created_at desc, id desc
+       limit $${values.length}`,
+      values
     );
-    res.json({ users: result.rows });
+    res.json({ users: result.rows, nextCursor: buildNextCursor(result.rows, limit) });
   })
 );
 

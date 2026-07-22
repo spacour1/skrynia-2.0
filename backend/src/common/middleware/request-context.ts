@@ -7,6 +7,7 @@ import { logger } from "../logger.js";
 import { httpRequestDuration } from "../metrics.js";
 import { redactSensitive } from "../audit-redact.js";
 import { normalizedRequestEndpoint, requestPath, stripQueryString } from "../request-url.js";
+import { runWithTraceId } from "../trace-context.js";
 
 const AUDITED_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const URL_FIELDS = new Set(["url", "uri", "path", "from", "to"]);
@@ -132,7 +133,9 @@ export function createRequestContext(requestLogger: RequestLogger = logger): Req
         .catch((error) => requestLogger.warn({ traceId: req.traceId, error }, "audit_log_failed"));
     });
 
-    next();
+    // Keep the trace available to lower-level async services (for example DB retry
+    // logs) without changing every route/service signature.
+    runWithTraceId(req.traceId, next);
   };
 }
 

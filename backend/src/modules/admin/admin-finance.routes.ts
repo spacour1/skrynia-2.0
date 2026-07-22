@@ -7,6 +7,7 @@ import type { AuthedRequest } from "../../common/types.js";
 import { createReconciliationSnapshot } from "./reconciliation.service.js";
 import { postManualAdjustment } from "../users/wallet.service.js";
 import { absoluteMoneyCents, parseMoneyCents } from "../../domain/money.js";
+import { buildNextCursor, keysetWhereClause, parseCursorPage } from "../../common/pagination.js";
 
 const router = Router();
 const adminOnly = requireRole("admin");
@@ -14,24 +15,34 @@ const adminOnly = requireRole("admin");
 router.get(
   "/transactions",
   adminOnly,
-  asyncHandler(async (_req: AuthedRequest, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { limit, cursor } = parseCursorPage(req.query, { defaultLimit: 100 });
+    const values: unknown[] = [];
+    const where = keysetWhereClause(values, cursor, "t.created_at", "t.id");
+    values.push(limit);
     const result = await pool.query(
       `select t.id, t.type, t.direction, t.amount_cents as "amountCents", t.currency, t.status,
               t.created_at as "createdAt", t.order_id as "orderId",
               u.email, u.display_name as "displayName"
        from transactions t
        left join users u on u.id = t.user_id
-       order by t.created_at desc
-       limit 300`
+       ${where ? `where ${where}` : ""}
+       order by t.created_at desc, t.id desc
+       limit $${values.length}`,
+      values
     );
-    res.json({ transactions: result.rows });
+    res.json({ transactions: result.rows, nextCursor: buildNextCursor(result.rows, limit) });
   })
 );
 
 router.get(
   "/ledger",
   adminOnly,
-  asyncHandler(async (_req: AuthedRequest, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { limit, cursor } = parseCursorPage(req.query, { defaultLimit: 100 });
+    const values: unknown[] = [];
+    const where = keysetWhereClause(values, cursor, "e.created_at", "e.id");
+    values.push(limit);
     const result = await pool.query(
       `select e.id, e.idempotency_key as "idempotencyKey", e.entry_type as "entryType",
               e.order_id as "orderId", e.currency, e.metadata, e.created_at as "createdAt",
@@ -53,11 +64,13 @@ router.get(
        from ledger_entries e
        left join ledger_lines l on l.entry_id = e.id
        left join ledger_accounts a on a.id = l.account_id
+       ${where ? `where ${where}` : ""}
        group by e.id
-       order by e.created_at desc
-       limit 200`
+       order by e.created_at desc, e.id desc
+       limit $${values.length}`,
+      values
     );
-    res.json({ entries: result.rows });
+    res.json({ entries: result.rows, nextCursor: buildNextCursor(result.rows, limit) });
   })
 );
 
@@ -73,7 +86,11 @@ router.post(
 router.get(
   "/reconciliation",
   adminOnly,
-  asyncHandler(async (_req: AuthedRequest, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { limit, cursor } = parseCursorPage(req.query, { defaultLimit: 100 });
+    const values: unknown[] = [];
+    const where = keysetWhereClause(values, cursor, "created_at", "id");
+    values.push(limit);
     const result = await pool.query(
       `select id, currency,
               wallet_available_cents as "walletAvailableCents",
@@ -86,10 +103,12 @@ router.get(
               difference_cents as "differenceCents",
               status, metadata, created_at as "createdAt"
        from reconciliation_snapshots
-       order by created_at desc
-       limit 100`
+       ${where ? `where ${where}` : ""}
+       order by created_at desc, id desc
+       limit $${values.length}`,
+      values
     );
-    res.json({ snapshots: result.rows });
+    res.json({ snapshots: result.rows, nextCursor: buildNextCursor(result.rows, limit) });
   })
 );
 
@@ -97,16 +116,22 @@ router.get(
 router.get(
   "/reconciliation/export",
   adminOnly,
-  asyncHandler(async (_req: AuthedRequest, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { limit, cursor } = parseCursorPage(req.query, { defaultLimit: 1000, maxLimit: 1000 });
+    const values: unknown[] = [];
+    const where = keysetWhereClause(values, cursor, "created_at", "id");
+    values.push(limit);
     const result = await pool.query(
-      `select currency, wallet_available_cents as "walletAvailableCents",
+      `select id, currency, wallet_available_cents as "walletAvailableCents",
               wallet_escrow_cents as "walletEscrowCents", ledger_payable_cents as "ledgerPayableCents",
               ledger_escrow_cents as "ledgerEscrowCents", platform_revenue_cents as "platformRevenueCents",
               ledger_revenue_cents as "ledgerRevenueCents", provider_clearing_cents as "providerClearingCents",
               difference_cents as "differenceCents", status, created_at as "createdAt"
        from reconciliation_snapshots
-       order by created_at desc
-       limit 1000`
+       ${where ? `where ${where}` : ""}
+       order by created_at desc, id desc
+       limit $${values.length}`,
+      values
     );
     const header = [
       "createdAt", "currency", "walletAvailableCents", "walletEscrowCents", "ledgerPayableCents",
@@ -117,6 +142,8 @@ router.get(
       header.map((key) => String((row as Record<string, unknown>)[key] ?? "")).join(",")
     );
     const csv = [header.join(","), ...csvRows].join("\n");
+    const nextCursor = buildNextCursor(result.rows, limit);
+    if (nextCursor) res.setHeader("X-Next-Cursor", nextCursor);
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="reconciliation-${Date.now()}.csv"`);
     res.send(csv);

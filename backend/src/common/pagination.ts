@@ -6,10 +6,14 @@ export const MAX_PAGE_LIMIT = 100;
 
 export type DecodedCursor = { createdAt: string; id: string };
 
-const pageQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(MAX_PAGE_LIMIT).optional(),
-  cursor: z.string().optional()
-});
+const cursorIdSchema = z.string().uuid();
+
+export type CursorPageOptions = {
+  defaultLimit?: number;
+  maxLimit?: number;
+};
+
+export type OffsetPage = { page: number; limit: number; offset: number };
 
 /**
  * Opaque keyset cursor over `(created_at desc, id desc)` — the one stable sort every
@@ -33,19 +37,40 @@ export function decodeCursor(raw: string): DecodedCursor {
   if (separatorIndex === -1) throw badRequest("Invalid pagination cursor");
   const createdAt = decoded.slice(0, separatorIndex);
   const id = decoded.slice(separatorIndex + 1);
-  if (!id || Number.isNaN(Date.parse(createdAt))) throw badRequest("Invalid pagination cursor");
-  return { createdAt, id };
+  if (Number.isNaN(Date.parse(createdAt)) || !cursorIdSchema.safeParse(id).success) {
+    throw badRequest("Invalid pagination cursor");
+  }
+  return { createdAt: new Date(createdAt).toISOString(), id };
 }
 
 export type CursorPage = { limit: number; cursor: DecodedCursor | null };
 
 /** Parses `?limit=&cursor=` from a request query, bounding limit and decoding the cursor. */
-export function parseCursorPage(query: unknown): CursorPage {
+export function parseCursorPage(query: unknown, options: CursorPageOptions = {}): CursorPage {
+  const maxLimit = options.maxLimit ?? MAX_PAGE_LIMIT;
+  const defaultLimit = options.defaultLimit ?? DEFAULT_PAGE_LIMIT;
+  const pageQuerySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(maxLimit).optional(),
+    cursor: z.string().max(512).optional()
+  });
   const parsed = pageQuerySchema.parse(query);
   return {
-    limit: parsed.limit ?? DEFAULT_PAGE_LIMIT,
+    limit: parsed.limit ?? defaultLimit,
     cursor: parsed.cursor ? decodeCursor(parsed.cursor) : null
   };
+}
+
+/** Stable page/limit fallback for lists whose sort has more than the shared two cursor fields. */
+export function parseOffsetPage(query: unknown, options: CursorPageOptions = {}): OffsetPage {
+  const maxLimit = options.maxLimit ?? MAX_PAGE_LIMIT;
+  const defaultLimit = options.defaultLimit ?? DEFAULT_PAGE_LIMIT;
+  const parsed = z.object({
+    page: z.coerce.number().int().min(1).max(1_000_000).optional(),
+    limit: z.coerce.number().int().min(1).max(maxLimit).optional()
+  }).parse(query);
+  const page = parsed.page ?? 1;
+  const limit = parsed.limit ?? defaultLimit;
+  return { page, limit, offset: (page - 1) * limit };
 }
 
 /**

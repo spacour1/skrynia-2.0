@@ -5,6 +5,11 @@ import {
 } from "../storage/storage.service.js";
 import { badRequest, forbidden, notFound } from "../../common/errors.js";
 import { inTx, pool, type DbClient } from "../../db/pool.js";
+import {
+  buildNextCursor,
+  keysetWhereClause,
+  type DecodedCursor
+} from "../../common/pagination.js";
 
 type DisputeAccessRow = {
   id: string;
@@ -99,8 +104,16 @@ async function selectMessage(messageId: string) {
   return result.rows[0] ?? null;
 }
 
-export async function listDisputeMessages(disputeId: string, user: AuthUser) {
+export async function listDisputeMessagePage(
+  disputeId: string,
+  user: AuthUser,
+  options: { limit?: number; cursor?: DecodedCursor | null } = {}
+) {
   await getDisputeAccess(pool, disputeId, user);
+  const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+  const values: unknown[] = [disputeId, isAdmin(user)];
+  const cursorWhere = keysetWhereClause(values, options.cursor ?? null, "dm.created_at", "dm.id");
+  values.push(limit);
   const result = await pool.query(
     `select dm.id,
             dm.dispute_id as "disputeId",
@@ -117,23 +130,36 @@ export async function listDisputeMessages(disputeId: string, user: AuthUser) {
      join users u on u.id = dm.author_id
      where dm.dispute_id = $1
        and ($2::boolean or dm.hidden_at is null)
-     order by dm.created_at, dm.id`,
-    [disputeId, isAdmin(user)]
+       ${cursorWhere ? `and ${cursorWhere}` : ""}
+     order by dm.created_at desc, dm.id desc
+     limit $${values.length}`,
+    values
   );
-  return result.rows;
+  const nextCursor = buildNextCursor(result.rows, limit);
+  return { messages: result.rows.reverse(), nextCursor };
 }
 
 export async function getOrderDispute(orderId: string, user: AuthUser) {
   const dispute = await getDisputeAccessByOrder(orderId, user);
-  const messages = await listDisputeMessages(dispute.id, user);
-  if (isAdmin(user)) return { dispute, messages };
+  const messagePage = await listDisputeMessagePage(dispute.id, user);
+  if (isAdmin(user)) {
+    return {
+      dispute,
+      messages: messagePage.messages,
+      messageNextCursor: messagePage.nextCursor
+    };
+  }
   const {
     resolutionOperationId: _resolutionOperationId,
     lastResolutionError: _lastResolutionError,
     resolutionAttempts: _resolutionAttempts,
     ...participantDispute
   } = dispute;
-  return { dispute: participantDispute, messages };
+  return {
+    dispute: participantDispute,
+    messages: messagePage.messages,
+    messageNextCursor: messagePage.nextCursor
+  };
 }
 
 export async function createDisputeMessage(input: {

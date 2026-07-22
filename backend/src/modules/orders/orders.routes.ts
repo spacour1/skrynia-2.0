@@ -33,6 +33,7 @@ import {
   parseMoneyCents,
   POSTGRES_BIGINT_MAX
 } from "../../domain/money.js";
+import { buildNextCursor, keysetWhereClause, parseCursorPage } from "../../common/pagination.js";
 
 const router = Router();
 
@@ -179,7 +180,8 @@ router.get(
   asyncHandler(async (req: AuthedRequest, res) => {
     const role = z.enum(["buyer", "seller", "all"]).default("all").parse(req.query.role ?? "all");
     const status = z.string().optional().parse(req.query.status);
-    const cacheKey = `orders:${req.user.id}:${role}:${status ?? "any"}`;
+    const { limit, cursor } = parseCursorPage(req.query, { defaultLimit: 100 });
+    const cacheKey = `orders:${req.user.id}:${role}:${status ?? "any"}:${limit}:${req.query.cursor ?? "first"}`;
     const cached = await cacheGet(cacheKey);
     if (cached) return res.json(cached);
     const values: unknown[] = [];
@@ -201,6 +203,9 @@ router.get(
       values.push(status);
       where.push(`o.status = $${values.length}`);
     }
+    const cursorWhere = keysetWhereClause(values, cursor, "o.created_at", "o.id");
+    if (cursorWhere) where.push(cursorWhere);
+    values.push(limit);
 
     const result = await pool.query(
       `select o.id, o.status, o.quantity, o.amount_cents as "amountCents", o.fee_cents as "feeCents",
@@ -214,11 +219,12 @@ router.get(
        join users b on b.id = o.buyer_id
        join users s on s.id = o.seller_id
        ${where.length ? `where ${where.join(" and ")}` : ""}
-       order by o.created_at desc
-       limit 100`,
+       order by o.created_at desc, o.id desc
+       limit $${values.length}`,
       values
     );
-    const payload = { orders: result.rows.map(mapOrderMoneyFields) };
+    const orders = result.rows.map(mapOrderMoneyFields);
+    const payload = { orders, nextCursor: buildNextCursor(result.rows, limit) };
     await cacheSet(cacheKey, payload, 15);
     res.json(payload);
   })

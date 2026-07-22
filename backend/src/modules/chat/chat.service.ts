@@ -15,6 +15,11 @@ import {
   SYSTEM_SENDER_DISPLAY_NAME
 } from "./system-messages.service.js";
 import { bigintToMoneyCents, type MoneyCents } from "../../domain/money.js";
+import {
+  buildNextCursor,
+  keysetWhereClause,
+  type DecodedCursor
+} from "../../common/pagination.js";
 
 export { createSystemMessage, getConversationIdForOrder };
 
@@ -356,14 +361,19 @@ export async function sendMessage(
   return result.message;
 }
 
-export async function getMessages(
+export async function getMessagePage(
   conversationId: string,
-  opts: { limit?: number; before?: string; viewerIsAdmin?: boolean } = {}
-): Promise<Message[]> {
+  opts: { limit?: number; cursor?: DecodedCursor | null; before?: string; viewerIsAdmin?: boolean } = {}
+): Promise<{ messages: Message[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
   const params: unknown[] = [conversationId];
   let beforeClause = "";
-  if (opts.before) {
+  if (opts.cursor) {
+    const cursorWhere = keysetWhereClause(params, opts.cursor, "m.created_at", "m.id");
+    beforeClause = `and ${cursorWhere}`;
+  } else if (opts.before) {
+    // Legacy timestamp-only paging remains accepted. New clients round-trip the
+    // response cursor, which also contains the id tiebreaker.
     params.push(opts.before);
     beforeClause = `and m.created_at < $${params.length}`;
   }
@@ -383,11 +393,19 @@ export async function getMessages(
      from messages m
      left join users u on u.id = m.sender_id
      where m.conversation_id = $1 ${beforeClause}
-     order by m.created_at desc
+     order by m.created_at desc, m.id desc
      limit $${limitParamIndex}`,
     params
   );
-  return result.rows.reverse();
+  const nextCursor = buildNextCursor(result.rows, limit);
+  return { messages: result.rows.reverse(), nextCursor };
+}
+
+export async function getMessages(
+  conversationId: string,
+  opts: { limit?: number; cursor?: DecodedCursor | null; before?: string; viewerIsAdmin?: boolean } = {}
+): Promise<Message[]> {
+  return (await getMessagePage(conversationId, opts)).messages;
 }
 
 export async function markConversationRead(conversationId: string, userId: string): Promise<void> {
@@ -420,7 +438,20 @@ export async function postOrderSystemMessage(
   return message;
 }
 
-export async function getUserConversations(userId: string, role: string) {
+export async function getUserConversationPage(
+  userId: string,
+  role: string,
+  options: { limit?: number; cursor?: DecodedCursor | null } = {}
+) {
+  const limit = Math.min(Math.max(options.limit ?? 100, 1), 100);
+  const values: unknown[] = [role, userId];
+  const cursorWhere = keysetWhereClause(
+    values,
+    options.cursor ?? null,
+    `coalesce(lm."lastMessageAt", c.created_at)`,
+    "c.id"
+  );
+  values.push(limit);
   const result = await pool.query(
     `select c.id, c.product_id as "productId", c.order_id as "orderId", c.created_at as "createdAt",
             p.title as "productTitle",
@@ -428,6 +459,7 @@ export async function getUserConversations(userId: string, role: string) {
             s.id as "sellerId", s.display_name as "sellerDisplayName", s.avatar_url as "sellerAvatarUrl",
             o.status as "orderStatus", o.amount_cents as "amountCents", o.currency,
             lm."lastMessageBody", lm."lastMessageAt",
+            coalesce(lm."lastMessageAt", c.created_at) as "activityAt",
             coalesce(unread.count, 0)::int as "unreadCount",
             exists(
               select 1 from user_blocks ub
@@ -445,7 +477,7 @@ export async function getUserConversations(userId: string, role: string) {
          m.created_at as "lastMessageAt"
        from messages m
        where m.conversation_id = c.id
-       order by m.created_at desc
+       order by m.created_at desc, m.id desc
        limit 1
      ) lm on true
      left join lateral (
@@ -455,12 +487,25 @@ export async function getUserConversations(userId: string, role: string) {
          and m2.sender_id != $2
          and m2.created_at > coalesce(case when c.buyer_id = $2 then c.buyer_last_read_at else c.seller_last_read_at end, 'epoch')
      ) unread on true
-     where $1 = 'admin' or c.buyer_id = $2 or c.seller_id = $2
-     order by coalesce(lm."lastMessageAt", c.created_at) desc
-     limit 100`,
-    [role, userId]
+     where ($1 = 'admin' or c.buyer_id = $2 or c.seller_id = $2)
+       ${cursorWhere ? `and ${cursorWhere}` : ""}
+     order by coalesce(lm."lastMessageAt", c.created_at) desc, c.id desc
+     limit $${values.length}`,
+    values
   );
-  return result.rows.map((row) => ({ ...row, canSendMessage: !row.blocked }));
+  const nextCursor = buildNextCursor(
+    result.rows.map((row) => ({ id: row.id, createdAt: row.activityAt })),
+    limit
+  );
+  const conversations = result.rows.map(({ activityAt: _activityAt, ...row }) => ({
+    ...row,
+    canSendMessage: !row.blocked
+  }));
+  return { conversations, nextCursor };
+}
+
+export async function getUserConversations(userId: string, role: string) {
+  return (await getUserConversationPage(userId, role)).conversations;
 }
 
 function rowContextType(row: { orderId?: string | null; productId?: string | null }): ConversationContextType {
@@ -481,8 +526,7 @@ function newestTimestamp(left?: string | null, right?: string | null) {
   return new Date(left).getTime() >= new Date(right).getTime() ? left : right;
 }
 
-export async function getGroupedUserConversations(userId: string, role: string): Promise<GroupedConversation[]> {
-  const rows = await getUserConversations(userId, role);
+async function groupUserConversations(rows: Awaited<ReturnType<typeof getUserConversations>>, userId: string) {
   const groups = new Map<string, GroupedConversation>();
 
   for (const row of rows) {
@@ -552,4 +596,20 @@ export async function getGroupedUserConversations(userId: string, role: string):
         new Date(b.lastMessageAt ?? b.contexts[0]?.createdAt ?? 0).getTime() -
         new Date(a.lastMessageAt ?? a.contexts[0]?.createdAt ?? 0).getTime()
     );
+}
+
+export async function getGroupedUserConversationPage(
+  userId: string,
+  role: string,
+  options: { limit?: number; cursor?: DecodedCursor | null } = {}
+) {
+  const page = await getUserConversationPage(userId, role, options);
+  return {
+    groups: await groupUserConversations(page.conversations, userId),
+    nextCursor: page.nextCursor
+  };
+}
+
+export async function getGroupedUserConversations(userId: string, role: string): Promise<GroupedConversation[]> {
+  return (await getGroupedUserConversationPage(userId, role)).groups;
 }

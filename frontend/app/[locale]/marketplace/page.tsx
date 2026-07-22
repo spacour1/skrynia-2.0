@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { ProductCard } from "@/components/ProductCard";
@@ -7,6 +8,14 @@ import { apiFetch, type Product } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
 export default function MarketplacePage() {
+  return (
+    <Suspense fallback={<div className="h-48 animate-pulse rounded-xl bg-panel" />}>
+      <MarketplaceContent />
+    </Suspense>
+  );
+}
+
+function MarketplaceContent() {
   const { t } = useI18n();
   const searchParams = useSearchParams();
   const category = searchParams.get("category")?.trim() ?? "";

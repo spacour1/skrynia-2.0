@@ -1,3 +1,8 @@
+import {
+  bigintToMoneyCents,
+  type MoneyCentsInput
+} from "../../domain/money.js";
+
 export type PublicSellerDto = {
   id: string;
   displayName: string;
@@ -35,7 +40,7 @@ export type PublicSellerOverviewRow = {
   completedOrders: number | string;
   disputedOrders: number | string;
   refundedOrders: number | string;
-  completedRevenueCents: number | string;
+  completedRevenueCents: MoneyCentsInput;
   successRate: number | string | null;
   hasEnoughData: boolean;
 };
@@ -68,7 +73,7 @@ export function toPublicSellerStatsDto(row: PublicSellerOverviewRow): PublicSell
     completedOrders: asNumber(row.completedOrders),
     disputedOrders: asNumber(row.disputedOrders),
     refundedOrders: asNumber(row.refundedOrders),
-    completedRevenueCents: String(row.completedRevenueCents ?? 0),
+    completedRevenueCents: bigintToMoneyCents(row.completedRevenueCents ?? 0),
     successRate: row.successRate === null ? null : asNumber(row.successRate),
     hasEnoughData: row.hasEnoughData
   };

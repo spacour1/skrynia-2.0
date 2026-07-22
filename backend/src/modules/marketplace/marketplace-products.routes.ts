@@ -9,7 +9,12 @@ import { moneyToCents } from "../../common/validation.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { DELIVERY_TYPES, PRODUCT_TYPES } from "../../domain/enums.js";
 import { resolveActiveSectionChain, validateLotMetadata } from "../catalog/catalog.service.js";
-import { addSellerPresence, attachCardMetadata, buildDynamicUpdate } from "./marketplace.helpers.js";
+import {
+  addSellerPresence,
+  attachCardMetadata,
+  buildDynamicUpdate,
+  mapProductMoneyFields
+} from "./marketplace.helpers.js";
 import { mediaAggWithStatus } from "./marketplace.sql.js";
 import {
   invalidateProductCacheBatch,
@@ -77,7 +82,9 @@ router.get(
       [req.user.id]
     );
     res.json({
-      products: await attachCardMetadata(await addSellerPresence(result.rows))
+      products: await attachCardMetadata(
+        await addSellerPresence(result.rows.map(mapProductMoneyFields))
+      )
     });
   })
 );

@@ -14,6 +14,7 @@ import {
   getConversationIdForOrder,
   SYSTEM_SENDER_DISPLAY_NAME
 } from "./system-messages.service.js";
+import { bigintToMoneyCents, type MoneyCents } from "../../domain/money.js";
 
 export { createSystemMessage, getConversationIdForOrder };
 
@@ -45,7 +46,7 @@ export type GroupedConversationContext = {
   productTitle: string | null;
   orderId: string | null;
   orderStatus: string | null;
-  amountCents: number | null;
+  amountCents: MoneyCents | null;
   currency: string | null;
   unreadCount: number;
   lastMessageAt: string | null;
@@ -522,7 +523,10 @@ export async function getGroupedUserConversations(userId: string, role: string):
       productTitle: row.productTitle ?? null,
       orderId: row.orderId ?? null,
       orderStatus: row.orderStatus ?? null,
-      amountCents: row.amountCents ?? null,
+      amountCents:
+        row.amountCents === null || row.amountCents === undefined
+          ? null
+          : bigintToMoneyCents(row.amountCents),
       currency: row.currency ?? null,
       unreadCount: Number(row.unreadCount ?? 0),
       lastMessageAt,

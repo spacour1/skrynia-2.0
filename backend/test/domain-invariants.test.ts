@@ -18,7 +18,11 @@ import {
   ROLES,
   isOrderStatus
 } from "../src/domain/enums.js";
-import { platformFeeCents } from "../src/domain/money.js";
+import {
+  bigintToMoneyCents,
+  parseMoneyCents,
+  platformFeeCents
+} from "../src/domain/money.js";
 import { createCatalogSection } from "../src/modules/catalog/catalog-sections.service.js";
 import { closeDb, createOrder, createProduct, createUser, resetDb } from "./fixtures.js";
 
@@ -201,16 +205,16 @@ describe("delivery type reconciliation", () => {
 
 describe("platform fee rule", () => {
   it("floors, never rounds up", () => {
-    expect(platformFeeCents(2000, 1000)).toBe(200);
-    expect(platformFeeCents(999, 1000)).toBe(99); // 99.9 floors to 99
-    expect(platformFeeCents(1, 999)).toBe(0);
-    expect(platformFeeCents(0, 1000)).toBe(0);
-    expect(platformFeeCents(10_001, 1)).toBe(1); // 1.0001 floors to 1
+    expect(platformFeeCents(2000, 1000)).toBe("200");
+    expect(platformFeeCents(999, 1000)).toBe("99"); // 99.9 floors to 99
+    expect(platformFeeCents(1, 999)).toBe("0");
+    expect(platformFeeCents(0, 1000)).toBe("0");
+    expect(platformFeeCents(10_001, 1)).toBe("1"); // 1.0001 floors to 1
   });
 
   it("is exact for amounts where float math would lose integer precision", () => {
-    const amount = 9_007_199_254_740_991n; // Number.MAX_SAFE_INTEGER as cents
-    const expected = Number((amount * 999n) / 10_000n);
+    const amount = 9_007_199_254_740_993n; // above Number.MAX_SAFE_INTEGER
+    const expected = ((amount * 999n) / 10_000n).toString();
     expect(platformFeeCents(amount, 999)).toBe(expected);
   });
 
@@ -220,6 +224,37 @@ describe("platform fee rule", () => {
     expect(() => platformFeeCents(1000, -1)).toThrow(/between 0 and 10000/);
     expect(() => platformFeeCents(1000, 10_001)).toThrow(/between 0 and 10000/);
     expect(() => platformFeeCents(1000, 2.5)).toThrow(/between 0 and 10000/);
+  });
+});
+
+describe("MoneyCents canonical representation", () => {
+  it("round-trips bigint and safe integer inputs as decimal strings", () => {
+    expect(bigintToMoneyCents(9_007_199_254_740_993n)).toBe("9007199254740993");
+    expect(bigintToMoneyCents(123)).toBe("123");
+    expect(parseMoneyCents("9007199254740993")).toBe(9_007_199_254_740_993n);
+  });
+
+  it("accepts both PostgreSQL bigint boundaries", () => {
+    expect(bigintToMoneyCents(9_223_372_036_854_775_807n)).toBe(
+      "9223372036854775807"
+    );
+    expect(parseMoneyCents("-9223372036854775808")).toBe(
+      -9_223_372_036_854_775_808n
+    );
+  });
+
+  it("rejects unsafe numbers, non-integers, and non-canonical strings", () => {
+    expect(() => bigintToMoneyCents(Number.MAX_SAFE_INTEGER + 1)).toThrow(/safe integer/);
+    expect(() => bigintToMoneyCents(1.5)).toThrow(/safe integer/);
+    expect(() => parseMoneyCents("1.0")).toThrow(/canonical integer string/);
+    expect(() => parseMoneyCents("01")).toThrow(/canonical integer string/);
+    expect(() => parseMoneyCents("-0")).toThrow(/canonical integer string/);
+    expect(() => bigintToMoneyCents(9_223_372_036_854_775_808n)).toThrow(
+      /outside PostgreSQL bigint range/
+    );
+    expect(() => parseMoneyCents("-9223372036854775809")).toThrow(
+      /outside PostgreSQL bigint range/
+    );
   });
 });
 

@@ -3,6 +3,8 @@ import { env } from "../../config/env.js";
 import { badRequest } from "../../common/errors.js";
 import { centsToDecimalString } from "../../common/validation.js";
 import { logger } from "../../common/logger.js";
+import type { MoneyCents } from "../../domain/money.js";
+import { moneyCentsToProviderDecimal } from "./provider-money.js";
 
 const API_URL = "https://api.wayforpay.com/api";
 
@@ -31,24 +33,25 @@ export type WayforpayInvoice = { invoiceUrl: string; orderReference: string };
 
 export async function createWayforpayInvoice(input: {
   orderReference: string;
-  amountCents: number;
+  amountCents: MoneyCents;
   currency: string;
   productName: string;
 }): Promise<WayforpayInvoice> {
   const { merchantAccount, secretKey } = requireConfig();
   const orderDate = Math.floor(Date.now() / 1000);
-  const amount = centsToDecimalString(input.amountCents);
+  const decimalAmount = centsToDecimalString(input.amountCents);
+  const providerAmount = moneyCentsToProviderDecimal(input.amountCents);
 
   const signedFields = [
     merchantAccount,
     domainName(),
     input.orderReference,
     orderDate,
-    amount,
+    decimalAmount,
     input.currency,
     input.productName,
     1,
-    amount
+    decimalAmount
   ];
   const signature = sign(secretKey, signedFields);
 
@@ -66,12 +69,12 @@ export async function createWayforpayInvoice(input: {
       serviceUrl: env.WAYFORPAY_SERVICE_URL,
       orderReference: input.orderReference,
       orderDate,
-      amount: Number(amount),
+      amount: providerAmount,
       currency: input.currency,
       orderTimeout: 49000,
       productName: [input.productName],
       productCount: [1],
-      productPrice: [Number(amount)]
+      productPrice: [providerAmount]
     })
   });
 
@@ -88,7 +91,7 @@ export async function createWayforpayInvoice(input: {
         merchantDomainName: domainName(),
         orderReference: input.orderReference,
         orderDate,
-        amount,
+        amount: decimalAmount,
         currency: input.currency,
         productName: input.productName,
         signedString: signedFields.join(";"),

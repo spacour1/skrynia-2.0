@@ -14,13 +14,45 @@ import { nanoid } from "nanoid";
 import type { PayoutDestination } from "../payments/payout.providers.js";
 import { getPayoutProvider } from "../payments/payout.providers.js";
 import { createNotification, notifyAdmins } from "../notifications/notifications.service.js";
+import {
+  absoluteMoneyCents,
+  addMoneyCents,
+  bigintToMoneyCents,
+  MoneyRangeError,
+  parseMoneyCents,
+  subtractMoneyCents,
+  type MoneyCents
+} from "../../domain/money.js";
 
-export async function createWalletTopup(userId: string, amountCents: number, currency: string) {
+function checkedWalletAddition(currentCents: MoneyCents, addedCents: MoneyCents) {
+  try {
+    return addMoneyCents(currentCents, addedCents);
+  } catch (error) {
+    if (error instanceof MoneyRangeError) {
+      throw badRequest("Wallet balance exceeds the supported money range");
+    }
+    throw error;
+  }
+}
+
+function checkedWalletSubtraction(currentCents: MoneyCents, subtractedCents: MoneyCents) {
+  try {
+    return subtractMoneyCents(currentCents, subtractedCents);
+  } catch (error) {
+    if (error instanceof MoneyRangeError) {
+      throw badRequest("Wallet balance exceeds the supported money range");
+    }
+    throw error;
+  }
+}
+
+export async function createWalletTopup(userId: string, amountCents: MoneyCents, currency: string) {
+  const canonicalAmount = bigintToMoneyCents(amountCents);
   const result = await pool.query(
     `insert into wallet_topups(user_id, amount_cents, currency)
      values ($1, $2, $3)
      returning id, user_id as "userId", amount_cents as "amountCents", currency, status`,
-    [userId, amountCents, currency]
+    [userId, canonicalAmount, currency]
   );
   return result.rows[0];
 }
@@ -37,9 +69,18 @@ export async function completeWalletTopup(topupId: string, provider: string, ref
     if (topup.status !== "pending") return topup;
 
     const walletId = await ensureWallet(client, topup.user_id, topup.currency);
+    const wallet = await client.query<{ available_cents: MoneyCents }>(
+      `select available_cents from wallets where id = $1 for update`,
+      [walletId]
+    );
+    const amountCents = bigintToMoneyCents(topup.amount_cents);
+    const nextAvailableCents = checkedWalletAddition(
+      wallet.rows[0].available_cents,
+      amountCents
+    );
     await client.query(
-      `update wallets set available_cents = available_cents + $2, updated_at = now() where id = $1`,
-      [walletId, topup.amount_cents]
+      `update wallets set available_cents = $2, updated_at = now() where id = $1`,
+      [walletId, nextAvailableCents]
     );
     await client.query(
       `insert into transactions(wallet_id, user_id, type, direction, amount_cents, currency, metadata)
@@ -49,7 +90,7 @@ export async function completeWalletTopup(topupId: string, provider: string, ref
     await recordWalletTopupLedger({
       client,
       userId: topup.user_id,
-      amountCents: Number(topup.amount_cents),
+      amountCents,
       currency: topup.currency,
       provider,
       reference,
@@ -75,34 +116,42 @@ export async function completeWalletTopup(topupId: string, provider: string, ref
  */
 export async function requestWithdrawal(
   userId: string,
-  amountCents: number,
+  amountCents: MoneyCents,
   currency: string,
   destination: PayoutDestination
 ) {
+  const canonicalAmount = bigintToMoneyCents(amountCents);
+  if (parseMoneyCents(canonicalAmount) <= 0n) {
+    throw badRequest("Withdrawal amount must be positive");
+  }
   const payout = await inSerializableTx(async (client) => {
     const walletId = await ensureWallet(client, userId, currency);
-    const walletResult = await client.query<{ available_cents: number }>(
+    const walletResult = await client.query<{ available_cents: MoneyCents }>(
       `select available_cents from wallets where id = $1 for update`,
       [walletId]
     );
-    const available = Number(walletResult.rows[0].available_cents);
-    if (available < amountCents) throw badRequest("Insufficient balance");
+    const available = parseMoneyCents(walletResult.rows[0].available_cents);
+    if (available < parseMoneyCents(canonicalAmount)) throw badRequest("Insufficient balance");
+    const nextAvailableCents = checkedWalletSubtraction(
+      walletResult.rows[0].available_cents,
+      canonicalAmount
+    );
 
     await client.query(
-      `update wallets set available_cents = available_cents - $2, updated_at = now() where id = $1`,
-      [walletId, amountCents]
+      `update wallets set available_cents = $2, updated_at = now() where id = $1`,
+      [walletId, nextAvailableCents]
     );
     const tx = await client.query(
       `insert into transactions(wallet_id, user_id, type, direction, amount_cents, currency, status, metadata)
        values ($1, $2, 'wallet_debit', 'debit', $3, $4, 'pending', $5)
        returning id`,
-      [walletId, userId, amountCents, currency, { destination }]
+      [walletId, userId, canonicalAmount, currency, { destination }]
     );
     await recordWalletWithdrawalLedger({
       client,
       transactionId: tx.rows[0].id,
       userId,
-      amountCents,
+      amountCents: canonicalAmount,
       currency
     });
     const payout = await client.query(
@@ -110,13 +159,13 @@ export async function requestWithdrawal(
        values ($1, $2, $3, $4, 'manual', $5, 'pending')
        returning id, user_id as "userId", amount_cents as "amountCents", currency, provider, destination, status,
                  created_at as "createdAt"`,
-      [userId, tx.rows[0].id, amountCents, currency, destination]
+      [userId, tx.rows[0].id, canonicalAmount, currency, destination]
     );
     await cacheDel(`user:${userId}:wallet`);
     return payout.rows[0];
   });
 
-  const amount = centsToDecimalString(amountCents);
+  const amount = centsToDecimalString(canonicalAmount);
   await createNotification({
     userId,
     type: "payout_requested",
@@ -138,27 +187,41 @@ export async function requestWithdrawal(
  */
 export async function postManualAdjustment(input: {
   userId: string;
-  amountCents: number;
+  amountCents: MoneyCents;
   currency: string;
   reason: string;
   adminId: string;
 }) {
-  if (input.amountCents === 0) throw badRequest("Adjustment amount cannot be zero");
+  const signedAmount = parseMoneyCents(input.amountCents);
+  if (signedAmount === 0n) throw badRequest("Adjustment amount cannot be zero");
+  let magnitude: MoneyCents;
+  try {
+    magnitude = absoluteMoneyCents(input.amountCents);
+  } catch (error) {
+    if (error instanceof MoneyRangeError) {
+      throw badRequest("Adjustment amount magnitude exceeds the supported money range");
+    }
+    throw error;
+  }
   return inSerializableTx(async (client) => {
     const walletId = await ensureWallet(client, input.userId, input.currency);
-    if (input.amountCents < 0) {
-      const walletResult = await client.query<{ available_cents: number }>(
-        `select available_cents from wallets where id = $1 for update`,
-        [walletId]
-      );
-      if (Number(walletResult.rows[0].available_cents) < Math.abs(input.amountCents)) {
+    const walletResult = await client.query<{ available_cents: MoneyCents }>(
+      `select available_cents from wallets where id = $1 for update`,
+      [walletId]
+    );
+    if (signedAmount < 0n) {
+      if (parseMoneyCents(walletResult.rows[0].available_cents) < parseMoneyCents(magnitude)) {
         throw badRequest("Insufficient balance for a negative adjustment");
       }
     }
+    const nextAvailableCents = checkedWalletAddition(
+      walletResult.rows[0].available_cents,
+      input.amountCents
+    );
 
     await client.query(
-      `update wallets set available_cents = available_cents + $2, updated_at = now() where id = $1`,
-      [walletId, input.amountCents]
+      `update wallets set available_cents = $2, updated_at = now() where id = $1`,
+      [walletId, nextAvailableCents]
     );
     const adjustmentId = nanoid();
     const tx = await client.query(
@@ -168,8 +231,8 @@ export async function postManualAdjustment(input: {
       [
         walletId,
         input.userId,
-        input.amountCents >= 0 ? "credit" : "debit",
-        Math.abs(input.amountCents),
+        signedAmount >= 0n ? "credit" : "debit",
+        magnitude,
         input.currency,
         { adminId: input.adminId, reason: input.reason }
       ]
@@ -216,7 +279,7 @@ export async function completePayout(payoutId: string, adminId: string, adminRef
   const provider = getPayoutProvider(payout.provider);
   const outcome = await provider.payout({
     payoutId: payout.id,
-    amountCents: Number(payout.amountCents),
+    amountCents: bigintToMoneyCents(payout.amountCents),
     currency: payout.currency,
     destination: payout.destination,
     adminReference
@@ -235,7 +298,7 @@ export async function completePayout(payoutId: string, adminId: string, adminRef
     userId: paid.userId,
     type: "payout_approved",
     templateKey: "notifications.payoutApproved",
-    params: { amount: centsToDecimalString(Number(paid.amountCents)), currency: paid.currency }
+    params: { amount: centsToDecimalString(paid.amountCents), currency: paid.currency }
   });
   return paid;
 }
@@ -253,9 +316,18 @@ export async function rejectPayout(payoutId: string, adminId: string, reason: st
     if (payout.status !== "pending") throw badRequest("Only pending payouts can be rejected");
 
     const walletId = await ensureWallet(client, payout.userId, payout.currency);
+    const wallet = await client.query<{ available_cents: MoneyCents }>(
+      `select available_cents from wallets where id = $1 for update`,
+      [walletId]
+    );
+    const payoutAmountCents = bigintToMoneyCents(payout.amountCents);
+    const nextAvailableCents = checkedWalletAddition(
+      wallet.rows[0].available_cents,
+      payoutAmountCents
+    );
     await client.query(
-      `update wallets set available_cents = available_cents + $2, updated_at = now() where id = $1`,
-      [walletId, payout.amountCents]
+      `update wallets set available_cents = $2, updated_at = now() where id = $1`,
+      [walletId, nextAvailableCents]
     );
     await client.query(
       `insert into transactions(wallet_id, user_id, type, direction, amount_cents, currency, status, metadata)
@@ -266,7 +338,7 @@ export async function rejectPayout(payoutId: string, adminId: string, reason: st
       client,
       transactionId: payout.transactionId,
       userId: payout.userId,
-      amountCents: Number(payout.amountCents),
+      amountCents: payoutAmountCents,
       currency: payout.currency
     });
 
@@ -286,7 +358,7 @@ export async function rejectPayout(payoutId: string, adminId: string, reason: st
     type: "payout_rejected",
     templateKey: "notifications.payoutRejected",
     params: {
-      amount: centsToDecimalString(Number(rejected.amountCents)),
+      amount: centsToDecimalString(rejected.amountCents),
       currency: rejected.currency,
       reason
     }

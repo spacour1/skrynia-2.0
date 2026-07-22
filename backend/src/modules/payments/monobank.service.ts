@@ -1,5 +1,7 @@
 import { env } from "../../config/env.js";
 import { badRequest } from "../../common/errors.js";
+import type { MoneyCents } from "../../domain/money.js";
+import { moneyCentsToProviderInteger } from "./provider-money.js";
 
 const API_BASE = "https://api.monobank.ua/api/merchant";
 
@@ -42,7 +44,7 @@ function currencyCode(currency: string) {
  */
 export async function createMonobankInvoice(input: {
   reference: string;
-  amountCents: number;
+  amountCents: MoneyCents;
   currency: string;
   description: string;
   redirectUrl: string;
@@ -53,7 +55,7 @@ export async function createMonobankInvoice(input: {
     method: "POST",
     headers: { "X-Token": token, "Content-Type": "application/json" },
     body: JSON.stringify({
-      amount: input.amountCents,
+      amount: moneyCentsToProviderInteger(input.amountCents),
       ccy: currencyCode(input.currency),
       merchantPaymInfo: { reference: input.reference, destination: input.description },
       redirectUrl: input.redirectUrl,

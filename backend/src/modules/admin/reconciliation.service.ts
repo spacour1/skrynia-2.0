@@ -1,18 +1,27 @@
 import { pool } from "../../db/pool.js";
+import {
+  bigintToMoneyCents,
+  parseMoneyCents,
+  type MoneyCentsInput
+} from "../../domain/money.js";
 
 type ReconciliationRow = {
   currency: string;
-  wallet_available_cents: string | number;
-  wallet_escrow_cents: string | number;
-  ledger_payable_cents: string | number;
-  ledger_escrow_cents: string | number;
-  platform_revenue_cents: string | number;
-  ledger_revenue_cents: string | number;
-  provider_clearing_cents: string | number;
+  wallet_available_cents: MoneyCentsInput;
+  wallet_escrow_cents: MoneyCentsInput;
+  ledger_payable_cents: MoneyCentsInput;
+  ledger_escrow_cents: MoneyCentsInput;
+  platform_revenue_cents: MoneyCentsInput;
+  ledger_revenue_cents: MoneyCentsInput;
+  provider_clearing_cents: MoneyCentsInput;
 };
 
-function toCents(value: string | number | null | undefined) {
-  return Number(value ?? 0);
+function toCents(value: MoneyCentsInput | null | undefined) {
+  return parseMoneyCents(bigintToMoneyCents(value ?? 0));
+}
+
+function abs(value: bigint) {
+  return value < 0n ? -value : value;
 }
 
 export async function createReconciliationSnapshot() {
@@ -70,9 +79,10 @@ export async function createReconciliationSnapshot() {
     const platformRevenue = toCents(row.platform_revenue_cents);
     const ledgerRevenue = toCents(row.ledger_revenue_cents);
     const providerClearing = toCents(row.provider_clearing_cents);
-    const difference = Math.abs(walletAvailable - ledgerPayable)
-      + Math.abs(walletEscrow - ledgerEscrow)
-      + Math.abs(platformRevenue - ledgerRevenue);
+    const difference =
+      abs(walletAvailable - ledgerPayable) +
+      abs(walletEscrow - ledgerEscrow) +
+      abs(platformRevenue - ledgerRevenue);
 
     const inserted = await pool.query(
       `insert into reconciliation_snapshots(
@@ -100,15 +110,15 @@ export async function createReconciliationSnapshot() {
                  status, metadata, created_at as "createdAt"`,
       [
         row.currency,
-        walletAvailable,
-        walletEscrow,
-        ledgerPayable,
-        ledgerEscrow,
-        platformRevenue,
-        ledgerRevenue,
-        providerClearing,
-        difference,
-        difference === 0 ? "balanced" : "mismatch",
+        bigintToMoneyCents(walletAvailable),
+        bigintToMoneyCents(walletEscrow),
+        bigintToMoneyCents(ledgerPayable),
+        bigintToMoneyCents(ledgerEscrow),
+        bigintToMoneyCents(platformRevenue),
+        bigintToMoneyCents(ledgerRevenue),
+        bigintToMoneyCents(providerClearing),
+        bigintToMoneyCents(difference),
+        difference === 0n ? "balanced" : "mismatch",
         { generatedBy: "admin_reconciliation" }
       ]
     );

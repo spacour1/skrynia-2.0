@@ -8,7 +8,11 @@ import { cacheGet, cacheSet } from "../../common/redis.js";
 import { moneyToCents, paginationSchema } from "../../common/validation.js";
 import { getActiveSchemaForSection, getSchemaByVersion } from "../catalog/catalog.service.js";
 import { buildMetadataFilterClauses } from "../catalog/catalog.validation.js";
-import { addSellerPresence, attachCardMetadata } from "./marketplace.helpers.js";
+import {
+  addSellerPresence,
+  attachCardMetadata,
+  mapProductMoneyFields
+} from "./marketplace.helpers.js";
 import { mediaAgg } from "./marketplace.sql.js";
 
 const router = Router();
@@ -173,7 +177,10 @@ router.get(
       [pattern, `${q}%`]
     );
 
-    res.json({ games: games.rows, products: products.rows });
+    res.json({
+      games: games.rows,
+      products: products.rows.map(mapProductMoneyFields)
+    });
   })
 );
 
@@ -316,7 +323,9 @@ router.get(
     );
     const total = result.rows[0]?.total ?? 0;
     const productsWithPresence = await addSellerPresence(
-      result.rows.map(({ total: _total, ...row }) => row)
+      result.rows.map(({ total: _total, ...row }) =>
+        mapProductMoneyFields(row)
+      )
     );
     const products = await attachCardMetadata(productsWithPresence);
     const payload = { products, page: input.page, limit: input.limit, total };
@@ -386,7 +395,7 @@ router.get(
        limit 5`,
       [result.rows[0].sellerId]
     );
-    const row = result.rows[0];
+    const row = mapProductMoneyFields(result.rows[0]);
     // Labels come from the *exact* schema version the lot was created under, not whatever
     // is currently active for the section - a later schema edit must never change how an
     // already-created lot displays.

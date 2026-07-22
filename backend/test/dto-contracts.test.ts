@@ -63,6 +63,8 @@ function assertOrderMutationDto(body: Record<string, unknown>): Record<string, u
   assertNoSnakeCaseKeys(body);
   const order = body.order as Record<string, unknown>;
   expect(order).toBeDefined();
+  expect(typeof order.amountCents).toBe("string");
+  expect(typeof order.feeCents).toBe("string");
   expectIsoTimestamp(order.createdAt);
   expectIsoTimestamp(order.updatedAt);
   for (const field of ["autoReleaseAt", "paidAt", "deliveredAt", "completedAt"] as const) {
@@ -195,6 +197,8 @@ describe("order detail DTO", () => {
     assertNoSnakeCaseKeys(response.body);
     expect(response.body.order.buyerId).toBe(buyer.userId);
     expect(response.body.order.sellerId).toBe(seller);
+    expect(typeof response.body.order.amountCents).toBe("string");
+    expect(typeof response.body.order.feeCents).toBe("string");
   });
 });
 

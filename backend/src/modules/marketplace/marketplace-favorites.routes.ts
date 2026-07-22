@@ -4,7 +4,11 @@ import { pool } from "../../db/pool.js";
 import { asyncHandler, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import type { AuthedRequest } from "../../common/types.js";
-import { addSellerPresence, attachCardMetadata } from "./marketplace.helpers.js";
+import {
+  addSellerPresence,
+  attachCardMetadata,
+  mapProductMoneyFields
+} from "./marketplace.helpers.js";
 import { productSelect } from "./marketplace.sql.js";
 
 const router = Router();
@@ -34,7 +38,9 @@ router.get(
       [req.user.id]
     );
     res.json({
-      products: await attachCardMetadata(await addSellerPresence(result.rows))
+      products: await attachCardMetadata(
+        await addSellerPresence(result.rows.map(mapProductMoneyFields))
+      )
     });
   })
 );

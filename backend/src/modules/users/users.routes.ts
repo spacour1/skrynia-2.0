@@ -36,8 +36,12 @@ import {
 } from "../storage/storage.service.js";
 import { locales } from "../../i18n/config.js";
 import { getRequestLocale } from "../../i18n/t.js";
-import { attachCardMetadata } from "../marketplace/marketplace.helpers.js";
+import {
+  attachCardMetadata,
+  mapProductMoneyFields
+} from "../marketplace/marketplace.helpers.js";
 import { normalizedRequestEndpoint, requestPath } from "../../common/request-url.js";
+import { bigintToMoneyCents, parseMoneyCents } from "../../domain/money.js";
 import {
   toPublicSellerDto,
   toPublicSellerStatsDto,
@@ -321,8 +325,17 @@ router.get(
        limit 100`,
        [req.user.id]
     );
-    const primaryWallet = wallets.rows.find((item) => item.currency === "UAH") ?? wallets.rows[0] ?? null;
-    const payload = { wallet: primaryWallet, wallets: wallets.rows, transactions: transactions.rows };
+    const walletDtos = wallets.rows.map((wallet) => ({
+      ...wallet,
+      availableCents: bigintToMoneyCents(wallet.availableCents),
+      escrowCents: bigintToMoneyCents(wallet.escrowCents)
+    }));
+    const transactionDtos = transactions.rows.map((transaction) => ({
+      ...transaction,
+      amountCents: bigintToMoneyCents(transaction.amountCents)
+    }));
+    const primaryWallet = walletDtos.find((item) => item.currency === "UAH") ?? walletDtos[0] ?? null;
+    const payload = { wallet: primaryWallet, wallets: walletDtos, transactions: transactionDtos };
     await cacheSet(`user:${req.user.id}:wallet`, payload, 15);
     res.json(payload);
   })
@@ -347,7 +360,7 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = withdrawSchema.parse(req.body);
     const amountCents = moneyToCents(input.amount);
-    if (amountCents < 100) throw badRequest("Minimum withdrawal amount is 1.00");
+    if (parseMoneyCents(amountCents) < 100n) throw badRequest("Minimum withdrawal amount is 1.00");
     const payout = await requestWithdrawal(req.user.id, amountCents, input.currency.toUpperCase(), input.destination);
     res.status(201).json({ payout });
   })
@@ -669,7 +682,9 @@ router.get(
     const sellerPresence = await isUserOnline(overview.rows[0].id);
     const seller = toPublicSellerDto(overview.rows[0], sellerPresence);
     const stats = toPublicSellerStatsDto(overview.rows[0]);
-    const productsWithCardMetadata = await attachCardMetadata(products.rows);
+    const productsWithCardMetadata = await attachCardMetadata(
+      products.rows.map(mapProductMoneyFields)
+    );
     res.json({
       user: seller,
       stats,

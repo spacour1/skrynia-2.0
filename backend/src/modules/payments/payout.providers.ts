@@ -1,3 +1,5 @@
+import type { MoneyCents } from "../../domain/money.js";
+
 export type PayoutProviderName = "manual" | "liqpay";
 
 export type PayoutDestination = {
@@ -17,7 +19,7 @@ export interface PayoutProvider {
   name: PayoutProviderName;
   payout(input: {
     payoutId: string;
-    amountCents: number;
+    amountCents: MoneyCents;
     currency: string;
     destination: PayoutDestination;
     adminReference?: string;

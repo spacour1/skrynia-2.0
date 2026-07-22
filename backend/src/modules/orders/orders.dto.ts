@@ -1,3 +1,8 @@
+import {
+  bigintToMoneyCents,
+  type MoneyCentsInput
+} from "../../domain/money.js";
+
 /**
  * Order mutations use raw `orders` rows internally so transaction code can keep matching
  * PostgreSQL column names. Every raw row must pass through this mapper before crossing an
@@ -10,8 +15,8 @@ export type RawOrderRow = {
   seller_id: string;
   product_id: string;
   quantity: number;
-  amount_cents: number | string;
-  fee_cents: number | string;
+  amount_cents: MoneyCentsInput;
+  fee_cents: MoneyCentsInput;
   currency: string;
   status: string;
   payment_provider: string | null;
@@ -40,8 +45,8 @@ export function mapOrderRowDto(row: RawOrderRow) {
     sellerId: row.seller_id,
     productId: row.product_id,
     quantity: row.quantity,
-    amountCents: row.amount_cents,
-    feeCents: row.fee_cents,
+    amountCents: bigintToMoneyCents(row.amount_cents),
+    feeCents: bigintToMoneyCents(row.fee_cents),
     currency: row.currency,
     status: row.status,
     paymentProvider: row.payment_provider,
@@ -53,5 +58,18 @@ export function mapOrderRowDto(row: RawOrderRow) {
     completedAt: toNullableIsoString(row.completed_at),
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at)
+  };
+}
+
+export function mapOrderMoneyFields<
+  T extends { amountCents: MoneyCentsInput; feeCents: MoneyCentsInput }
+>(row: T): Omit<T, "amountCents" | "feeCents"> & {
+  amountCents: string;
+  feeCents: string;
+} {
+  return {
+    ...row,
+    amountCents: bigintToMoneyCents(row.amountCents),
+    feeCents: bigintToMoneyCents(row.feeCents)
   };
 }

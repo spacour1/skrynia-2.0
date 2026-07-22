@@ -22,7 +22,7 @@ export async function createUser(role: "user" | "moderator" | "admin" = "user") 
 export async function createProduct(
   sellerId: string,
   opts: {
-    priceCents?: number;
+    priceCents?: number | string;
     stock?: number;
     currency?: string;
     deliveryType?: "manual" | "instant";
@@ -51,7 +51,7 @@ export async function createOrder(
   buyerId: string,
   sellerId: string,
   productId: string,
-  opts: { amountCents?: number; currency?: string; status?: string; quantity?: number } = {}
+  opts: { amountCents?: number | string; currency?: string; status?: string; quantity?: number } = {}
 ) {
   const result = await pool.query<{ id: string }>(
     `insert into orders(buyer_id, seller_id, product_id, amount_cents, currency, status, quantity)

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { env } from "../../config/env.js";
 import { badRequest } from "../../common/errors.js";
 import { centsToDecimalString } from "../../common/validation.js";
+import type { MoneyCents } from "../../domain/money.js";
 
 const CHECKOUT_ACTION_URL = "https://www.liqpay.ua/api/3/checkout";
 
@@ -42,7 +43,7 @@ function sign(privateKey: string, data: string) {
  */
 export function buildLiqpayCheckout(input: {
   orderId: string;
-  amountCents: number;
+  amountCents: MoneyCents;
   currency: string;
   description: string;
   resultUrl: string;

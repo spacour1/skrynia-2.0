@@ -6,6 +6,7 @@ import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { createReconciliationSnapshot } from "./reconciliation.service.js";
 import { postManualAdjustment } from "../users/wallet.service.js";
+import { absoluteMoneyCents, parseMoneyCents } from "../../domain/money.js";
 
 const router = Router();
 const adminOnly = requireRole("admin");
@@ -42,8 +43,8 @@ router.get(
                     'accountName', a.name,
                     'accountType', a.account_type,
                     'userId', a.user_id,
-                    'debitCents', l.debit_cents,
-                    'creditCents', l.credit_cents
+                    'debitCents', l.debit_cents::text,
+                    'creditCents', l.credit_cents::text
                   )
                   order by l.created_at, l.id
                 ) filter (where l.id is not null),
@@ -160,7 +161,15 @@ router.get(
 
 const manualAdjustmentSchema = z.object({
   userId: z.string().uuid(),
-  amountCents: z.coerce.number().int().refine((value) => value !== 0, "Amount cannot be zero"),
+  amountCents: z.string().refine((value) => {
+    try {
+      if (parseMoneyCents(value) === 0n) return false;
+      absoluteMoneyCents(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }, "Amount must be a non-zero canonical integer within the supported magnitude"),
   currency: z.string().length(3).default("UAH"),
   reason: z.string().trim().min(3).max(1000)
 });

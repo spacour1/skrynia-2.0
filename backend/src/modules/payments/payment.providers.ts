@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid";
+import type { MoneyCents } from "../../domain/money.js";
 
 export type PaymentProviderName = "mock" | "stripe" | "liqpay" | "fondy" | "monobank" | "manual" | "wayforpay";
 
@@ -12,7 +13,7 @@ export interface PaymentProvider {
   name: PaymentProviderName;
   capture(input: {
     orderId: string;
-    amountCents: number;
+    amountCents: MoneyCents;
     currency: string;
     idempotencyKey: string;
     /** Transaction id already confirmed by the provider (e.g. a verified webhook). */
@@ -27,7 +28,7 @@ class SimulatedProvider implements PaymentProvider {
 
   async capture(input: {
     orderId: string;
-    amountCents: number;
+    amountCents: MoneyCents;
     currency: string;
     idempotencyKey: string;
   }): Promise<PaymentResult> {
@@ -55,7 +56,7 @@ class LiqpayCaptureProvider implements PaymentProvider {
 
   async capture(input: {
     orderId: string;
-    amountCents: number;
+    amountCents: MoneyCents;
     currency: string;
     idempotencyKey: string;
     externalReference?: string;
@@ -77,7 +78,7 @@ class MonobankCaptureProvider implements PaymentProvider {
 
   async capture(input: {
     orderId: string;
-    amountCents: number;
+    amountCents: MoneyCents;
     currency: string;
     idempotencyKey: string;
     externalReference?: string;
@@ -99,7 +100,7 @@ class ManualCaptureProvider implements PaymentProvider {
 
   async capture(input: {
     orderId: string;
-    amountCents: number;
+    amountCents: MoneyCents;
     currency: string;
     idempotencyKey: string;
     externalReference?: string;
@@ -118,7 +119,7 @@ class WayforpayCaptureProvider implements PaymentProvider {
 
   async capture(input: {
     orderId: string;
-    amountCents: number;
+    amountCents: MoneyCents;
     currency: string;
     idempotencyKey: string;
     externalReference?: string;

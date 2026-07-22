@@ -20,7 +20,7 @@ import {
   listDisputeMessages
 } from "./dispute-messages.service.js";
 import { resolveDisputeResolution, type DisputeResolutionResult } from "./dispute-resolution.service.js";
-import { mapOrderRowDto, type RawOrderRow } from "../orders/orders.dto.js";
+import { mapOrderRowDto } from "../orders/orders.dto.js";
 
 const router = Router();
 
@@ -322,7 +322,7 @@ router.post(
     });
     res.json({
       dispute: mapAdminDisputeResolutionDto(result.dispute),
-      order: result.order ? mapOrderRowDto(result.order as RawOrderRow) : null,
+      order: result.order ? mapOrderRowDto(result.order) : null,
       operationId: result.operationId,
       idempotent: !result.newlyResolved
     });

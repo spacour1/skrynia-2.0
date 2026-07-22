@@ -3,21 +3,21 @@ import { centsToDecimalString, moneyToCents } from "../src/common/validation.js"
 
 describe("moneyToCents", () => {
   it("parses whole amounts", () => {
-    expect(moneyToCents("100")).toBe(10_000);
+    expect(moneyToCents("100")).toBe("10000");
   });
 
   it("parses amounts with one decimal digit", () => {
-    expect(moneyToCents("19.1")).toBe(1910);
+    expect(moneyToCents("19.1")).toBe("1910");
   });
 
   it("parses amounts with two decimal digits", () => {
-    expect(moneyToCents("549.99")).toBe(54_999);
+    expect(moneyToCents("549.99")).toBe("54999");
   });
 
   it("never produces floating-point rounding drift", () => {
     // 19.1 * 100 is 1909.999999999998 in IEEE754; this must not leak through.
-    expect(moneyToCents("0.1")).toBe(10);
-    expect(moneyToCents("0.29")).toBe(29);
+    expect(moneyToCents("0.1")).toBe("10");
+    expect(moneyToCents("0.29")).toBe("29");
   });
 
   it("rejects negative amounts", () => {
@@ -32,7 +32,11 @@ describe("moneyToCents", () => {
     expect(() => moneyToCents("abc")).toThrow("Invalid money amount");
   });
 
-  it("rejects amounts beyond the safe integer range", () => {
+  it("preserves values above Number.MAX_SAFE_INTEGER", () => {
+    expect(moneyToCents("90071992547409.93")).toBe("9007199254740993");
+  });
+
+  it("rejects amounts beyond PostgreSQL bigint", () => {
     expect(() => moneyToCents("999999999999999999")).toThrow("Money amount too large");
   });
 });
@@ -47,7 +51,11 @@ describe("centsToDecimalString", () => {
   });
 
   it("round-trips through moneyToCents", () => {
-    expect(moneyToCents(centsToDecimalString(123_456))).toBe(123_456);
+    expect(moneyToCents(centsToDecimalString(123_456))).toBe("123456");
+  });
+
+  it("formats exact values above Number.MAX_SAFE_INTEGER", () => {
+    expect(centsToDecimalString("9007199254740993")).toBe("90071992547409.93");
   });
 
   it("formats zero", () => {

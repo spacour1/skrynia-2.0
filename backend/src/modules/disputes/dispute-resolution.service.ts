@@ -7,6 +7,7 @@ import { refundEscrow, releaseEscrow } from "../orders/ledger.service.js";
 import { recordOrderEvent } from "../orders/order-events.service.js";
 import { createOrderSystemMessage } from "../chat/system-messages.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
+import type { RawOrderRow } from "../orders/orders.dto.js";
 
 export type DisputeResolutionDecision = "refund" | "release";
 
@@ -39,7 +40,7 @@ type ResolutionClaim = {
 
 export type DisputeResolutionResult = {
   dispute: ResolutionRow;
-  order: unknown;
+  order: RawOrderRow | null;
   newlyResolved: boolean;
   escrowExecuted: boolean;
   operationId: string;
@@ -333,7 +334,7 @@ export async function resolveDisputeResolution(input: {
     };
   }
 
-  let order: unknown = null;
+  let order: RawOrderRow | null = null;
   let escrowExecuted = false;
   if (claim.shouldExecuteEscrow) {
     try {

@@ -1,5 +1,12 @@
 import type { DbClient } from "../../db/pool.js";
 import { badRequest } from "../../common/errors.js";
+import {
+  absoluteMoneyCents,
+  bigintToMoneyCents,
+  parseMoneyCents,
+  subtractMoneyCents,
+  type MoneyCents
+} from "../../domain/money.js";
 
 type AccountType = "asset" | "liability" | "revenue" | "expense" | "equity";
 
@@ -8,8 +15,8 @@ type LedgerLineInput = {
   accountName: string;
   accountType: AccountType;
   userId?: string | null;
-  debitCents?: number;
-  creditCents?: number;
+  debitCents?: MoneyCents;
+  creditCents?: MoneyCents;
 };
 
 type LedgerEntryInput = {
@@ -51,9 +58,15 @@ async function ensureLedgerAccount(client: DbClient, line: LedgerLineInput, curr
 export async function postLedgerEntry(client: DbClient, input: LedgerEntryInput) {
   if (input.lines.length < 2) throw badRequest("Ledger entry must contain at least two lines");
 
-  const debitTotal = input.lines.reduce((sum, line) => sum + Number(line.debitCents ?? 0), 0);
-  const creditTotal = input.lines.reduce((sum, line) => sum + Number(line.creditCents ?? 0), 0);
-  if (debitTotal <= 0 || debitTotal !== creditTotal) {
+  const debitTotal = input.lines.reduce(
+    (sum, line) => sum + parseMoneyCents(line.debitCents ?? "0"),
+    0n
+  );
+  const creditTotal = input.lines.reduce(
+    (sum, line) => sum + parseMoneyCents(line.creditCents ?? "0"),
+    0n
+  );
+  if (debitTotal <= 0n || debitTotal !== creditTotal) {
     throw badRequest("Ledger entry is not balanced");
   }
 
@@ -71,7 +84,7 @@ export async function postLedgerEntry(client: DbClient, input: LedgerEntryInput)
     await client.query(
       `insert into ledger_lines(entry_id, account_id, debit_cents, credit_cents, currency)
        values ($1, $2, $3, $4, $5)`,
-      [entry.rows[0].id, accountId, line.debitCents ?? 0, line.creditCents ?? 0, input.currency]
+      [entry.rows[0].id, accountId, line.debitCents ?? "0", line.creditCents ?? "0", input.currency]
     );
   }
 
@@ -82,7 +95,7 @@ export async function recordPaymentCaptureLedger(params: {
   client: DbClient;
   orderId: string;
   sellerId: string;
-  amountCents: number;
+  amountCents: MoneyCents;
   currency: string;
   provider: string;
   reference: string;
@@ -115,12 +128,30 @@ export async function recordEscrowReleaseLedger(params: {
   client: DbClient;
   orderId: string;
   sellerId: string;
-  amountCents: number;
-  feeCents: number;
+  amountCents: MoneyCents;
+  feeCents: MoneyCents;
   currency: string;
   adminId?: string | null;
 }) {
-  const netCents = params.amountCents - params.feeCents;
+  const netCents = subtractMoneyCents(params.amountCents, params.feeCents);
+  const creditLines: LedgerLineInput[] = [];
+  if (parseMoneyCents(netCents) > 0n) {
+    creditLines.push({
+      accountCode: ledgerAccountCodes.userPayable(params.currency, params.sellerId),
+      accountName: `${params.currency} user payable liability`,
+      accountType: "liability",
+      userId: params.sellerId,
+      creditCents: netCents
+    });
+  }
+  if (parseMoneyCents(params.feeCents) > 0n) {
+    creditLines.push({
+      accountCode: ledgerAccountCodes.platformRevenue(params.currency),
+      accountName: `${params.currency} platform fee revenue`,
+      accountType: "revenue",
+      creditCents: params.feeCents
+    });
+  }
   await postLedgerEntry(params.client, {
     idempotencyKey: `order:${params.orderId}:escrow_release`,
     entryType: "escrow_release",
@@ -135,19 +166,7 @@ export async function recordEscrowReleaseLedger(params: {
         userId: params.sellerId,
         debitCents: params.amountCents
       },
-      {
-        accountCode: ledgerAccountCodes.userPayable(params.currency, params.sellerId),
-        accountName: `${params.currency} user payable liability`,
-        accountType: "liability",
-        userId: params.sellerId,
-        creditCents: netCents
-      },
-      {
-        accountCode: ledgerAccountCodes.platformRevenue(params.currency),
-        accountName: `${params.currency} platform fee revenue`,
-        accountType: "revenue",
-        creditCents: params.feeCents
-      }
+      ...creditLines
     ]
   });
 }
@@ -155,7 +174,7 @@ export async function recordEscrowReleaseLedger(params: {
 export async function recordWalletTopupLedger(params: {
   client: DbClient;
   userId: string;
-  amountCents: number;
+  amountCents: MoneyCents;
   currency: string;
   provider: string;
   reference: string;
@@ -188,7 +207,7 @@ export async function recordWalletWithdrawalLedger(params: {
   client: DbClient;
   transactionId: string;
   userId: string;
-  amountCents: number;
+  amountCents: MoneyCents;
   currency: string;
 }) {
   await postLedgerEntry(params.client, {
@@ -219,7 +238,7 @@ export async function recordWalletWithdrawalReversalLedger(params: {
   client: DbClient;
   transactionId: string;
   userId: string;
-  amountCents: number;
+  amountCents: MoneyCents;
   currency: string;
 }) {
   await postLedgerEntry(params.client, {
@@ -255,13 +274,14 @@ export async function recordManualAdjustmentLedger(params: {
   client: DbClient;
   adjustmentId: string;
   userId: string;
-  amountCents: number;
+  amountCents: MoneyCents;
   currency: string;
   adminId: string;
   reason: string;
 }) {
-  const magnitude = Math.abs(params.amountCents);
-  const isCredit = params.amountCents >= 0;
+  const signedAmount = parseMoneyCents(params.amountCents);
+  const magnitude = absoluteMoneyCents(params.amountCents);
+  const isCredit = signedAmount >= 0n;
   await postLedgerEntry(params.client, {
     idempotencyKey: `manual_adjustment:${params.adjustmentId}`,
     entryType: "adjustment",
@@ -292,7 +312,7 @@ export async function recordRefundLedger(params: {
   orderId: string;
   sellerId: string;
   buyerId: string;
-  amountCents: number;
+  amountCents: MoneyCents;
   currency: string;
   adminId?: string | null;
 }) {

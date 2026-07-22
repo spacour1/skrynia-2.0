@@ -26,6 +26,12 @@ import { createWalletTopup, completeWalletTopup } from "../users/wallet.service.
 import { buildLiqpayCheckout, decodeLiqpayCallback, isLiqpaySuccessStatus, verifyLiqpaySignature } from "./liqpay.service.js";
 import { createMonobankInvoice, getMonobankInvoiceStatus, isMonobankSuccessStatus } from "./monobank.service.js";
 import { buildWayforpayAck, createWayforpayInvoice, getWayforpayStatus, isWayforpaySuccessStatus } from "./wayforpay.service.js";
+import { bigintToMoneyCents, parseMoneyCents } from "../../domain/money.js";
+import { mapOrderRowDto } from "../orders/orders.dto.js";
+import {
+  moneyCentsToProviderDecimal,
+  moneyCentsToProviderInteger
+} from "./provider-money.js";
 
 const router = Router();
 
@@ -104,7 +110,7 @@ router.post(
       reference: updated.payment_reference,
       status: "captured" as const
     };
-    res.json({ order: updated, payment });
+    res.json({ order: mapOrderRowDto(updated), payment });
   })
 );
 
@@ -128,7 +134,7 @@ router.post(
 
     const checkout = buildLiqpayCheckout({
       orderId: order.id,
-      amountCents: Number(order.amount_cents),
+      amountCents: bigintToMoneyCents(order.amount_cents),
       currency: order.currency,
       description: `SKRYNIA: ${order.product_title}`,
       resultUrl: `${env.FRONTEND_URL}/orders/${order.id}?liqpay=return`
@@ -157,7 +163,7 @@ router.post(
 
     const invoice = await createMonobankInvoice({
       reference: order.id,
-      amountCents: Number(order.amount_cents),
+      amountCents: bigintToMoneyCents(order.amount_cents),
       currency: order.currency,
       description: `SKRYNIA: ${order.product_title}`,
       redirectUrl: `${env.FRONTEND_URL}/orders/${order.id}?monobank=return`
@@ -186,7 +192,7 @@ router.post(
 
     const invoice = await createWayforpayInvoice({
       orderReference: order.id,
-      amountCents: Number(order.amount_cents),
+      amountCents: bigintToMoneyCents(order.amount_cents),
       currency: order.currency,
       productName: `SKRYNIA: ${order.product_title}`
     });
@@ -229,7 +235,7 @@ router.get(
         type: "manual_payment_pending_admin",
         templateKey: "notifications.manualPaymentPendingAdmin",
         orderId,
-        params: { amount: centsToDecimalString(Number(order.amount_cents)), currency: order.currency }
+        params: { amount: centsToDecimalString(order.amount_cents), currency: order.currency }
       });
     }
 
@@ -237,7 +243,7 @@ router.get(
       cardNumber: env.MANUAL_PAYMENT_CARD_NUMBER,
       receiverName: env.MANUAL_PAYMENT_RECEIVER_NAME,
       bank: env.MANUAL_PAYMENT_BANK ?? null,
-      amountCents: Number(order.amount_cents),
+      amountCents: bigintToMoneyCents(order.amount_cents),
       currency: order.currency,
       comment: `SKRYNIA ${order.id.slice(0, 8)}`
     });
@@ -251,7 +257,7 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = walletTopupSchema.parse(req.body);
     const amountCents = moneyToCents(input.amount);
-    if (amountCents < 100) throw badRequest("Minimum top-up amount is 1.00");
+    if (parseMoneyCents(amountCents) < 100n) throw badRequest("Minimum top-up amount is 1.00");
 
     const topup = await createWalletTopup(req.user.id, amountCents, "UAH");
     const checkout = buildLiqpayCheckout({
@@ -272,8 +278,11 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = walletTopupSchema.parse(req.body);
     const amountCents = moneyToCents(input.amount);
-    if (amountCents < 100) throw badRequest("Minimum top-up amount is 1.00");
+    if (parseMoneyCents(amountCents) < 100n) throw badRequest("Minimum top-up amount is 1.00");
 
+    // Validate the provider's numeric wire format before persisting a pending top-up;
+    // the provider service repeats this check immediately before fetch as defense in depth.
+    moneyCentsToProviderInteger(amountCents);
     const topup = await createWalletTopup(req.user.id, amountCents, "UAH");
     const invoice = await createMonobankInvoice({
       reference: topup.id,
@@ -293,8 +302,9 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = walletTopupSchema.parse(req.body);
     const amountCents = moneyToCents(input.amount);
-    if (amountCents < 100) throw badRequest("Minimum top-up amount is 1.00");
+    if (parseMoneyCents(amountCents) < 100n) throw badRequest("Minimum top-up amount is 1.00");
 
+    moneyCentsToProviderDecimal(amountCents);
     const topup = await createWalletTopup(req.user.id, amountCents, "UAH");
     const invoice = await createWayforpayInvoice({
       orderReference: topup.id,

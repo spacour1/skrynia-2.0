@@ -27,7 +27,12 @@ import {
   runIdempotentTransaction
 } from "../idempotency/idempotency.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
-import { mapOrderRowDto } from "./orders.dto.js";
+import { mapOrderMoneyFields, mapOrderRowDto } from "./orders.dto.js";
+import {
+  bigintToMoneyCents,
+  parseMoneyCents,
+  POSTGRES_BIGINT_MAX
+} from "../../domain/money.js";
 
 const router = Router();
 
@@ -87,7 +92,13 @@ router.post(
         }
         if (product.stock < input.quantity) throw badRequest("Not enough stock");
 
-        const amountCents = Number(product.price_cents) * input.quantity;
+        const amount =
+          parseMoneyCents(bigintToMoneyCents(product.price_cents)) *
+          BigInt(input.quantity);
+        if (amount > POSTGRES_BIGINT_MAX) {
+          throw badRequest("Order amount is too large");
+        }
+        const amountCents = bigintToMoneyCents(amount);
         const orderResult = await client.query(
           `insert into orders(buyer_id, seller_id, product_id, quantity, amount_cents, currency)
            values ($1, $2, $3, $4, $5, $6)
@@ -207,7 +218,7 @@ router.get(
        limit 100`,
       values
     );
-    const payload = { orders: result.rows };
+    const payload = { orders: result.rows.map(mapOrderMoneyFields) };
     await cacheSet(cacheKey, payload, 15);
     res.json(payload);
   })
@@ -236,9 +247,18 @@ router.get(
        where o.id = $1`,
       [id]
     );
-    const order = result.rows[0];
+    const order = result.rows[0]
+      ? mapOrderMoneyFields(result.rows[0])
+      : null;
     if (!order) throw notFound("Order not found");
-    if (!canSeeOrder(order, req.user)) throw forbidden();
+    if (
+      !canSeeOrder(
+        { buyerId: order.buyerId, sellerId: order.sellerId },
+        req.user
+      )
+    ) {
+      throw forbidden();
+    }
     const events = await pool.query(
       `select e.id, e.order_id as "orderId", e.actor_id as "actorId", u.display_name as "actorDisplayName",
               e.type, e.title, e.body, e.metadata, e.created_at as "createdAt"

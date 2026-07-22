@@ -19,17 +19,19 @@ const { createApp } = await import("../src/app.js");
 const app = createApp();
 
 async function applyRefund(orderId: string) {
-  await pool.query(`update orders set status = 'refunded', updated_at = now() where id = $1`, [
-    orderId
-  ]);
-  return { id: orderId, status: "refunded" };
+  const updated = await pool.query(
+    `update orders set status = 'refunded', updated_at = now() where id = $1 returning *`,
+    [orderId]
+  );
+  return updated.rows[0];
 }
 
 async function applyRelease(orderId: string) {
-  await pool.query(`update orders set status = 'completed', updated_at = now() where id = $1`, [
-    orderId
-  ]);
-  return { id: orderId, status: "completed" };
+  const updated = await pool.query(
+    `update orders set status = 'completed', updated_at = now() where id = $1 returning *`,
+    [orderId]
+  );
+  return updated.rows[0];
 }
 
 beforeEach(async () => {

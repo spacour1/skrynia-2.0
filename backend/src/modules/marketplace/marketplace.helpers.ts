@@ -1,6 +1,30 @@
 import { pool } from "../../db/pool.js";
 import { isUserOnline } from "../chat/ws.service.js";
 import type { CatalogSchema } from "../catalog/catalog.validation.js";
+import {
+  bigintToMoneyCents,
+  type MoneyCentsInput
+} from "../../domain/money.js";
+
+export function mapProductMoneyFields<
+  T extends {
+    priceCents: MoneyCentsInput;
+    oldPriceCents?: MoneyCentsInput | null;
+  }
+>(row: T) {
+  return {
+    ...row,
+    priceCents: bigintToMoneyCents(row.priceCents),
+    ...(row.oldPriceCents === undefined
+      ? {}
+      : {
+          oldPriceCents:
+            row.oldPriceCents === null
+              ? null
+              : bigintToMoneyCents(row.oldPriceCents)
+        })
+  };
+}
 
 export function addSellerPresence<T extends { sellerId?: string }>(rows: T[]) {
   const sellerIds = Array.from(

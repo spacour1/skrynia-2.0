@@ -14,7 +14,15 @@ import {
   type ProductCacheContext
 } from "../marketplace/marketplace-cache.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
-import { platformFeeCents } from "../../domain/money.js";
+import {
+  addMoneyCents,
+  bigintToMoneyCents,
+  MoneyRangeError,
+  parseMoneyCents,
+  platformFeeCents,
+  subtractMoneyCents,
+  type MoneyCents
+} from "../../domain/money.js";
 import type { OrderStatus } from "../../domain/enums.js";
 import { canTransitionOrder } from "./order-transitions.js";
 import { recordOrderEvent } from "./order-events.service.js";
@@ -26,8 +34,8 @@ type OrderRow = {
   seller_id: string;
   product_id: string;
   quantity: number;
-  amount_cents: number;
-  fee_cents: number;
+  amount_cents: MoneyCents;
+  fee_cents: MoneyCents;
   currency: string;
   status: string;
 };
@@ -65,8 +73,41 @@ export async function ensureWallet(client: DbClient, userId: string, currency: s
   return wallet.rows[0].id;
 }
 
-function feeFor(amountCents: number) {
+function feeFor(amountCents: MoneyCents) {
   return platformFeeCents(amountCents, env.PLATFORM_FEE_BPS);
+}
+
+function checkedBalanceAddition(
+  currentCents: MoneyCents,
+  addedCents: MoneyCents,
+  balanceName: string
+) {
+  try {
+    return addMoneyCents(currentCents, addedCents);
+  } catch (error) {
+    if (error instanceof MoneyRangeError) {
+      throw badRequest(`${balanceName} exceeds the supported money range`);
+    }
+    throw error;
+  }
+}
+
+function checkedBalanceSubtraction(
+  currentCents: MoneyCents,
+  subtractedCents: MoneyCents,
+  insufficientMessage: string
+) {
+  if (parseMoneyCents(currentCents) < parseMoneyCents(subtractedCents)) {
+    throw badRequest(insufficientMessage);
+  }
+  try {
+    return subtractMoneyCents(currentCents, subtractedCents);
+  } catch (error) {
+    if (error instanceof MoneyRangeError) {
+      throw badRequest("Balance exceeds the supported money range");
+    }
+    throw error;
+  }
 }
 
 export async function lockEscrow(
@@ -96,6 +137,21 @@ export async function lockEscrow(
     const product = productResult.rows[0];
     if (!product || product.status !== "active") throw badRequest("Product is no longer available");
     if (Number(product.stock) < Number(order.quantity)) throw badRequest("Not enough stock");
+
+    const sellerWalletId = await ensureWallet(client, order.seller_id, order.currency);
+    const buyerWalletId = await ensureWallet(client, order.buyer_id, order.currency);
+    const sellerWallet = await client.query<{ escrow_cents: MoneyCents }>(
+      `select escrow_cents from wallets where id = $1 for update`,
+      [sellerWalletId]
+    );
+    const amountCents = bigintToMoneyCents(order.amount_cents);
+    const nextEscrowCents = checkedBalanceAddition(
+      sellerWallet.rows[0].escrow_cents,
+      amountCents,
+      "Seller escrow balance"
+    );
+    const feeCents = feeFor(amountCents);
+
     await client.query(`update products set stock = stock - $2, updated_at = now() where id = $1`, [
       order.product_id,
       order.quantity
@@ -106,21 +162,17 @@ export async function lockEscrow(
     const provider = getPaymentProvider(providerName);
     const payment = await provider.capture({
       orderId: order.id,
-      amountCents: Number(order.amount_cents),
+      amountCents,
       currency: order.currency,
       idempotencyKey: `payment:${order.id}`,
       externalReference
     });
 
-    const sellerWalletId = await ensureWallet(client, order.seller_id, order.currency);
-    const buyerWalletId = await ensureWallet(client, order.buyer_id, order.currency);
-    const feeCents = feeFor(order.amount_cents);
-
     await client.query(
       `update wallets
-       set escrow_cents = escrow_cents + $2, updated_at = now()
+       set escrow_cents = $2, updated_at = now()
        where id = $1`,
-      [sellerWalletId, order.amount_cents]
+      [sellerWalletId, nextEscrowCents]
     );
 
     await client.query(
@@ -132,7 +184,7 @@ export async function lockEscrow(
         buyerWalletId,
         order.buyer_id,
         order.id,
-        order.amount_cents,
+        amountCents,
         order.currency,
         { provider: payment.provider, reference: payment.reference },
         sellerWalletId,
@@ -143,7 +195,7 @@ export async function lockEscrow(
       client,
       orderId: order.id,
       sellerId: order.seller_id,
-      amountCents: Number(order.amount_cents),
+      amountCents,
       currency: order.currency,
       provider: payment.provider,
       reference: payment.reference
@@ -241,31 +293,63 @@ export async function releaseEscrow(
     }
 
     const sellerWalletId = await ensureWallet(client, order.seller_id, order.currency);
-    const sellerWallet = await client.query<{ escrow_cents: number }>(
-      `select escrow_cents from wallets where id = $1 for update`,
+    const sellerWallet = await client.query<{
+      escrow_cents: MoneyCents;
+      available_cents: MoneyCents;
+    }>(
+      `select escrow_cents, available_cents from wallets where id = $1 for update`,
       [sellerWalletId]
     );
-    if (Number(sellerWallet.rows[0].escrow_cents) < Number(order.amount_cents)) {
-      throw badRequest("Escrow balance is insufficient");
+    const amountCents = bigintToMoneyCents(order.amount_cents);
+    const storedFeeCents = bigintToMoneyCents(order.fee_cents);
+    if (parseMoneyCents(storedFeeCents) > parseMoneyCents(amountCents)) {
+      throw badRequest("Platform fee exceeds the order amount");
     }
+    // fee_cents is captured with the payment and is immutable pricing history. Zero is
+    // a valid persisted fee (free promotion / zero-BPS configuration), not a sentinel.
+    const feeCents = storedFeeCents;
+    const netCents = subtractMoneyCents(amountCents, feeCents);
+    const nextEscrowCents = checkedBalanceSubtraction(
+      sellerWallet.rows[0].escrow_cents,
+      amountCents,
+      "Escrow balance is insufficient"
+    );
+    const nextAvailableCents = checkedBalanceAddition(
+      sellerWallet.rows[0].available_cents,
+      netCents,
+      "Seller available balance"
+    );
 
-    const feeCents = order.fee_cents || feeFor(order.amount_cents);
-    const netCents = Number(order.amount_cents) - Number(feeCents);
+    let nextRevenueCents: MoneyCents | null = null;
+    if (parseMoneyCents(feeCents) > 0n) {
+      const platformWallet = await client.query<{ revenue_cents: MoneyCents }>(
+        `select revenue_cents from platform_wallets where currency = $1 for update`,
+        [order.currency]
+      );
+      if (!platformWallet.rows[0]) throw new Error(`Platform wallet is missing for ${order.currency}`);
+      nextRevenueCents = checkedBalanceAddition(
+        platformWallet.rows[0].revenue_cents,
+        feeCents,
+        "Platform revenue balance"
+      );
+    }
 
     await client.query(
       `update wallets
-       set escrow_cents = escrow_cents - $2,
-           available_cents = available_cents + $3,
+       set escrow_cents = $2,
+           available_cents = $3,
            updated_at = now()
        where id = $1`,
-      [sellerWalletId, order.amount_cents, netCents]
+      [sellerWalletId, nextEscrowCents, nextAvailableCents]
     );
-    await client.query(
-      `update platform_wallets
-       set revenue_cents = revenue_cents + $1, updated_at = now()
-       where currency = $2`,
-      [feeCents, order.currency]
-    );
+    if (nextRevenueCents !== null) {
+      await client.query(
+        `update platform_wallets
+         set revenue_cents = $1, updated_at = now()
+         where currency = $2`,
+        [nextRevenueCents, order.currency]
+      );
+    }
 
     await client.query(
       `insert into transactions(wallet_id, user_id, order_id, type, direction, amount_cents, currency, metadata)
@@ -286,8 +370,8 @@ export async function releaseEscrow(
       client,
       orderId: order.id,
       sellerId: order.seller_id,
-      amountCents: Number(order.amount_cents),
-      feeCents: Number(feeCents),
+      amountCents,
+      feeCents,
       currency: order.currency,
       adminId: options.adminId ?? null
     });
@@ -343,25 +427,37 @@ export async function refundEscrow(orderId: string, adminId?: string) {
 
     const sellerWalletId = await ensureWallet(client, order.seller_id, order.currency);
     const buyerWalletId = await ensureWallet(client, order.buyer_id, order.currency);
-    const sellerWallet = await client.query<{ escrow_cents: number }>(
+    const sellerWallet = await client.query<{ escrow_cents: MoneyCents }>(
       `select escrow_cents from wallets where id = $1 for update`,
       [sellerWalletId]
     );
-    if (Number(sellerWallet.rows[0].escrow_cents) < Number(order.amount_cents)) {
-      throw badRequest("Escrow balance is insufficient");
-    }
+    const buyerWallet = await client.query<{ available_cents: MoneyCents }>(
+      `select available_cents from wallets where id = $1 for update`,
+      [buyerWalletId]
+    );
+    const amountCents = bigintToMoneyCents(order.amount_cents);
+    const nextEscrowCents = checkedBalanceSubtraction(
+      sellerWallet.rows[0].escrow_cents,
+      amountCents,
+      "Escrow balance is insufficient"
+    );
+    const nextBuyerAvailableCents = checkedBalanceAddition(
+      buyerWallet.rows[0].available_cents,
+      amountCents,
+      "Buyer available balance"
+    );
 
     await client.query(
       `update wallets
-       set escrow_cents = escrow_cents - $2, updated_at = now()
+       set escrow_cents = $2, updated_at = now()
        where id = $1`,
-      [sellerWalletId, order.amount_cents]
+      [sellerWalletId, nextEscrowCents]
     );
     await client.query(
       `update wallets
-       set available_cents = available_cents + $2, updated_at = now()
+       set available_cents = $2, updated_at = now()
        where id = $1`,
-      [buyerWalletId, order.amount_cents]
+      [buyerWalletId, nextBuyerAvailableCents]
     );
 
     await client.query(
@@ -373,7 +469,7 @@ export async function refundEscrow(orderId: string, adminId?: string) {
         sellerWalletId,
         order.seller_id,
         order.id,
-        order.amount_cents,
+        amountCents,
         order.currency,
         { adminId: adminId ?? null },
         buyerWalletId,
@@ -385,7 +481,7 @@ export async function refundEscrow(orderId: string, adminId?: string) {
       orderId: order.id,
       sellerId: order.seller_id,
       buyerId: order.buyer_id,
-      amountCents: Number(order.amount_cents),
+      amountCents,
       currency: order.currency,
       adminId: adminId ?? null
     });

@@ -13,12 +13,28 @@ import {
   attachCardMetadata,
   mapProductMoneyFields
 } from "./marketplace.helpers.js";
+import {
+  buildMarketplaceSearchCtes,
+  MARKETPLACE_SEARCH_GROUP_BY,
+  MARKETPLACE_SEARCH_JOIN,
+  MARKETPLACE_SEARCH_ORDER_BY,
+  MARKETPLACE_SEARCH_SELECT
+} from "./marketplace-search.sql.js";
 import { mediaAgg } from "./marketplace.sql.js";
 
 const router = Router();
 
+const searchTermSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(80)
+  .refine((value) => /[\p{L}\p{N}]/u.test(value), {
+    message: "Search must contain a letter or number"
+  });
+
 const searchSchema = paginationSchema.extend({
-  q: z.string().optional(),
+  q: searchTermSchema.optional(),
   category: z.string().optional(),
   game: z.string().optional(),
   section: z.string().optional(),
@@ -123,36 +139,99 @@ router.get(
 router.get(
   "/suggest",
   asyncHandler(async (req, res) => {
-    const q = z.string().trim().min(1).max(80).parse(req.query.q);
-    const pattern = `%${q}%`;
+    const q = searchTermSchema.parse(req.query.q);
 
     const games = await pool.query(
-      `select g.id, g.slug, g.name, g.publisher, g.icon_url as "iconUrl", g.popularity,
+      `with search_input as materialized (
+         select marketplace_search_normalize($1::text) as normalized
+       )
+       select g.id, g.slug, g.name, g.publisher, g.icon_url as "iconUrl", g.popularity,
               count(distinct p.id) filter (where product_seller.is_banned = false)::int as "lotCount"
        from games g
+       cross join search_input
        left join products p on p.game_id = g.id and p.status = 'active'
        left join users product_seller on product_seller.id = p.seller_id
        where g.is_active = true
-         and (g.name ilike $1 or g.slug ilike $1 or coalesce(g.publisher, '') ilike $1
-              or exists (select 1 from unnest(g.aliases) alias where alias ilike $1))
-       group by g.id
+         and (
+           marketplace_search_normalize(g.name) = search_input.normalized
+           or marketplace_search_normalize(g.name) like search_input.normalized || '%'
+           or marketplace_search_normalize(g.slug) = search_input.normalized
+           or marketplace_search_normalize(coalesce(g.publisher, ''))
+                like search_input.normalized || '%'
+           or word_similarity(
+                search_input.normalized,
+                marketplace_search_normalize(g.name)
+              ) >= 0.3
+           or exists (
+             select 1
+             from unnest(g.aliases) as game_alias(alias)
+             where marketplace_search_normalize(game_alias.alias) = search_input.normalized
+                or marketplace_search_normalize(game_alias.alias)
+                     like search_input.normalized || '%'
+                or similarity(
+                     marketplace_search_normalize(game_alias.alias),
+                     search_input.normalized
+                   ) >= 0.3
+           )
+         )
+       group by g.id, search_input.normalized
        order by
-         case when lower(g.name) like lower($2) then 0 else 1 end,
+         case
+           when exists (
+             select 1
+             from unnest(g.aliases) as exact_alias(alias)
+             where marketplace_search_normalize(exact_alias.alias)
+               = search_input.normalized
+           ) then 0
+           when marketplace_search_normalize(g.name) = search_input.normalized then 1
+           when marketplace_search_normalize(g.name)
+             like search_input.normalized || '%' then 2
+           when exists (
+             select 1
+             from unnest(g.aliases) as prefix_alias(alias)
+             where marketplace_search_normalize(prefix_alias.alias)
+               like search_input.normalized || '%'
+           ) then 2
+           else 3
+         end,
+         greatest(
+           word_similarity(
+             search_input.normalized,
+             marketplace_search_normalize(g.name)
+           ),
+           coalesce(
+             (
+               select max(
+                 similarity(
+                   marketplace_search_normalize(similar_alias.alias),
+                   search_input.normalized
+                 )
+               )
+               from unnest(g.aliases) as similar_alias(alias)
+             ),
+             0
+           )
+         ) desc,
          g.popularity desc,
          g.name asc
        limit 6`,
-      [pattern, `${q}%`]
+      [q]
     );
 
     const products = await pool.query(
-      `select p.id, p.title, p.description, p.price_cents as "priceCents", p.currency,
+      `with ${buildMarketplaceSearchCtes(1)}
+       select p.id, p.title, p.description, p.price_cents as "priceCents", p.currency,
               p.product_type as "productType", p.delivery_type as "deliveryType",
               p.metadata, p.is_hot as "isHot", p.old_price_cents as "oldPriceCents",
               g.slug as "gameSlug", g.name as "gameName",
               c.name as "categoryName",
               u.display_name as "sellerDisplayName",
+              search_match.relevance_tier as "searchRelevanceTier",
+              search_match.trigram_similarity as "searchSimilarity",
+              search_match.full_text_rank as "searchFullTextRank",
               ${mediaAgg}
        from products p
+       ${MARKETPLACE_SEARCH_JOIN}
        join categories c on c.id = p.category_id
        left join games g on g.id = p.game_id
        join users u on u.id = p.seller_id
@@ -160,26 +239,28 @@ router.get(
        where p.status = 'active'
          and p.stock > 0
          and u.is_banned = false
-         and (
-           p.title ilike $1
-           or p.description ilike $1
-           or coalesce(g.name, '') ilike $1
-           or c.name ilike $1
-           or p.product_type ilike $1
-         )
-       group by p.id, c.id, g.id, u.id
+       group by p.id, c.id, g.id, u.id${MARKETPLACE_SEARCH_GROUP_BY}
        order by
-         case when lower(p.title) like lower($2) then 0 else 1 end,
-         p.is_hot desc,
+         search_match.relevance_tier asc,
+         search_match.trigram_similarity desc,
+         search_match.full_text_rank desc,
          p.sales_count desc,
-         p.created_at desc
+         p.created_at desc,
+         p.id asc
        limit 8`,
-      [pattern, `${q}%`]
+      [q]
     );
 
     res.json({
       games: games.rows,
-      products: products.rows.map(mapProductMoneyFields)
+      products: products.rows.map(
+        ({
+          searchRelevanceTier: _searchRelevanceTier,
+          searchSimilarity: _searchSimilarity,
+          searchFullTextRank: _searchFullTextRank,
+          ...row
+        }) => mapProductMoneyFields(row)
+      )
     });
   })
 );
@@ -194,16 +275,17 @@ router.get(
     const offset = (input.page - 1) * input.limit;
     const values: unknown[] = [];
     const where = ["p.status = 'active'", "p.stock > 0", "u.is_banned = false"];
+    let searchCtes = "";
+    let searchJoin = "";
+    let searchSelect = "";
+    let searchGroupBy = "";
 
     if (input.q) {
       values.push(input.q);
-      where.push(`(
-        to_tsvector('english', p.title || ' ' || p.description) @@ plainto_tsquery('english', $${values.length})
-        or p.title ilike '%' || $${values.length} || '%'
-        or p.description ilike '%' || $${values.length} || '%'
-        or coalesce(g.name, '') ilike '%' || $${values.length} || '%'
-        or c.name ilike '%' || $${values.length} || '%'
-      )`);
+      searchCtes = buildMarketplaceSearchCtes(values.length);
+      searchJoin = MARKETPLACE_SEARCH_JOIN;
+      searchSelect = MARKETPLACE_SEARCH_SELECT;
+      searchGroupBy = MARKETPLACE_SEARCH_GROUP_BY;
     }
     if (input.category) {
       values.push(input.category);
@@ -272,8 +354,9 @@ router.get(
       having.push(`coalesce(avg(r.rating), 0) >= $${values.length}`);
     }
 
-    const orderBy =
-      input.sort === "price_asc"
+    const orderBy = input.q
+      ? MARKETPLACE_SEARCH_ORDER_BY
+      : input.sort === "price_asc"
         ? '"priceCents" asc'
         : input.sort === "price_desc"
           ? '"priceCents" desc'
@@ -287,7 +370,8 @@ router.get(
 
     values.push(input.limit, offset);
     const baseQuery = `
-      select p.id, p.title, p.description, p.price_cents as "priceCents", p.currency, p.stock,
+      select ${searchSelect}
+              p.id, p.title, p.description, p.price_cents as "priceCents", p.currency, p.stock,
               p.delivery_type as "deliveryType", p.server, p.platform, p.metadata,
               p.section_id as "sectionId", p.schema_version as "schemaVersion",
               p.product_type as "productType", p.old_price_cents as "oldPriceCents",
@@ -302,6 +386,7 @@ router.get(
               count(distinct pf.user_id)::int as "favoriteCount",
               ${mediaAgg}
       from products p
+      ${searchJoin}
       join categories c on c.id = p.category_id
       left join games g on g.id = p.game_id
       left join game_sections gs on gs.id = p.section_id
@@ -310,11 +395,11 @@ router.get(
       left join product_favorites pf on pf.product_id = p.id
       left join product_media pm on pm.product_id = p.id and pm.status = 'approved'
       where ${where.join(" and ")}
-      group by p.id, c.id, g.id, gs.id, u.id
+      group by p.id, c.id, g.id, gs.id, u.id${searchGroupBy}
       ${having.length ? `having ${having.join(" and ")}` : ""}
     `;
     const result = await pool.query(
-      `with filtered as (${baseQuery})
+      `with ${searchCtes ? `${searchCtes},` : ""} filtered as (${baseQuery})
        select filtered.*, count(*) over()::int as total
        from filtered
        order by ${orderBy}
@@ -323,8 +408,14 @@ router.get(
     );
     const total = result.rows[0]?.total ?? 0;
     const productsWithPresence = await addSellerPresence(
-      result.rows.map(({ total: _total, ...row }) =>
-        mapProductMoneyFields(row)
+      result.rows.map(
+        ({
+          total: _total,
+          searchRelevanceTier: _searchRelevanceTier,
+          searchSimilarity: _searchSimilarity,
+          searchFullTextRank: _searchFullTextRank,
+          ...row
+        }) => mapProductMoneyFields(row)
       )
     );
     const products = await attachCardMetadata(productsWithPresence);

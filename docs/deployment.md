@@ -59,6 +59,9 @@ Never use the API, worker, or outbox command as a migration hook. Run exactly on
 release job before rolling out the three long-running process types. The release
 runner holds a repository-stable PostgreSQL advisory lock across both SQL and 2FA
 data migrations, so accidentally concurrent release jobs serialize safely.
+The release process validates only `DATABASE_URL`, `TWO_FACTOR_ENCRYPTION_KEY`, and
+`TWO_FACTOR_ENCRYPTION_KEY_VERSION`; it does not load HTTP, Redis, metrics, mail, or
+payment-provider configuration.
 
 ### Production-shaped Compose
 

@@ -4,7 +4,13 @@ import { runReleaseMigrations } from "./migrate-deploy.js";
 const databaseUrl = process.env.DATABASE_URL ?? "";
 
 try {
-  const result = await runReleaseMigrations({ databaseUrl });
+  const result = await runReleaseMigrations({
+    databaseUrl,
+    twoFactorEncryptionKey: process.env.TWO_FACTOR_ENCRYPTION_KEY,
+    twoFactorEncryptionKeyVersion: Number(
+      process.env.TWO_FACTOR_ENCRYPTION_KEY_VERSION ?? "1"
+    )
+  });
   console.info(
     `Release migrations complete: ${result.sqlMigrations} SQL, ${result.legacyTwoFactorSecrets} legacy 2FA secrets`
   );

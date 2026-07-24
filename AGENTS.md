@@ -14,7 +14,9 @@ P2P digital marketplace with escrow. Buyers pay, funds are held in escrow, selle
 
 ## Hard constraints — never violate
 
-- **No floating-point money.** All amounts are integer cents. `amountCents: number` — always integers.
+- **No floating-point money.** Persisted amounts are integer cents, and API money fields
+  such as `amountCents` are decimal strings so values above JavaScript's safe-integer
+  range remain exact. Convert to `bigint` for arithmetic; never use floats.
 - **Ledger is append-only.** The DB has a trigger that blocks UPDATE/DELETE on `ledger_entries` and `ledger_lines`. Corrections go through a new entry, never by rewriting history.
 - **Every money mutation books a ledger entry** inside the same DB transaction. See `accounting.service.ts`.
 - **Payment callbacks must stay idempotent.** They rely on `on conflict (idempotency_key) do nothing`. Do not remove this pattern.

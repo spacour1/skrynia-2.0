@@ -182,7 +182,7 @@ Redis is required in production for:
 
 | Feature | Without Redis |
 |---------|--------------|
-| Session revocation | JWT expiry only (revoked tokens remain valid until TTL) |
+| Session revocation | Durable `session_version` checks still reject revoked HTTP sessions and WebSocket frames; immediate cross-replica socket disconnect is degraded until Redis recovers |
 | BullMQ job queue | Jobs silently dropped; escrow auto-release, reconciliation, notifications do not run |
 | Application cache | Every request hits PostgreSQL directly |
 | Realtime Pub/Sub | Only sockets on the producing process receive best-effort events |

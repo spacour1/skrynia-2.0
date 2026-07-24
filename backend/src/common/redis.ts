@@ -2,8 +2,11 @@ import { Redis } from "ioredis";
 import { env } from "../config/env.js";
 
 let redis: Redis | null = null;
+let redisClosing = false;
+let redisClosePromise: Promise<void> | null = null;
 
 export function getRedis() {
+  if (redisClosing) return null;
   if (!env.REDIS_URL) return null;
   if (!redis) {
     redis = new Redis(env.REDIS_URL, {
@@ -17,6 +20,27 @@ export function getRedis() {
     });
   }
   return redis;
+}
+
+/**
+ * The process entrypoint is the sole owner of the shared Redis connection used by
+ * sessions, cache, rate limits, presence and realtime publishing. BullMQ owns and
+ * closes its own connections separately.
+ */
+export function closeRedis() {
+  if (redisClosePromise) return redisClosePromise;
+  redisClosing = true;
+  const client = redis;
+  redis = null;
+  redisClosePromise = (async () => {
+    if (!client || client.status === "end") return;
+    try {
+      await client.quit();
+    } catch {
+      client.disconnect();
+    }
+  })();
+  return redisClosePromise;
 }
 
 export async function cacheGet<T>(key: string): Promise<T | null> {

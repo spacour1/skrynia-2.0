@@ -17,6 +17,7 @@ import { normalizeLocale } from "../../i18n/config.js";
 import { t } from "../../i18n/t.js";
 import { recoverStaleDisputeResolutions } from "../disputes/dispute-resolution.service.js";
 import { cleanupTemporaryStorageObjects } from "../storage/storage.service.js";
+import { drainStartingBullWorker } from "../../runtime/bull-worker-drain.js";
 
 export type MarketplaceJobName =
   | "escrow_release"
@@ -52,6 +53,11 @@ let queueConnection: ConnectionOptions | null = null;
 let workerConnection: ConnectionOptions | null = null;
 let queue: Queue<MarketplaceJobPayload, unknown, string> | null = null;
 let worker: Worker<MarketplaceJobPayload, unknown, string> | null = null;
+let workerStartPromise: Promise<void> | null = null;
+let workerStopPromise: Promise<void> | null = null;
+let queueClosePromise: Promise<void> | null = null;
+let workerReady = false;
+let queueClosing = false;
 
 function buildConnection(maxRetriesPerRequest: number | null): ConnectionOptions | null {
   if (!env.REDIS_URL) return null;
@@ -62,6 +68,7 @@ function buildConnection(maxRetriesPerRequest: number | null): ConnectionOptions
     username: url.username || undefined,
     password: url.password || undefined,
     db: Number(url.pathname.replace("/", "") || 0),
+    tls: url.protocol === "rediss:" ? {} : undefined,
     maxRetriesPerRequest
   };
 }
@@ -77,6 +84,7 @@ function getWorkerConnection() {
 }
 
 export function getJobQueue() {
+  if (queueClosing) return null;
   const redis = getQueueConnection();
   if (!redis) return null;
   if (!queue) {
@@ -326,30 +334,87 @@ async function processReconciliationDaily() {
 }
 
 export function startJobWorker() {
-  if (!env.JOB_WORKER_ENABLED || worker) return;
-  const redis = getWorkerConnection();
-  if (!redis) return;
+  if (workerStartPromise) return workerStartPromise;
+  if (workerStopPromise) return Promise.reject(new Error("Job worker is shutting down"));
 
-  worker = new Worker<MarketplaceJobPayload, unknown, string>(
-    "marketplace",
-    async (job) => {
-      if (job.name === "escrow_release") await processEscrowRelease(job.data.orderId);
-      if (job.name === "dispute_timer") await processDisputeTimers(job.data.disputeId);
-      if (job.name === "payout") await processPayout(job.data.userId);
-      if (job.name === "notification_delivery" || job.name === "email_notification") await processNotificationDelivery(job.data);
-      if (job.name === "reconciliation_daily") await processReconciliationDaily();
-      if (job.name === "storage_cleanup") await cleanupTemporaryStorageObjects();
-    },
-    { connection: redis, concurrency: 5 }
-  );
+  workerStartPromise = (async () => {
+    const redis = getWorkerConnection();
+    if (!redis) throw new Error("REDIS_URL is required by the job worker");
 
-  worker.on("completed", (job) => {
-    jobProcessedTotal.labels("marketplace", job.name, "completed").inc();
-  });
-  worker.on("failed", (job, error) => {
-    jobProcessedTotal.labels("marketplace", job?.name ?? "unknown", "failed").inc();
-    logger.error({ jobId: job?.id, name: job?.name, error }, "job_failed");
-  });
+    worker = new Worker<MarketplaceJobPayload, unknown, string>(
+      "marketplace",
+      async (job) => {
+        if (job.name === "escrow_release") await processEscrowRelease(job.data.orderId);
+        if (job.name === "dispute_timer") await processDisputeTimers(job.data.disputeId);
+        if (job.name === "payout") await processPayout(job.data.userId);
+        if (job.name === "notification_delivery" || job.name === "email_notification") await processNotificationDelivery(job.data);
+        if (job.name === "reconciliation_daily") await processReconciliationDaily();
+        if (job.name === "storage_cleanup") await cleanupTemporaryStorageObjects();
+      },
+      { connection: redis, concurrency: 5 }
+    );
 
-  scheduleRecurringJobs().catch((error) => logger.error({ error }, "job_schedule_failed"));
+    worker.on("completed", (job) => {
+      jobProcessedTotal.labels("marketplace", job.name, "completed").inc();
+    });
+    worker.on("failed", (job, error) => {
+      jobProcessedTotal.labels("marketplace", job?.name ?? "unknown", "failed").inc();
+      logger.error({ jobId: job?.id, name: job?.name, error }, "job_failed");
+    });
+    worker.on("error", (error) => {
+      workerReady = false;
+      logger.error({ error }, "job_worker_error");
+    });
+    worker.on("ready", () => {
+      workerReady = true;
+    });
+    worker.on("closing", () => {
+      workerReady = false;
+    });
+
+    await worker.waitUntilReady();
+    await scheduleRecurringJobs();
+    workerReady = true;
+    logger.info("job_worker_started");
+  })();
+  return workerStartPromise;
+}
+
+export function getJobWorkerReadiness() {
+  return Boolean(worker && workerReady && worker.isRunning());
+}
+
+export function stopJobWorker(graceMs = env.SHUTDOWN_GRACE_MS) {
+  if (workerStopPromise) return workerStopPromise;
+  workerReady = false;
+  workerStopPromise = (async () => {
+    const current = worker;
+    if (!current) {
+      await workerStartPromise?.catch(() => undefined);
+      return;
+    }
+
+    // Do not wait for waitUntilReady() before closing. Redis can disappear between
+    // the orchestrator dependency check and this process connecting; in that state
+    // startup is pending indefinitely and SIGTERM must be able to abort it.
+    await drainStartingBullWorker(
+      current,
+      workerStartPromise,
+      graceMs,
+      (error) => {
+        logger.error({ error }, "job_worker_pause_failed");
+      }
+    );
+    worker = null;
+  })();
+  return workerStopPromise;
+}
+
+export function closeJobQueue() {
+  if (queueClosePromise) return queueClosePromise;
+  queueClosing = true;
+  const current = queue;
+  queue = null;
+  queueClosePromise = current ? current.close() : Promise.resolve();
+  return queueClosePromise;
 }

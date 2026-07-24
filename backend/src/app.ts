@@ -35,9 +35,16 @@ import telegramWebhookRoutes from "./modules/notifications/telegram-webhook.rout
 import currencyRoutes from "./modules/currencies/currencies.routes.js";
 import catalogRoutes from "./modules/catalog/catalog.routes.js";
 import adminCatalogRoutes from "./modules/catalog/admin-catalog.routes.js";
-import { getRealtimeReadiness } from "./modules/realtime/realtime-runtime.js";
+import { createApiHealthService } from "./runtime/api-health.js";
+import {
+  HealthService,
+  ReadinessGate,
+  mountHealthRoutes
+} from "./runtime/health.js";
 
-export function createApp(options: { requestLogger?: RequestLogger } = {}) {
+export function createApp(
+  options: { requestLogger?: RequestLogger; healthService?: HealthService } = {}
+) {
   const app = express();
   // TRUST_PROXY=1 is required behind Railway/Fly/Cloudflare so that req.ip resolves
   // to the real client IP from X-Forwarded-For instead of the proxy's address.
@@ -45,6 +52,10 @@ export function createApp(options: { requestLogger?: RequestLogger } = {}) {
   if (env.TRUST_PROXY > 0) {
     app.set("trust proxy", env.TRUST_PROXY);
   }
+  mountHealthRoutes(
+    app,
+    options.healthService ?? createApiHealthService(new ReadinessGate(true))
+  );
   app.use(
     helmet({
       crossOriginResourcePolicy: { policy: "cross-origin" }
@@ -67,11 +78,6 @@ export function createApp(options: { requestLogger?: RequestLogger } = {}) {
   app.use(csrfProtection);
   app.use("/uploads", express.static(path.resolve(env.LOCAL_UPLOAD_DIR)));
 
-  app.get("/health", (_req, res) => res.json({ ok: true }));
-  app.get("/health/ready", (_req, res) => {
-    const readiness = getRealtimeReadiness();
-    res.status(readiness.ok ? 200 : 503).json(readiness);
-  });
   app.get("/metrics", metricsAuth, async (_req, res) => {
     res.setHeader("content-type", "text/plain; version=0.0.4");
     res.send(await metricsText());

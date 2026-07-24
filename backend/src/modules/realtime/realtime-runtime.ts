@@ -26,6 +26,9 @@ const presence = new PresenceService({
   heartbeatMs: env.PRESENCE_HEARTBEAT_MS
 });
 
+let startPromise: Promise<void> | null = null;
+let stopPromise: Promise<void> | null = null;
+
 export function onRealtimeEvent(handler: RealtimeEventHandler) {
   return eventBus.onEvent(handler);
 }
@@ -42,13 +45,22 @@ export function getPresenceService() {
 }
 
 export async function startRealtimeServices() {
-  presence.start();
-  await eventBus.start();
+  if (startPromise) return startPromise;
+  startPromise = (async () => {
+    presence.start();
+    await eventBus.start();
+  })();
+  return startPromise;
 }
 
 export async function stopRealtimeServices() {
-  await presence.stop();
-  await eventBus.stop();
+  if (stopPromise) return stopPromise;
+  stopPromise = (async () => {
+    await startPromise?.catch(() => undefined);
+    await presence.stop();
+    await eventBus.stop();
+  })();
+  return stopPromise;
 }
 
 export function getRealtimeReadiness() {
@@ -62,11 +74,10 @@ export function getRealtimeReadiness() {
     redisState === "ready";
   return {
     ok,
-    status: ok ? "ready" : "degraded",
-    redis: redisState,
-    subscriber: status.subscriberReady ? "ready" : "degraded",
-    presence: redisState === "ready" ? "available" : "unknown",
-    instanceId,
-    lastError: status.lastError
+    configured: status.configured,
+    started: status.started,
+    redisReady: redisState === "ready",
+    subscriberReady: status.subscriberReady,
+    publisherReady: status.publisherReady
   };
 }

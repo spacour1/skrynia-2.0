@@ -12,6 +12,7 @@ import { issueSession, revokeSession } from "../src/modules/auth/session.service
 import {
   attachWebSocketServer,
   sendJson,
+  type WebSocketRuntime,
   WS_CLOSE_SESSION_REVOKED,
   WS_CLOSE_SLOW_CLIENT
 } from "../src/modules/chat/ws.service.js";
@@ -24,13 +25,14 @@ import { closeDb, createConversation, createUser, resetDb } from "./fixtures.js"
 
 const app = createApp();
 let server: http.Server;
+let websocketRuntime: WebSocketRuntime;
 let baseUrl: string;
 let wsUrl: string;
 const liveSockets = new Set<WebSocket>();
 
 beforeAll(async () => {
   server = http.createServer(app);
-  attachWebSocketServer(server);
+  websocketRuntime = attachWebSocketServer(server);
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const { port } = server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${port}`;
@@ -43,6 +45,8 @@ afterEach(() => {
   liveSockets.clear();
 });
 afterAll(async () => {
+  // Drain asynchronous presence cleanup before closing the shared Redis client.
+  await websocketRuntime.beginShutdown();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await getRedis()?.quit();
   await closeDb();
@@ -422,5 +426,24 @@ describe("realtime delivery and connection limits", () => {
     expect(sendJson(slowClient, { type: "notification" })).toBe(false);
     expect(send).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledWith(WS_CLOSE_SLOW_CLIENT, "Slow client");
+  });
+});
+
+describe("websocket graceful shutdown", () => {
+  it("sends a going-away close frame and drains connected clients", async () => {
+    const session = await sessionFor();
+    const ticket = await getTicket(session);
+    const socket = await connectLive(
+      `${wsUrl}?ticket=${encodeURIComponent(ticket)}`
+    );
+    const closed = waitForClose(socket);
+
+    await websocketRuntime.beginShutdown();
+
+    await expect(closed).resolves.toEqual({
+      code: 1001,
+      reason: "Server shutting down"
+    });
+    expect(websocketRuntime.server.clients.size).toBe(0);
   });
 });

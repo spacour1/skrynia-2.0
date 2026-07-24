@@ -24,9 +24,7 @@ import {
 import {
   getPresenceService,
   onRealtimeEvent,
-  publishRealtimeEvent,
-  startRealtimeServices,
-  stopRealtimeServices
+  publishRealtimeEvent
 } from "../realtime/realtime-runtime.js";
 import { sendMessageIdempotently } from "./chat.service.js";
 
@@ -60,6 +58,16 @@ type JwtPayload = {
   sv?: number;
 };
 
+class WebSocketShuttingDownError extends Error {
+  constructor() {
+    super("WebSocket server is shutting down");
+    this.name = "WebSocketShuttingDownError";
+  }
+}
+
+type AssertHandshakeActive = () => void;
+const handshakeAlwaysActive: AssertHandshakeActive = () => undefined;
+
 const clientsByUser = new Map<string, Set<Client>>();
 const clientsByConversation = new Map<string, Set<Client>>();
 // One jti can have several live connections (one per browser tab sharing the same cookies),
@@ -91,7 +99,11 @@ async function verifyUserAlive(userId: string, expectedSessionVersion?: number) 
   return user;
 }
 
-async function authenticateSocket(token: string) {
+async function authenticateSocket(
+  token: string,
+  assertHandshakeActive: AssertHandshakeActive = handshakeAlwaysActive
+) {
+  assertHandshakeActive();
   const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
   if (!payload.jti) throw new Error("Missing session id");
 
@@ -99,8 +111,11 @@ async function authenticateSocket(token: string) {
   if (redis) {
     try {
       const exists = await redis.exists(`session:${payload.jti}`);
+      assertHandshakeActive();
       if (!exists) throw new Error("Session expired");
     } catch (error) {
+      if (error instanceof WebSocketShuttingDownError) throw error;
+      assertHandshakeActive();
       if (error instanceof Error && error.message === "Session expired") throw error;
       // Redis being briefly unreachable shouldn't refuse every WS connection in the
       // building - fall back to trusting the JWT's own signature/expiry, same as the
@@ -111,6 +126,7 @@ async function authenticateSocket(token: string) {
 
   const sessionVersion = payload.sv ?? 1;
   const user = await verifyUserAlive(payload.sub, sessionVersion);
+  assertHandshakeActive();
   return {
     userId: user.id,
     jti: payload.jti,
@@ -126,25 +142,34 @@ async function authenticateSocket(token: string) {
  * The ticket's session is re-checked against Redis revocation and the user row, so a
  * banned user or revoked session can't ride in on a ticket issued moments earlier.
  */
-async function authenticateHandshake(req: http.IncomingMessage) {
+async function authenticateHandshake(
+  req: http.IncomingMessage,
+  assertHandshakeActive: AssertHandshakeActive = handshakeAlwaysActive
+) {
+  assertHandshakeActive();
   const url = new URL(req.url ?? "/ws", "http://localhost");
   const ticket = url.searchParams.get("ticket");
 
   if (ticket) {
     const identity = await consumeWsTicket(ticket);
+    assertHandshakeActive();
     if (!identity) throw new Error("Invalid ticket");
     const redis = getRedis();
     if (redis) {
       try {
         const exists = await redis.exists(`session:${identity.jti}`);
+        assertHandshakeActive();
         if (!exists) throw new Error("Session expired");
       } catch (error) {
+        if (error instanceof WebSocketShuttingDownError) throw error;
+        assertHandshakeActive();
         if (error instanceof Error && error.message === "Session expired") throw error;
         logger.warn({ error, jti: identity.jti }, "ws_session_revocation_check_failed_redis_unavailable");
       }
     }
     const sessionVersion = identity.sessionVersion ?? 1;
     const user = await verifyUserAlive(identity.userId, sessionVersion);
+    assertHandshakeActive();
     return {
       userId: identity.userId,
       jti: identity.jti,
@@ -155,7 +180,9 @@ async function authenticateHandshake(req: http.IncomingMessage) {
 
   const token = readCookie(req.headers.cookie, ACCESS_COOKIE);
   if (!token) throw new Error("Missing token");
-  return authenticateSocket(token);
+  const identity = await authenticateSocket(token, assertHandshakeActive);
+  assertHandshakeActive();
+  return identity;
 }
 
 function allowedOrigins(): Set<string> {
@@ -415,6 +442,12 @@ export function isUserOnline(userId: string) {
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
+export type WebSocketRuntime = {
+  server: WebSocketServer;
+  beginShutdown: () => Promise<void>;
+  forceClose: () => void;
+};
+
 const incomingMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("join_conversation"),
@@ -446,11 +479,42 @@ function sendMessageError(
   });
 }
 
-export function attachWebSocketServer(server: http.Server) {
-  void startRealtimeServices().catch((error) => {
-    logger.warn({ error }, "realtime_services_start_failed_degraded");
-  });
+export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
   const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 64 * 1024 });
+  let activeHandlers = 0;
+  let shuttingDown = false;
+  let shutdownPromise: Promise<void> | null = null;
+  const handlerDrainWaiters = new Set<() => void>();
+
+  const handlerStarted = () => {
+    activeHandlers += 1;
+  };
+  const handlerFinished = () => {
+    activeHandlers = Math.max(0, activeHandlers - 1);
+    if (activeHandlers !== 0) return;
+    for (const resolve of handlerDrainWaiters) resolve();
+    handlerDrainWaiters.clear();
+  };
+  const waitForHandlers = () =>
+    activeHandlers === 0
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => handlerDrainWaiters.add(resolve));
+  const tryStartHandler = () => {
+    if (shuttingDown) return false;
+    handlerStarted();
+    return true;
+  };
+  const assertHandshakeActive = () => {
+    if (shuttingDown) throw new WebSocketShuttingDownError();
+  };
+  const closeForShutdown = (client: Client) => {
+    if (
+      client.readyState === WebSocket.OPEN ||
+      client.readyState === WebSocket.CONNECTING
+    ) {
+      client.close(1001, "Server shutting down");
+    }
+  };
 
   // Server-side heartbeat: ping every 30 s; terminate clients that miss a pong.
   // This cleans up zombie connections (mobile sleep, NAT timeouts) without waiting for
@@ -468,17 +532,77 @@ export function attachWebSocketServer(server: http.Server) {
 
   wss.on("close", () => {
     clearInterval(heartbeat);
-    void stopRealtimeServices();
   });
 
   wss.on("connection", async (client: Client, req) => {
+    // Admission and accounting are one synchronous operation. Once shutdown flips the
+    // gate, an upgrade that was already in the HTTP/WebSocket boundary is closed without
+    // starting authentication or escaping the drain.
+    if (!tryStartHandler()) {
+      closeForShutdown(client);
+      return;
+    }
+
+    let closed = false;
+    let mapsRegistered = false;
+    let metricRegistered = false;
+    let presenceRegistered = false;
+    let presenceRegistration: Promise<unknown> | null = null;
+    let cleanupPromise: Promise<void> | null = null;
+
+    const cleanupConnection = () => {
+      if (cleanupPromise) return cleanupPromise;
+      cleanupPromise = (async () => {
+        if (mapsRegistered) {
+          leaveAll(client);
+          mapsRegistered = false;
+        }
+        if (metricRegistered) {
+          wsConnectionsActive.dec();
+          metricRegistered = false;
+        }
+        if (presenceRegistration) {
+          try {
+            await presenceRegistration;
+          } catch (error) {
+            logger.warn(
+              { error, userId: client.userId, connectionId: client.connectionId },
+              "ws_presence_register_failed"
+            );
+          }
+        }
+        if (presenceRegistered && client.connectionId) {
+          await getPresenceService().unregister(client.connectionId);
+          presenceRegistered = false;
+        }
+      })();
+      return cleanupPromise;
+    };
+
+    // Install cleanup before the first await. A peer can disappear while ticket/DB
+    // authentication is pending, and shutdown must also wait for async presence cleanup.
+    client.on("close", () => {
+      closed = true;
+      handlerStarted();
+      void cleanupConnection()
+        .catch((error) => {
+          logger.warn(
+            { error, userId: client.userId, connectionId: client.connectionId },
+            "ws_connection_cleanup_failed"
+          );
+        })
+        .finally(handlerFinished);
+    });
+
     client.isAlive = true;
     client.on("pong", () => { client.isAlive = true; });
 
     try {
       if (!isOriginAllowed(req)) throw new Error("Origin not allowed");
 
-      const { userId, jti, sessionVersion, emailVerified } = await authenticateHandshake(req);
+      const { userId, jti, sessionVersion, emailVerified } =
+        await authenticateHandshake(req, assertHandshakeActive);
+      if (closed || client.readyState !== WebSocket.OPEN) return;
       if ((clientsByUser.get(userId)?.size ?? 0) >= MAX_CONNECTIONS_PER_USER) {
         throw new Error("Too many connections");
       }
@@ -488,6 +612,23 @@ export function attachWebSocketServer(server: http.Server) {
       client.connectionId = randomUUID();
       client.emailVerified = emailVerified;
       client.rooms = new Set();
+
+      // Presence is part of handshake admission, not a detached side effect. If shutdown
+      // starts while Redis is pending, the close cleanup waits for registration and then
+      // compensates with unregister before the runtime reports drained.
+      presenceRegistration = getPresenceService()
+        .register(userId, client.connectionId)
+        .then((result) => {
+          presenceRegistered = true;
+          return result;
+        });
+      await presenceRegistration;
+      assertHandshakeActive();
+      if (closed || client.readyState !== WebSocket.OPEN) {
+        await cleanupConnection();
+        return;
+      }
+
       const sameSession = clientsByJti.get(jti) ?? new Set<Client>();
       sameSession.add(client);
       clientsByJti.set(jti, sameSession);
@@ -495,12 +636,17 @@ export function attachWebSocketServer(server: http.Server) {
       const userClients = clientsByUser.get(client.userId) ?? new Set<Client>();
       userClients.add(client);
       clientsByUser.set(client.userId, userClients);
-      void getPresenceService().register(userId, client.connectionId);
+      mapsRegistered = true;
 
       wsConnectionsActive.inc();
+      metricRegistered = true;
       sendJson(client, { type: "connected" });
 
       client.on("message", (raw) => {
+        if (shuttingDown) {
+          closeForShutdown(client);
+          return;
+        }
         // Frame budget and handler bound are checked synchronously, before any parsing
         // or async work, so a flood cannot fan out into parallel DB checks.
         const frameBudget = trackFrame(client);
@@ -528,6 +674,11 @@ export function attachWebSocketServer(server: http.Server) {
           return;
         }
         client.pendingHandlers = (client.pendingHandlers ?? 0) + 1;
+        if (!tryStartHandler()) {
+          client.pendingHandlers = Math.max(0, client.pendingHandlers - 1);
+          closeForShutdown(client);
+          return;
+        }
         void (async () => {
           let parsed: unknown;
           try {
@@ -566,6 +717,7 @@ export function attachWebSocketServer(server: http.Server) {
           try {
             await verifyUserAlive(client.userId!, client.sessionVersion);
           } catch (authError) {
+            if (shuttingDown) return;
             const banned = authError instanceof ApiError && authError.status === 403;
             client.close(
               banned ? WS_CLOSE_USER_BANNED : WS_CLOSE_SESSION_REVOKED,
@@ -573,6 +725,7 @@ export function attachWebSocketServer(server: http.Server) {
             );
             return;
           }
+          if (shuttingDown) return;
 
           if (msg.type === "join_conversation") {
             if (client.rooms?.has(msg.conversationId)) {
@@ -593,7 +746,12 @@ export function attachWebSocketServer(server: http.Server) {
               });
               return;
             }
-            if (!(await canAccessConversation(msg.conversationId, client.userId!))) {
+            const canAccess = await canAccessConversation(
+              msg.conversationId,
+              client.userId!
+            );
+            if (shuttingDown) return;
+            if (!canAccess) {
               sendJson(client, {
                 type: "error",
                 code: "conversation_forbidden",
@@ -653,6 +811,7 @@ export function attachWebSocketServer(server: http.Server) {
               body: msg.body,
               attachmentUploadId: msg.attachmentUploadId
             });
+            if (shuttingDown) return;
             // ACK is queued before the room broadcast so the sender can replace its
             // optimistic row before receiving the normal conversation event.
             sendJson(client, {
@@ -662,6 +821,7 @@ export function attachWebSocketServer(server: http.Server) {
               replayed: !result.created
             });
           } catch (sendError) {
+            if (shuttingDown) return;
             const code = sendError instanceof ApiError ? sendError.code : undefined;
             const message =
               sendError instanceof ApiError
@@ -679,6 +839,7 @@ export function attachWebSocketServer(server: http.Server) {
         })()
           .catch((error) => {
             logger.error({ error, userId: client.userId }, "ws_message_handler_failed");
+            if (shuttingDown) return;
             sendJson(client, {
               type: "error",
               code: "internal_error",
@@ -687,22 +848,53 @@ export function attachWebSocketServer(server: http.Server) {
           })
           .finally(() => {
             client.pendingHandlers = Math.max(0, (client.pendingHandlers ?? 1) - 1);
+            handlerFinished();
           });
       });
-
-      client.on("close", () => {
-        wsConnectionsActive.dec();
-        leaveAll(client);
-        if (client.connectionId) {
-          void getPresenceService().unregister(client.connectionId);
-        }
-      });
     } catch (err) {
+      if (err instanceof WebSocketShuttingDownError || shuttingDown) {
+        closeForShutdown(client);
+        return;
+      }
       const reason = err instanceof Error ? err.message : "unknown";
       wsConnectionFailuresTotal.labels(reason.slice(0, 64)).inc();
       client.close(1008, "Unauthorized");
+    } finally {
+      handlerFinished();
     }
   });
 
-  return wss;
+  const beginShutdown = () => {
+    if (shutdownPromise) return shutdownPromise;
+    shuttingDown = true;
+    clearInterval(heartbeat);
+    const websocketClosed = new Promise<void>((resolve) => {
+      try {
+        wss.close(() => resolve());
+      } catch {
+        resolve();
+      }
+      for (const client of wss.clients) {
+        closeForShutdown(client as Client);
+      }
+    });
+    // Close events synchronously admit their async cleanup before the WebSocketServer
+    // close callback. Waiting for handlers *after* that callback ensures those presence
+    // unregister tasks cannot race an earlier already-resolved zero-handler snapshot.
+    shutdownPromise = websocketClosed.then(() => waitForHandlers());
+    return shutdownPromise;
+  };
+
+  const forceClose = () => {
+    shuttingDown = true;
+    clearInterval(heartbeat);
+    for (const client of wss.clients) client.terminate();
+    try {
+      wss.close();
+    } catch {
+      // The listener may already be closed; upgraded sockets were terminated above.
+    }
+  };
+
+  return { server: wss, beginShutdown, forceClose };
 }

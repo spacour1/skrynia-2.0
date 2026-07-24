@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import { z } from "zod";
+import { strictBooleanEnvSchema } from "./env-boolean.js";
 
 dotenv.config();
 
@@ -12,6 +13,13 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().optional(),
   PG_POOL_MAX: z.coerce.number().int().min(1).max(200).default(20),
+  PG_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(100).max(30_000).default(3_000),
+  HEALTHCHECK_TIMEOUT_MS: z.coerce.number().int().min(100).max(10_000).default(1_000),
+  SHUTDOWN_GRACE_MS: z.coerce.number().int().min(1_000).max(120_000).default(20_000),
+  SHUTDOWN_HARD_TIMEOUT_MS: z.coerce.number().int().min(2_000).max(180_000).default(30_000),
+  RUNTIME_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().min(1_000).default(10_000),
+  RUNTIME_HEARTBEAT_TTL_MS: z.coerce.number().int().min(3_000).default(30_000),
+  RUNTIME_INSTANCE_ID: z.string().trim().min(1).max(200).optional(),
   JWT_SECRET: z.string().min(24).default("dev-secret-change-me-for-production"),
   TWO_FACTOR_ENCRYPTION_KEY: z
     .string()
@@ -23,7 +31,7 @@ const schema = z.object({
   // Reserved for a future opt-in "stay signed in on this device" toggle; until that ships,
   // every login is persistent and REFRESH_TOKEN_TTL_DAYS alone governs session lifetime.
   SESSION_REMEMBER_ME_DAYS: z.coerce.number().int().min(1).default(90),
-  REFRESH_ROTATION_ENABLED: z.coerce.boolean().default(true),
+  REFRESH_ROTATION_ENABLED: strictBooleanEnvSchema.default(true),
   COOKIE_DOMAIN: z.string().optional(),
   FRONTEND_URL: z.string().default("http://localhost:3000"),
   // Comma-separated extra origins allowed to open WebSocket connections (besides FRONTEND_URL).
@@ -58,8 +66,8 @@ const schema = z.object({
   SENTRY_DSN: z.string().optional(),
   SENTRY_RELEASE: z.string().optional(),
   SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).optional(),
-  JOB_WORKER_ENABLED: z.coerce.boolean().default(true),
-  OUTBOX_WORKER_ENABLED: z.coerce.boolean().optional(),
+  JOB_WORKER_ENABLED: strictBooleanEnvSchema.default(true),
+  OUTBOX_WORKER_ENABLED: strictBooleanEnvSchema.optional(),
   OUTBOX_POLL_INTERVAL_MS: z.coerce.number().int().min(50).default(1_000),
   OUTBOX_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(25),
   OUTBOX_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(5),
@@ -131,11 +139,24 @@ const schema = z.object({
   WEBHOOK_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(60),
   METRICS_USER: z.string().default("metrics"),
   METRICS_PASSWORD: z.string().default("dev-metrics-password-change-me"),
-  // Lets the dev/test payment-simulation endpoints (success/failure/wait_accept) run in a
-  // deployed-but-not-quite-production environment (e.g. a staging demo) without flipping
-  // NODE_ENV away from "production". Defaults closed everywhere else stays disabled.
-  ENABLE_TEST_PAYMENTS: z.coerce.boolean().default(false)
+  // Second half of the test-payment safety gate. Routes additionally require
+  // NODE_ENV=test, so this flag can never enable mock capture in production/staging.
+  ENABLE_TEST_PAYMENTS: strictBooleanEnvSchema.default(false)
 }).superRefine((value, ctx) => {
+  if (value.SHUTDOWN_HARD_TIMEOUT_MS <= value.SHUTDOWN_GRACE_MS) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["SHUTDOWN_HARD_TIMEOUT_MS"],
+      message: "SHUTDOWN_HARD_TIMEOUT_MS must exceed SHUTDOWN_GRACE_MS"
+    });
+  }
+  if (value.RUNTIME_HEARTBEAT_TTL_MS < value.RUNTIME_HEARTBEAT_INTERVAL_MS * 2) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["RUNTIME_HEARTBEAT_TTL_MS"],
+      message: "RUNTIME_HEARTBEAT_TTL_MS must be at least twice RUNTIME_HEARTBEAT_INTERVAL_MS"
+    });
+  }
   if (value.PRESENCE_HEARTBEAT_MS * 2 >= value.PRESENCE_TTL_MS) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

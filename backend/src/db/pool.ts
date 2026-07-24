@@ -8,8 +8,17 @@ import { currentTraceId } from "../common/trace-context.js";
 export const pool = new pg.Pool({
   connectionString: env.DATABASE_URL,
   max: env.PG_POOL_MAX,
+  connectionTimeoutMillis: env.PG_CONNECTION_TIMEOUT_MS,
   idleTimeoutMillis: 30_000
 });
+
+let poolClosePromise: Promise<void> | null = null;
+
+/** The process entrypoint is the only owner allowed to close the shared pool. */
+export function closeDbPool() {
+  poolClosePromise ??= pool.end();
+  return poolClosePromise;
+}
 
 export type DbClient = pg.PoolClient | pg.Pool;
 

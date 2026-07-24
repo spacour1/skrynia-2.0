@@ -13,6 +13,7 @@ import {
   outboxReturningColumns,
   type DomainOutboxEvent
 } from "./outbox.service.js";
+import { BackgroundPoller } from "../../runtime/background-poller.js";
 
 export type DomainEventHandler = (event: DomainOutboxEvent) => Promise<void>;
 
@@ -35,9 +36,11 @@ type ProcessOutboxResult = {
 const LAST_ERROR_MAX_LENGTH = 2_000;
 const MAX_BACKOFF_MS = 24 * 60 * 60 * 1_000;
 
-let timer: NodeJS.Timeout | null = null;
-let tickRunning = false;
 const instanceWorkerId = `${os.hostname()}:${process.pid}:${randomUUID()}`;
+let poller: BackgroundPoller | null = null;
+let startPromise: Promise<void> | null = null;
+let stopPromise: Promise<void> | null = null;
+let outboxReady = false;
 
 function errorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
@@ -348,30 +351,47 @@ export async function retryFailedOutboxEvents(input: {
   return result.rows.map((row) => row.id);
 }
 
-async function runTick() {
-  if (tickRunning) return;
-  tickRunning = true;
-  try {
-    do {
-      const result = await processOutboxBatch();
-      if (result.claimed < env.OUTBOX_BATCH_SIZE) break;
-    } while (true);
-  } catch (error) {
-    logger.error({ error, workerId: instanceWorkerId }, "outbox_worker_tick_failed");
-  } finally {
-    tickRunning = false;
-  }
+async function runTick(shouldStop: () => boolean) {
+  do {
+    if (shouldStop()) return;
+    const result = await processOutboxBatch();
+    if (result.claimed < env.OUTBOX_BATCH_SIZE) break;
+  } while (!shouldStop());
+  outboxReady = true;
 }
 
 export function startOutboxWorker() {
-  if (!env.OUTBOX_WORKER_ENABLED || timer) return;
-  void runTick();
-  timer = setInterval(() => void runTick(), env.OUTBOX_POLL_INTERVAL_MS);
-  timer.unref();
-  logger.info({ workerId: instanceWorkerId }, "outbox_worker_started");
+  if (startPromise) return startPromise;
+  if (stopPromise) return Promise.reject(new Error("Outbox worker is shutting down"));
+  poller = new BackgroundPoller({
+    intervalMs: env.OUTBOX_POLL_INTERVAL_MS,
+    task: runTick,
+    onError: (error) => {
+      outboxReady = false;
+      logger.error({ error, workerId: instanceWorkerId }, "outbox_worker_tick_failed");
+    }
+  });
+  startPromise = poller.start().then(() => {
+    // Readiness means this role owns a live poller and can make progress, not that
+    // the entire pre-existing backlog has already drained. The heartbeat performs
+    // its own bounded PostgreSQL probe; a failed tick flips this back to false.
+    outboxReady = true;
+    logger.info({ workerId: instanceWorkerId }, "outbox_worker_started");
+  });
+  return startPromise;
 }
 
 export function stopOutboxWorker() {
-  if (timer) clearInterval(timer);
-  timer = null;
+  if (stopPromise) return stopPromise;
+  outboxReady = false;
+  const current = poller;
+  stopPromise = (async () => {
+    await current?.stop();
+    poller = null;
+  })();
+  return stopPromise;
+}
+
+export function getOutboxWorkerReadiness() {
+  return outboxReady && !poller?.isStopping();
 }

@@ -7,17 +7,18 @@ import { env } from "../../config/env.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { simulateTestPaymentFailure, simulateTestPaymentSuccess, simulateTestPaymentWaitAccept } from "./test-payments.service.js";
 import { mapOrderRowDto } from "../orders/orders.dto.js";
+import { testPaymentsEnabled } from "./test-payments.gate.js";
 
 const router = Router();
 
 /**
- * A buyer's own card/Monobank/wallet test panel — never a real payment. Stays available
- * available automatically only under NODE_ENV=test. Development/staging demos must
- * opt in explicitly with ENABLE_TEST_PAYMENTS so a non-production deployment cannot
- * silently expose a free escrow path.
+ * A buyer's own card/Monobank/wallet test panel — never a real payment. Both guards
+ * are required: the process must be an explicit test environment and the feature flag
+ * must be enabled. A production or staging process can therefore never expose a free
+ * escrow path merely because one boolean was misconfigured.
  */
 function assertTestPaymentsEnabled() {
-  if (env.NODE_ENV !== "test" && !env.ENABLE_TEST_PAYMENTS) {
+  if (!testPaymentsEnabled(env)) {
     throw forbidden("Test payments are disabled on this server");
   }
 }

@@ -191,7 +191,12 @@ export function ChatPanel({
       };
       setMessages((current) => [...current, optimistic]);
 
-      const saved = await deliverMessage(optimistic);
+      // React state does not update synchronously. When ensureConversation creates the
+      // first conversation, activeConversationId still belongs to the previous render at
+      // this point. Pass the resolved target explicitly so the first message can use the
+      // already-connected socket and receive its normal message_ack instead of falling
+      // back to REST.
+      const saved = await deliverMessage(optimistic, targetConversationId);
       markMessageSent(pendingClientMessageId, saved);
       queryClient.invalidateQueries({ queryKey: ["chat-conversations"] });
       queryClient.invalidateQueries({ queryKey: ["chat-conversations-grouped"] });
@@ -220,10 +225,13 @@ export function ChatPanel({
     }
   }
 
-  async function deliverMessage(message: Message): Promise<Message> {
+  async function deliverMessage(
+    message: Message,
+    selectedConversationId = activeConversationId
+  ): Promise<Message> {
     const conversation = message.conversationId!;
     if (
-      conversation === activeConversationId &&
+      conversation === selectedConversationId &&
       realtimeStatus.status === "connected" &&
       message.clientMessageId
     ) {

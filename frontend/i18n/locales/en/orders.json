@@ -32,7 +32,21 @@
     "disputePlaceholder": "Open dispute reason",
     "openDispute": "Open dispute",
     "reviewPlaceholder": "Review",
-    "submitReview": "Submit review"
+    "submitReview": "Submit review",
+    "loadingDispute": "Loading dispute...",
+    "disputeUnavailable": "The dispute is temporarily unavailable.",
+    "disputeThreadTitle": "Dispute discussion",
+    "disputeThreadHelp": "Buyer, seller, and administrators can review this separate evidence thread.",
+    "disputeOpen": "Open",
+    "disputeResolved": "Resolved",
+    "originalDisputeReason": "Original reason (immutable)",
+    "disputeMessages": "Dispute messages",
+    "noDisputeMessages": "No participant replies yet.",
+    "disputeReply": "Add evidence or a reply",
+    "disputeReplyPlaceholder": "Describe the facts relevant to this dispute",
+    "sendDisputeReply": "Send reply",
+    "sendingDisputeReply": "Sending...",
+    "resolvedDisputeReadOnly": "This dispute is resolved. The discussion is now read-only."
   },
   "dashboard": {
     "signedInAs": "Signed in as",

@@ -84,6 +84,20 @@ After the dev stack is running:
 The script logs in as buyer and seller, creates a listing, creates an order,
 captures mock payment, starts delivery, confirms completion, and leaves a review.
 
+## Playwright E2E
+
+Run the isolated production-shaped browser suite:
+
+```bash
+node e2e/scripts/run.mjs
+```
+
+It creates disposable PostgreSQL/Redis volumes, migrates and seeds them, starts
+separate API/worker/outbox/frontend services, runs Chromium with one worker, and
+always removes containers and volumes. Real payment APIs are never used. See
+[`docs/e2e.md`](docs/e2e.md) for safety gates, covered flows, and failure
+artifacts.
+
 ## Required Checks
 
 ```bash
@@ -108,6 +122,7 @@ docker compose -f docker-compose.dev.yml exec -T -e TEST_DATABASE_URL=postgres:/
 - Fast repository map: `docs/agent-map.md`
 - Architecture: `docs/architecture.md`
 - Testing: `docs/testing.md`
+- Playwright E2E: `docs/e2e.md`
 - Deployment: `docs/deployment.md`
 - Product behavior: `docs/product-behavior.md`
 - Email verification: `docs/email-verification.md`

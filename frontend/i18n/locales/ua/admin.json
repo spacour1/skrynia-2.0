@@ -26,6 +26,16 @@
     "supportNoTickets": "Звернень поки немає.",
     "mediaTitle": "Модерація зображень товарів",
     "mediaSubtitle": "Відхилені зображення приховуються з публічних карток, але залишаються видимі продавцю.",
-    "mediaNone": "Зображень поки немає."
+    "mediaNone": "Зображень поки немає.",
+    "originalDisputeReason": "Початкова причина спору (незмінна)",
+    "disputeParticipantMessages": "Повідомлення учасників спору",
+    "disputeParticipantMessagesHelp": "Докази та відповіді з окремої стрічки спору.",
+    "noDisputeMessages": "Повідомлень учасників спору ще немає.",
+    "disputeMessageHidden": "Приховано модерацією",
+    "disputeAuthorRole": {
+      "user": "учасник",
+      "moderator": "модератор",
+      "admin": "адміністратор"
+    }
   }
 }

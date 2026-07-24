@@ -122,7 +122,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: [backend, frontend]
+        project: [backend, frontend, e2e]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -178,3 +178,28 @@ jobs:
         run: docker compose --profile '*' config --quiet
       - name: Build production images
         run: docker compose --profile '*' build
+
+  e2e:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Validate isolated E2E Compose topology
+        run: docker compose -f docker-compose.e2e.yml config --quiet
+      - name: Run isolated Chromium E2E suite
+        run: node e2e/scripts/run.mjs
+      - name: Upload Playwright traces, media, report, and stack logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            e2e/test-results
+            e2e/playwright-report
+          if-no-files-found: warn
+          retention-days: 7

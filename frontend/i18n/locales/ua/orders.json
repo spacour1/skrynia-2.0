@@ -32,7 +32,21 @@
     "disputePlaceholder": "Причина спору",
     "openDispute": "Відкрити спір",
     "reviewPlaceholder": "Відгук",
-    "submitReview": "Залишити відгук"
+    "submitReview": "Залишити відгук",
+    "loadingDispute": "Завантаження спору...",
+    "disputeUnavailable": "Спір тимчасово недоступний.",
+    "disputeThreadTitle": "Обговорення спору",
+    "disputeThreadHelp": "Покупець, продавець і адміністратори бачать цю окрему стрічку доказів.",
+    "disputeOpen": "Відкритий",
+    "disputeResolved": "Вирішений",
+    "originalDisputeReason": "Початкова причина (незмінна)",
+    "disputeMessages": "Повідомлення спору",
+    "noDisputeMessages": "Відповідей учасників ще немає.",
+    "disputeReply": "Додати доказ або відповідь",
+    "disputeReplyPlaceholder": "Опишіть факти, що стосуються цього спору",
+    "sendDisputeReply": "Надіслати відповідь",
+    "sendingDisputeReply": "Надсилання...",
+    "resolvedDisputeReadOnly": "Спір вирішено. Обговорення доступне лише для читання."
   },
   "dashboard": {
     "signedInAs": "Ви увійшли як",

@@ -26,6 +26,16 @@
     "supportNoTickets": "Обращений пока нет.",
     "mediaTitle": "Модерация изображений товаров",
     "mediaSubtitle": "Отклонённые изображения скрываются из публичных карточек, но остаются видны продавцу.",
-    "mediaNone": "Изображений пока нет."
+    "mediaNone": "Изображений пока нет.",
+    "originalDisputeReason": "Исходная причина спора (неизменяемая)",
+    "disputeParticipantMessages": "Сообщения участников спора",
+    "disputeParticipantMessagesHelp": "Доказательства и ответы из отдельной ленты спора.",
+    "noDisputeMessages": "Сообщений участников спора пока нет.",
+    "disputeMessageHidden": "Скрыто модерацией",
+    "disputeAuthorRole": {
+      "user": "участник",
+      "moderator": "модератор",
+      "admin": "администратор"
+    }
   }
 }

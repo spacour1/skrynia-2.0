@@ -26,6 +26,16 @@
     "supportNoTickets": "No tickets yet.",
     "mediaTitle": "Product image moderation",
     "mediaSubtitle": "Rejected images are hidden from public listings but stay visible to the seller.",
-    "mediaNone": "No images yet."
+    "mediaNone": "No images yet.",
+    "originalDisputeReason": "Original dispute reason (immutable)",
+    "disputeParticipantMessages": "Participant dispute messages",
+    "disputeParticipantMessagesHelp": "Evidence and replies sent in the dedicated dispute thread.",
+    "noDisputeMessages": "No participant dispute messages yet.",
+    "disputeMessageHidden": "Hidden by moderation",
+    "disputeAuthorRole": {
+      "user": "participant",
+      "moderator": "moderator",
+      "admin": "administrator"
+    }
   }
 }

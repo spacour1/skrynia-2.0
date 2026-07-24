@@ -21,6 +21,7 @@ import {
 } from "./dispute-messages.service.js";
 import { resolveDisputeResolution, type DisputeResolutionResult } from "./dispute-resolution.service.js";
 import { mapOrderRowDto } from "../orders/orders.dto.js";
+import { cacheDelPattern } from "../../common/redis.js";
 
 const router = Router();
 
@@ -77,7 +78,7 @@ router.post(
     // Order lock, status flip, and dispute creation/check are one transaction. There is no
     // window where the order says 'disputed' but no dispute row exists, and two concurrent
     // opens (or an open racing a confirm/deliver transition) serialize on the row lock.
-    const { dispute, repeated, messageSuggested } = await inTx(async (client) => {
+    const { dispute, repeated, messageSuggested, buyerId, sellerId } = await inTx(async (client) => {
       const order = await client.query(`select * from orders where id = $1 for update`, [orderId]);
       const orderRow = order.rows[0];
       if (!orderRow) throw notFound("Order not found");
@@ -100,7 +101,9 @@ router.post(
           repeated: true,
           messageSuggested:
             existingDispute.opened_by !== req.user.id ||
-            existingDispute.reason !== input.reason
+            existingDispute.reason !== input.reason,
+          buyerId: orderRow.buyer_id as string,
+          sellerId: orderRow.seller_id as string
         };
       }
 
@@ -149,7 +152,9 @@ router.post(
       return {
         dispute: createdDispute,
         repeated: false,
-        messageSuggested: false
+        messageSuggested: false,
+        buyerId: orderRow.buyer_id as string,
+        sellerId: orderRow.seller_id as string
       };
     });
 
@@ -160,6 +165,15 @@ router.post(
         messageSuggested
       });
     }
+
+    // The order detail includes both status and its event timeline. Opening a dispute
+    // changes both inside the transaction above, so every participant/admin detail and
+    // list variant must miss its previous 15-second cache immediately.
+    await Promise.all([
+      cacheDelPattern(`order:${orderId}:*`),
+      cacheDelPattern(`orders:${buyerId}:*`),
+      cacheDelPattern(`orders:${sellerId}:*`)
+    ]);
 
     res.status(201).json({ dispute: participantDisputeDto(dispute) });
   })

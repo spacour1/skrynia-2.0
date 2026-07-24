@@ -32,6 +32,7 @@ import { ManualPaymentPanel } from "@/components/ManualPaymentPanel";
 import { redirectToWayforpay, type WayforpayCheckout } from "@/lib/wayforpay";
 import { captureEvent } from "@/lib/posthog";
 import { formatDate as formatLocaleDate } from "@/lib/locale-format";
+import { DisputeParticipantThread } from "@/components/DisputeParticipantThread";
 
 // The backend denies test-payment routes unless explicitly enabled, so never expose
 // the panel merely because this is a development build.
@@ -156,6 +157,8 @@ export default function OrderPage({ params }: { params: { id: string } }) {
   const productTitle = item.productTitle ?? "Заказ";
   const activeStep = Math.max(0, statusSteps.findIndex((step) => step.key === item.status));
   const canDispute = ["paid", "in_progress", "delivered"].includes(item.status);
+  const hasDispute =
+    item.status === "disputed" || events.some((event) => event.type === "disputed");
 
   const roleLabel = isBuyer ? "Вы покупатель" : isSeller ? "Вы продавец" : "Участник сделки";
   const nextHint = getNextHint(item.status, isBuyer, isSeller);
@@ -212,6 +215,8 @@ export default function OrderPage({ params }: { params: { id: string } }) {
             <InfoTile icon={ShieldCheck} label="Защита" value="Escrow активен" />
           </div>
         </section>
+
+        {hasDispute ? <DisputeParticipantThread orderId={params.id} /> : null}
 
         <section className="app-card p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">

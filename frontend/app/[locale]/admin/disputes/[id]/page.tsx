@@ -30,6 +30,17 @@ type DisputeMessage = {
   createdAt: string;
 };
 
+type ParticipantDisputeMessage = {
+  id: string;
+  authorDisplayName: string;
+  authorRole: string;
+  body: string;
+  attachmentUrl?: string | null;
+  hiddenAt?: string | null;
+  moderationReason?: string | null;
+  createdAt: string;
+};
+
 export default function AdminDisputeDetailPage({ params }: { params: { id: string } }) {
   return (
     <RequireAuth roles={["admin"]}>
@@ -45,7 +56,12 @@ function AdminDisputeDetailContent({ params }: { params: { id: string } }) {
   const [adminNote, setAdminNote] = useState("");
   const detail = useQuery({
     queryKey: ["admin-dispute", params.id],
-    queryFn: () => apiFetch<{ dispute: DisputeDetail; messages: DisputeMessage[] }>(`/disputes/${params.id}`)
+    queryFn: () =>
+      apiFetch<{
+        dispute: DisputeDetail;
+        messages: DisputeMessage[];
+        disputeMessages: ParticipantDisputeMessage[];
+      }>(`/disputes/${params.id}`)
   });
   const resolve = useMutation({
     mutationFn: (decision: "refund" | "release") =>
@@ -84,7 +100,12 @@ function AdminDisputeDetailContent({ params }: { params: { id: string } }) {
           </div>
           <StatusBadge status={dispute.status} />
         </div>
-        <p className="mt-4 rounded-md border border-line bg-panel p-3 text-sm">{dispute.reason}</p>
+        <div className="mt-4 rounded-md border border-line bg-panel p-3">
+          <p className="text-xs font-bold uppercase text-muted">{t("admin.originalDisputeReason")}</p>
+          <p className="mt-2 whitespace-pre-wrap text-sm" data-testid="admin-original-dispute-reason">
+            {dispute.reason}
+          </p>
+        </div>
       </section>
 
       {dispute.status === "open" && (
@@ -127,6 +148,42 @@ function AdminDisputeDetailContent({ params }: { params: { id: string } }) {
             </article>
           ))}
           {!detail.data.messages.length && <p className="text-sm text-muted">{t("admin.noChat")}</p>}
+        </div>
+      </section>
+
+      <section className="app-card p-5" data-testid="admin-dispute-messages">
+        <h2 className="text-lg font-semibold">{t("admin.disputeParticipantMessages")}</h2>
+        <p className="mt-1 text-sm text-muted">{t("admin.disputeParticipantMessagesHelp")}</p>
+        <div className="mt-4 space-y-3">
+          {detail.data.disputeMessages.map((message) => (
+            <article
+              key={message.id}
+              className="rounded-md border border-line bg-surface/50 p-3"
+              data-testid="admin-dispute-message"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <span className="font-semibold">
+                  {message.authorDisplayName} · {t(`admin.disputeAuthorRole.${message.authorRole}`)}
+                </span>
+                <span className="text-muted">{formatDate(message.createdAt, locale)}</span>
+              </div>
+              <p className="mt-2 whitespace-pre-wrap text-sm">{message.body}</p>
+              {message.hiddenAt ? (
+                <p className="mt-2 text-xs font-bold text-rose-500">
+                  {t("admin.disputeMessageHidden")}
+                  {message.moderationReason ? `: ${message.moderationReason}` : ""}
+                </p>
+              ) : null}
+              {message.attachmentUrl ? (
+                <a className="mt-2 block text-sm text-brand hover:underline" href={message.attachmentUrl}>
+                  {t("chat.attachment")}
+                </a>
+              ) : null}
+            </article>
+          ))}
+          {!detail.data.disputeMessages.length ? (
+            <p className="text-sm text-muted">{t("admin.noDisputeMessages")}</p>
+          ) : null}
         </div>
       </section>
     </div>

@@ -1,0 +1,204 @@
+x-backend-image: &backend-image
+  image: skrynia-e2e-backend:${E2E_RUN_ID:-local}
+  build:
+    context: ./backend
+    target: runtime
+
+x-backend-environment: &backend-environment
+  NODE_ENV: test
+  DATABASE_URL: postgres://e2e:e2e@postgres:5432/skrynia_e2e
+  REDIS_URL: redis://redis:6379/0
+  JWT_SECRET: e2e-only-jwt-secret-never-use-outside-tests
+  TWO_FACTOR_ENCRYPTION_KEY: 6532652d6f6e6c792d746573742d656e6372797074696f6e2d6b65792d303031
+  FRONTEND_URL: http://frontend:3000
+  PUBLIC_BACKEND_URL: http://api:4000
+  COOKIE_DOMAIN: ""
+  ENABLE_TEST_PAYMENTS: "false"
+  STORAGE_DRIVER: local
+  LOCAL_UPLOAD_DIR: uploads
+  JOB_WORKER_ENABLED: "false"
+  OUTBOX_WORKER_ENABLED: "false"
+  CREDENTIAL_RATE_LIMIT_PER_15MIN: 1000
+  CREDENTIAL_RATE_LIMIT_PER_IDENTITY_15MIN: 1000
+  AUTHENTICATED_WRITE_RATE_LIMIT_PER_MIN: 1000
+  AUTHENTICATED_WRITE_RATE_LIMIT_PER_IP: 2000
+  PUBLIC_READ_RATE_LIMIT_PER_MIN: 5000
+  WS_TICKET_RATE_LIMIT_PER_MIN: 1000
+  WS_TICKET_RATE_LIMIT_PER_IP: 2000
+  WEBHOOK_RATE_LIMIT_PER_MIN: 1000
+  RUNTIME_HEARTBEAT_INTERVAL_MS: 1000
+  RUNTIME_HEARTBEAT_TTL_MS: 5000
+  OUTBOX_POLL_INTERVAL_MS: 100
+  OUTBOX_BASE_BACKOFF_MS: 100
+  METRICS_USER: e2e
+  METRICS_PASSWORD: e2e-metrics-password
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: skrynia_e2e
+      POSTGRES_USER: e2e
+      POSTGRES_PASSWORD: e2e
+    volumes:
+      - postgres_e2e_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U e2e -d skrynia_e2e"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    volumes:
+      - redis_e2e_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    <<: *backend-image
+    command: ["node", "dist/db/migrate-deploy.cli.js"]
+    environment:
+      <<: *backend-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  seed:
+    <<: *backend-image
+    command: ["node", "dist/db/seed-e2e.js"]
+    environment:
+      <<: *backend-environment
+      E2E_SEED_ENABLED: "true"
+      E2E_ADMIN_EMAIL: e2e-admin-${E2E_RUN_ID:-local}@example.test
+      E2E_ADMIN_PASSWORD: Password123!
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  api:
+    <<: *backend-image
+    command: ["node", "dist/entrypoints/api.js"]
+    environment:
+      <<: *backend-environment
+      PORT: 4000
+      ENABLE_TEST_PAYMENTS: "true"
+    volumes:
+      - uploads_e2e_data:/app/uploads
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health/ready').then(r=>{if(!r.ok)throw Error()}).catch(()=>process.exitCode=1)"]
+      interval: 2s
+      timeout: 3s
+      start_period: 5s
+      retries: 30
+
+  worker:
+    <<: *backend-image
+    command: ["node", "dist/entrypoints/worker.js"]
+    environment:
+      <<: *backend-environment
+      JOB_WORKER_ENABLED: "true"
+      RUNTIME_INSTANCE_ID: e2e-worker
+    volumes:
+      - uploads_e2e_data:/app/uploads
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "dist/runtime/heartbeat-healthcheck.js", "worker"]
+      interval: 2s
+      timeout: 3s
+      start_period: 5s
+      retries: 30
+
+  outbox:
+    <<: *backend-image
+    command: ["node", "dist/entrypoints/outbox.js"]
+    environment:
+      <<: *backend-environment
+      OUTBOX_WORKER_ENABLED: "true"
+      RUNTIME_INSTANCE_ID: e2e-outbox
+    volumes:
+      - uploads_e2e_data:/app/uploads
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "dist/runtime/heartbeat-healthcheck.js", "outbox"]
+      interval: 2s
+      timeout: 3s
+      start_period: 5s
+      retries: 30
+
+  frontend:
+    image: skrynia-e2e-frontend:${E2E_RUN_ID:-local}
+    build:
+      context: ./frontend
+      target: runner
+      args:
+        NEXT_PUBLIC_API_URL: http://api:4000
+        NEXT_PUBLIC_WS_URL: ws://api:4000/ws
+        NEXT_PUBLIC_WS_COOKIE_FALLBACK: "false"
+        NEXT_PUBLIC_SITE_URL: http://frontend:3000
+        NEXT_PUBLIC_ENABLE_TEST_PAYMENTS: "true"
+        NEXT_PUBLIC_SENTRY_DSN: ""
+        NEXT_PUBLIC_POSTHOG_KEY: ""
+        NEXT_PUBLIC_POSTHOG_HOST: ""
+    environment:
+      NEXT_PUBLIC_API_URL: http://api:4000
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/en').then(r=>{if(r.status>=500)throw Error()}).catch(()=>process.exitCode=1)"]
+      interval: 2s
+      timeout: 3s
+      start_period: 5s
+      retries: 30
+
+  playwright:
+    image: skrynia-e2e-playwright:${E2E_RUN_ID:-local}
+    build:
+      context: ./e2e
+    environment:
+      CI: ${CI:-}
+      E2E_BASE_URL: http://frontend:3000
+      E2E_API_URL: http://frontend:3000/api
+      E2E_RUN_ID: ${E2E_RUN_ID:-local}
+      E2E_ADMIN_EMAIL: e2e-admin-${E2E_RUN_ID:-local}@example.test
+      E2E_ADMIN_PASSWORD: Password123!
+    volumes:
+      - ./e2e/test-results:/work/test-results
+      - ./e2e/playwright-report:/work/playwright-report
+    depends_on:
+      frontend:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
+      outbox:
+        condition: service_healthy
+    ipc: host
+
+volumes:
+  postgres_e2e_data:
+  redis_e2e_data:
+  uploads_e2e_data:
+
+networks:
+  default:
+    internal: true

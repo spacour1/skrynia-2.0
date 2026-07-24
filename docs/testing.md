@@ -1,8 +1,14 @@
 # Testing
 
+For the isolated PostgreSQL/Redis/API/worker/outbox/frontend Playwright suite,
+including payment-safety gates, failure artifacts, and cleanup behavior, see
+[`docs/e2e.md`](e2e.md).
+
 ## Test runner
 
-Backend uses **Vitest** (`npm test` / `npm run test:watch`). Frontend has no test suite — CI verifies it via `npm run typecheck` + `npm run build`.
+Backend and frontend use **Vitest** (`npm test`; backend also exposes
+`npm run test:watch`). Playwright runs the isolated cross-service browser suite
+described in [`docs/e2e.md`](e2e.md).
 
 ## CI checks (must pass before merging)
 
@@ -13,7 +19,12 @@ npm test        # vitest run
 
 # Frontend
 npm run typecheck   # tsc --noEmit
+npm run i18n:check  # locale parity and source-key validation
+npm test            # vitest run
 npm run build       # catches static-generation and server/client boundary errors
+
+# Isolated browser stack (from the repository root)
+node e2e/scripts/run.mjs
 ```
 
 CI config: `.github/workflows/ci.yml`. Backend CI spins up real PostgreSQL 16 and Redis 7 service containers — do not mock the database in tests.
@@ -111,11 +122,13 @@ async function createTestUser(role = "user") {
 
 ## What CI does NOT cover (manual smoke testing)
 
-- WebSocket real-time chat delivery
 - Payment provider sandbox flows (LiqPay / Monobank / WayForPay test modes)
 - Email delivery via Resend
 - Telegram bot notification delivery
 - File upload to S3
+
+CI does cover the application WebSocket path, including the first chat
+message and its `message_ack`, through the isolated Playwright golden flow.
 
 For these, use the dev Docker environment (`docker-compose.dev.yml`) and the seeded demo accounts:
 

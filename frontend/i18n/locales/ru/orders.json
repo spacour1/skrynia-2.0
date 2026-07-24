@@ -32,7 +32,21 @@
     "disputePlaceholder": "Причина спора",
     "openDispute": "Открыть спор",
     "reviewPlaceholder": "Отзыв",
-    "submitReview": "Оставить отзыв"
+    "submitReview": "Оставить отзыв",
+    "loadingDispute": "Загрузка спора...",
+    "disputeUnavailable": "Спор временно недоступен.",
+    "disputeThreadTitle": "Обсуждение спора",
+    "disputeThreadHelp": "Покупатель, продавец и администраторы видят эту отдельную ленту доказательств.",
+    "disputeOpen": "Открыт",
+    "disputeResolved": "Решён",
+    "originalDisputeReason": "Исходная причина (неизменяемая)",
+    "disputeMessages": "Сообщения спора",
+    "noDisputeMessages": "Ответов участников пока нет.",
+    "disputeReply": "Добавить доказательство или ответ",
+    "disputeReplyPlaceholder": "Опишите факты, относящиеся к этому спору",
+    "sendDisputeReply": "Отправить ответ",
+    "sendingDisputeReply": "Отправка...",
+    "resolvedDisputeReadOnly": "Спор решён. Обсуждение доступно только для чтения."
   },
   "dashboard": {
     "signedInAs": "Вы вошли как",

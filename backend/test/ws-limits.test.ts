@@ -9,9 +9,11 @@ import { WebSocket, type RawData } from "ws";
 process.env.WS_MAX_FRAMES_PER_MIN = "10";
 process.env.WS_MAX_JOINS_PER_MIN = "3";
 process.env.WS_MAX_CONCURRENT_HANDLERS = "2";
+process.env.PG_POOL_MAX = "2";
 
 const { createApp } = await import("../src/app.js");
 const { getRedis } = await import("../src/common/redis.js");
+const { pool } = await import("../src/db/pool.js");
 const { issueSession } = await import("../src/modules/auth/session.service.js");
 const { attachWebSocketServer, broadcastConversation, WS_CLOSE_ABUSE } = await import(
   "../src/modules/chat/ws.service.js"
@@ -96,6 +98,36 @@ async function connectedSocket() {
 }
 
 describe("websocket control-frame limits", () => {
+  it("bounds concurrent handlers before they can fan out into database work", async () => {
+    const client = await connectedSocket();
+    const blockers = await Promise.all([pool.connect(), pool.connect()]);
+
+    try {
+      // Every valid frame first performs the durable session-version query. With the
+      // entire two-connection pool held here, the first two handlers stay in flight,
+      // making the per-socket ceiling deterministic instead of timing-dependent.
+      client.send({ type: "leave_conversation", conversationId: randomUUID() });
+      client.send({ type: "leave_conversation", conversationId: randomUUID() });
+      client.send({ type: "leave_conversation", conversationId: randomUUID() });
+
+      await client.waitFor((event) => event.code === "busy");
+      expect(client.events.filter((event) => event.code === "busy")).toHaveLength(1);
+      expect(
+        client.events.filter((event) => event.type === "left_conversation")
+      ).toHaveLength(0);
+    } finally {
+      for (const blocker of blockers) blocker.release();
+    }
+
+    await client.waitFor(
+      () =>
+        client.events.filter((event) => event.type === "left_conversation").length === 2
+    );
+    expect(
+      client.events.filter((event) => event.type === "left_conversation")
+    ).toHaveLength(2);
+  });
+
   it("rejects join floods with a dedicated error before hitting the database", async () => {
     const client = await connectedSocket();
 

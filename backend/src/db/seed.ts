@@ -87,8 +87,16 @@ async function getGame(slug: string) {
 
 async function getSection(gameId: string | null, slug: string) {
   if (!gameId) return null;
-  const result = await pool.query<{ id: string }>(`select id from game_sections where game_id = $1 and slug = $2`, [gameId, slug]);
-  return result.rows[0]?.id ?? null;
+  const result = await pool.query<{
+    id: string;
+    currentSchemaVersion: number | null;
+  }>(
+    `select id, current_schema_version as "currentSchemaVersion"
+     from game_sections
+     where game_id = $1 and slug = $2`,
+    [gameId, slug]
+  );
+  return result.rows[0] ?? null;
 }
 
 for (const seller of sellers) {
@@ -110,14 +118,33 @@ for (const seller of sellers) {
     const categoryId = await getCategoryId(categorySlug);
     if (!categoryId) continue;
     const gameId = await getGame(gameSlug);
-    const sectionId = await getSection(gameId, sectionSlug);
+    const section = await getSection(gameId, sectionSlug);
     await pool.query(
       `insert into products(
-         seller_id, category_id, game_id, section_id, title, description, price_cents, old_price_cents,
-         currency, stock, delivery_type, product_type, server, platform, metadata, is_hot, is_recommended, status
+         seller_id, category_id, game_id, section_id, schema_version, title, description,
+         price_cents, old_price_cents, currency, stock, delivery_type, product_type,
+         server, platform, metadata, is_hot, is_recommended, status
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, 'UAH', 5, 'manual', $9, $10, $11, '{}'::jsonb, $12, $13, 'active')`,
-      [user.rows[0].id, categoryId, gameId, sectionId, title, description, priceCents, oldPriceCents, productType, server, platform, isHot, isRecommended]
+       values (
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, 'UAH', 5, 'manual',
+         $10, $11, $12, '{}'::jsonb, $13, $14, 'active'
+       )`,
+      [
+        user.rows[0].id,
+        categoryId,
+        gameId,
+        section?.id ?? null,
+        section?.currentSchemaVersion ?? null,
+        title,
+        description,
+        priceCents,
+        oldPriceCents,
+        productType,
+        server,
+        platform,
+        isHot,
+        isRecommended
+      ]
     );
   }
 }

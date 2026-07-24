@@ -13,6 +13,7 @@ import { SalesTips } from "./_components/SalesTips";
 import { SellerListings } from "./_components/SellerListings";
 import type { EditProduct, LotForm, SelectedMedia, SellerProduct } from "./_components/types";
 import { uploadImage } from "@/lib/storage";
+import { createClientUuid } from "@/lib/uuid";
 
 export default function SellerProductsPage() {
   return (
@@ -102,7 +103,7 @@ function SellerProductsContent() {
       .filter((file) => file.type.startsWith("image/"))
       .slice(0, Math.max(0, 10 - media.length))
       .map((file) => ({
-        id: `${file.name}-${file.lastModified}-${crypto.randomUUID()}`,
+        id: `${file.name}-${file.lastModified}-${createClientUuid()}`,
         file,
         previewUrl: URL.createObjectURL(file)
       }));

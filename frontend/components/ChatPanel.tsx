@@ -7,7 +7,8 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
 import { RealtimeMessageError } from "@/lib/realtime-client";
-import { useRealtime, useRealtimeStatus } from "@/components/RealtimeProvider";
+import { createClientUuid } from "@/lib/uuid";
+import { useRealtime } from "@/components/RealtimeProvider";
 import { EmailNotVerifiedNotice } from "./EmailNotVerifiedNotice";
 import { ReportModal } from "./ReportModal";
 import { uploadImage } from "@/lib/storage";
@@ -30,6 +31,14 @@ type Message = {
 
 type ChatPanelMode = "full" | "compact";
 
+const REALTIME_REST_FALLBACK_CODES = new Set([
+  "not_connected",
+  "connection_closed",
+  "auth_refreshed",
+  "ack_timeout",
+  "send_failed"
+]);
+
 export function ChatPanel({
   conversationId,
   mode,
@@ -49,7 +58,6 @@ export function ChatPanel({
 }) {
   const user = useAuth((state) => state.user);
   const realtime = useRealtime();
-  const realtimeStatus = useRealtimeStatus();
   const { language, t } = useI18n();
   const queryClient = useQueryClient();
   const isCompact = mode ? mode === "compact" : compact;
@@ -82,15 +90,27 @@ export function ChatPanel({
   useEffect(() => {
     if (!history.data?.messages) return;
     setMessages((current) => {
-      const pending = current.filter(
+      const localDeliveries = current.filter(
         (message) =>
           message.conversationId === activeConversationId &&
-          (message.deliveryStatus === "sending" || message.deliveryStatus === "failed")
+          Boolean(message.deliveryStatus)
       );
-      const serverIds = new Set(history.data.messages.map((message) => message.id));
+      const serverMessages = history.data.messages.map((serverMessage) => {
+        const localMessage = current.find((candidate) =>
+          messagesMatch(candidate, serverMessage)
+        );
+        return localMessage
+          ? mergeServerMessage(serverMessage, localMessage)
+          : serverMessage;
+      });
       return [
-        ...history.data.messages,
-        ...pending.filter((message) => !serverIds.has(message.id))
+        ...serverMessages,
+        ...localDeliveries.filter(
+          (localMessage) =>
+            !history.data.messages.some((serverMessage) =>
+              messagesMatch(localMessage, serverMessage)
+            )
+        )
       ];
     });
   }, [activeConversationId, history.data]);
@@ -115,9 +135,15 @@ export function ChatPanel({
       if (payload.type === "message") {
         const message = payload.message as Message | undefined;
         if (!message || message.conversationId !== activeConversationId) return;
-        setMessages((current) =>
-          current.some((item) => item.id === message.id) ? current : [...current, message]
-        );
+        setMessages((current) => {
+          const existingIndex = current.findIndex((item) =>
+            messagesMatch(item, message)
+          );
+          if (existingIndex === -1) return [...current, message];
+          const next = [...current];
+          next[existingIndex] = mergeServerMessage(message, current[existingIndex]);
+          return next;
+        });
         queryClient.invalidateQueries({ queryKey: ["chat-conversations"] });
         queryClient.invalidateQueries({ queryKey: ["chat-conversations-grouped"] });
       }
@@ -175,7 +201,7 @@ export function ChatPanel({
         onConversationReady?.(targetConversationId);
       }
 
-      pendingClientMessageId = crypto.randomUUID();
+      pendingClientMessageId = createClientUuid();
       const optimistic: Message = {
         id: `client:${pendingClientMessageId}`,
         clientMessageId: pendingClientMessageId,
@@ -232,15 +258,28 @@ export function ChatPanel({
     const conversation = message.conversationId!;
     if (
       conversation === selectedConversationId &&
-      realtimeStatus.status === "connected" &&
+      realtime.getSnapshot().status === "connected" &&
       message.clientMessageId
     ) {
-      return (await realtime.sendMessage({
-        clientMessageId: message.clientMessageId,
-        conversationId: conversation,
-        body: message.body,
-        attachmentUploadId: message.attachmentUploadId
-      })) as Message;
+      try {
+        return (await realtime.sendMessage({
+          clientMessageId: message.clientMessageId,
+          conversationId: conversation,
+          body: message.body,
+          attachmentUploadId: message.attachmentUploadId
+        })) as Message;
+      } catch (realtimeError) {
+        // The socket can move from connected to refreshing/closed between the render
+        // and this click. Retrying the same clientMessageId over REST is safe even if
+        // the message was persisted and only its ACK was lost: the backend deduplicates
+        // it on (sender_id, client_message_id).
+        if (
+          !(realtimeError instanceof RealtimeMessageError) ||
+          !REALTIME_REST_FALLBACK_CODES.has(realtimeError.code)
+        ) {
+          throw realtimeError;
+        }
+      }
     }
 
     const saved = await apiFetch<{ message: Message }>(
@@ -452,4 +491,24 @@ function isRetryable(error: unknown) {
   if (error instanceof RealtimeMessageError) return error.retryable;
   if (error instanceof ApiError) return error.status === 429 || error.status >= 500;
   return true;
+}
+
+function messagesMatch(left: Message, right: Message) {
+  return (
+    left.id === right.id ||
+    Boolean(
+      left.clientMessageId &&
+      right.clientMessageId &&
+      left.clientMessageId === right.clientMessageId
+    )
+  );
+}
+
+function mergeServerMessage(serverMessage: Message, localMessage: Message): Message {
+  return {
+    ...serverMessage,
+    clientMessageId: serverMessage.clientMessageId ?? localMessage.clientMessageId,
+    deliveryStatus: localMessage.deliveryStatus,
+    retryable: localMessage.retryable
+  };
 }

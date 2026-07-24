@@ -30,6 +30,7 @@ import { fieldLabel, formatFieldValue } from "@/lib/product-fields";
 import type { CatalogField } from "@/lib/catalog-api";
 import { showAppToast } from "@/lib/toast-events";
 import { captureEvent } from "@/lib/posthog";
+import { createClientUuid } from "@/lib/uuid";
 
 const HIDDEN_METADATA_KEYS = new Set(["catalogKind", "shortDescription", "region", "rank"]);
 
@@ -121,7 +122,7 @@ export function ProductPageClient({ id }: { id: string }) {
   const buySecurely = useMutation({
     mutationFn: async () => {
       captureEvent("checkout_started", { product_id: id });
-      orderIdempotencyKey.current ??= crypto.randomUUID();
+      orderIdempotencyKey.current ??= createClientUuid();
       const { order } = await apiFetch<{ order: { id: string } }>("/orders", {
         method: "POST",
         headers: { "Idempotency-Key": orderIdempotencyKey.current },

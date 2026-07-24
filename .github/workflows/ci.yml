@@ -5,9 +5,17 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: backend
@@ -40,19 +48,32 @@ jobs:
       JWT_SECRET: ci-secret-aaaaaaaaaaaaaaaaaaaaaaaa
       METRICS_PASSWORD: ci-metrics-password-aaaa
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          node-version: 20
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "20"
           cache: npm
           cache-dependency-path: backend/package-lock.json
-      - run: npm ci
-      - run: npm run migrate
-      - run: npm run lint
-      - run: npm test
+      - name: Install backend dependencies
+        run: npm ci
+      - name: Backend production build
+        run: npm run build
+      - name: Apply all migrations to a clean database
+        run: npm run migrate:deploy
+      - name: Verify migrations are repeatable
+        run: npm run migrate:deploy
+      - name: Backend typecheck
+        run: npm run lint
+      - name: Schema contract
+        run: npx vitest run test/schema-contract.test.ts
+      - name: Backend tests
+        run: npm test
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: frontend
@@ -60,16 +81,100 @@ jobs:
       NEXT_PUBLIC_API_URL: http://localhost:4000
       NEXT_PUBLIC_WS_URL: ws://localhost:4000/ws
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          node-version: 20
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - run: npm run typecheck
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Frontend typecheck
+        run: npm run typecheck
       # Missing/extra translation keys and new hardcoded UI strings fail the build.
-      - run: npm run i18n:check
+      - name: Frontend i18n contract
+        run: npm run i18n:check
+      - name: Frontend unit tests
+        run: npm test
       # Catches build-time-only failures (e.g. broken static generation, bad imports in
       # client/server boundaries) that `tsc --noEmit` alone doesn't see.
-      - run: npm run build
+      - name: Frontend production build
+        run: npm run build
+
+  audit-policy-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "20"
+      - name: Test npm audit policy
+        run: node --test .github/scripts/check-npm-audit.test.mjs
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [backend, frontend]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "20"
+      - name: Audit production dependencies
+        run: node .github/scripts/check-npm-audit.mjs ${{ matrix.project }}
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned Gitleaks
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/gitleaks_8.30.1_linux_x64.tar.gz"
+          install_dir="$RUNNER_TEMP/gitleaks-8.30.1"
+          mkdir -p "$install_dir"
+          curl --fail --silent --show-error --location \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            --output "$archive"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $archive" \
+            | sha256sum --check --strict
+          tar -xzf "$archive" -C "$install_dir" gitleaks
+          echo "$install_dir" >> "$GITHUB_PATH"
+      - name: Scan complete repository history
+        run: >-
+          gitleaks git --redact --no-banner
+          --config=.github/gitleaks.toml
+          --gitleaks-ignore-path=.github/gitleaksignore
+          --log-opts="--all" .
+
+  docker:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      POSTGRES_PASSWORD: ci-postgres-password
+      JWT_SECRET: ci-secret-aaaaaaaaaaaaaaaaaaaaaaaa
+      TWO_FACTOR_ENCRYPTION_KEY: "1111111111111111111111111111111111111111111111111111111111111111"
+      METRICS_PASSWORD: ci-metrics-password-aaaaaaaa
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Validate all Compose profiles
+        run: docker compose --profile '*' config --quiet
+      - name: Build production images
+        run: docker compose --profile '*' build

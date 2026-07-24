@@ -47,22 +47,42 @@ on:
         default: "10m"
         type: string
 
+permissions:
+  contents: read
+
+# Load tests must not overlap against staging. Queue a second manual run instead of
+# cancelling an operator-requested run that is already in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   k6:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
 
       - name: Install k6
         run: |
-          curl https://github.com/grafana/k6/releases/download/v0.54.0/k6-v0.54.0-linux-amd64.tar.gz -L | tar xvz --strip-components 1
-          sudo mv k6 /usr/local/bin/k6
-          k6 version
+          archive="$RUNNER_TEMP/k6-v0.54.0-linux-amd64.tar.gz"
+          install_dir="$RUNNER_TEMP/k6-v0.54.0"
+          mkdir -p "$install_dir"
+          curl --fail --silent --show-error --location \
+            https://github.com/grafana/k6/releases/download/v0.54.0/k6-v0.54.0-linux-amd64.tar.gz \
+            --output "$archive"
+          echo "c7f03434854f837b6790ee81572e4b0f955241974c79a43cbb9f8d0fef069589  $archive" \
+            | sha256sum --check --strict
+          tar -xzf "$archive" -C "$install_dir" --strip-components=1 \
+            k6-v0.54.0-linux-amd64/k6
+          echo "$install_dir" >> "$GITHUB_PATH"
+          "$install_dir/k6" version
 
       - name: Run ${{ inputs.scenario }} scenario
         env:
           BASE_URL: ${{ inputs.base_url }}
-          WS_URL: ${{ inputs.ws_url || format('{0}/ws', replace(inputs.base_url, 'http', 'ws')) }}
+          WS_URL: ${{ inputs.ws_url }}
           TARGET_RPS: ${{ inputs.target_rps }}
           TARGET_VU: ${{ inputs.target_vu }}
           RAMP_DURATION: ${{ inputs.ramp_duration }}
@@ -74,6 +94,17 @@ jobs:
           TEST_BUYER_PASSWORD: ${{ secrets.STAGING_BUYER_PASSWORD }}
           TEST_PRODUCT_ID: ${{ secrets.STAGING_TEST_PRODUCT_ID }}
         run: |
+          if [[ -z "$WS_URL" ]]; then
+            base_without_trailing_slash="${BASE_URL%/}"
+            case "$base_without_trailing_slash" in
+              https://*) WS_URL="wss://${base_without_trailing_slash#https://}/ws" ;;
+              http://*) WS_URL="ws://${base_without_trailing_slash#http://}/ws" ;;
+              *)
+                echo "base_url must start with http:// or https://" >&2
+                exit 2
+                ;;
+            esac
+          fi
           k6 run \
             -e BASE_URL="$BASE_URL" \
             -e WS_URL="$WS_URL" \

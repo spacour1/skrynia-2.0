@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "projects": {
+    "backend": [
+      {
+        "advisory": "GHSA-3jxr-9vmj-r5cp",
+        "package": "brace-expansion",
+        "maxSeverity": "high",
+        "expires": "2026-08-21",
+        "reference": "docs/security/npm-audit-debt.md#backend-ghsa-3jxr-9vmj-r5cp"
+      },
+      {
+        "advisory": "GHSA-f88m-g3jw-g9cj",
+        "package": "sharp",
+        "maxSeverity": "high",
+        "expires": "2026-08-21",
+        "reference": "docs/security/npm-audit-debt.md#backend-ghsa-f88m-g3jw-g9cj"
+      }
+    ],
+    "frontend": [
+      {
+        "advisory": "GHSA-3jxr-9vmj-r5cp",
+        "package": "brace-expansion",
+        "maxSeverity": "high",
+        "expires": "2026-08-21",
+        "reference": "docs/security/npm-audit-debt.md#frontend-ghsa-3jxr-9vmj-r5cp"
+      },
+      {
+        "advisory": "GHSA-v2hh-gcrm-f6hx",
+        "package": "fast-uri",
+        "maxSeverity": "high",
+        "expires": "2026-08-21",
+        "reference": "docs/security/npm-audit-debt.md#frontend-ghsa-v2hh-gcrm-f6hx"
+      },
+      {
+        "advisory": "GHSA-h25m-26qc-wcjf",
+        "package": "next",
+        "maxSeverity": "high",
+        "expires": "2026-08-21",
+        "reference": "docs/security/npm-audit-debt.md#frontend-ghsa-h25m-26qc-wcjf"
+      },
+      {
+        "advisory": "GHSA-q4gf-8mx6-v5v3",
+        "package": "next",
+        "maxSeverity": "high",
+        "expires": "2026-08-21",
+        "reference": "docs/security/npm-audit-debt.md#frontend-ghsa-q4gf-8mx6-v5v3"
+      },
+      {
+        "advisory": "GHSA-8h8q-6873-q5fj",
+        "package": "next",
+        "maxSeverity": "high",
+        "expires": "2026-08-21",
+        "reference": "docs/security/npm-audit-debt.md#frontend-ghsa-8h8q-6873-q5fj"
+      },
+      {
+        "advisory": "GHSA-c4j6-fc7j-m34r",
+        "package": "next",
+        "maxSeverity": "high",
+        "expires": "2026-08-21",
+        "reference": "docs/security/npm-audit-debt.md#frontend-ghsa-c4j6-fc7j-m34r"
+      },
+      {
+        "advisory": "GHSA-36qx-fr4f-26g5",
+        "package": "next",
+        "maxSeverity": "high",
+        "expires": "2026-08-21",
+        "reference": "docs/security/npm-audit-debt.md#frontend-ghsa-36qx-fr4f-26g5"
+      },
+      {
+        "advisory": "GHSA-m99w-x7hq-7vfj",
+        "package": "next",
+        "maxSeverity": "high",
+        "expires": "2026-08-21",
+        "reference": "docs/security/npm-audit-debt.md#frontend-ghsa-m99w-x7hq-7vfj"
+      },
+      {
+        "advisory": "GHSA-89xv-2m56-2m9x",
+        "package": "next",
+        "maxSeverity": "high",
+        "expires": "2026-08-21",
+        "reference": "docs/security/npm-audit-debt.md#frontend-ghsa-89xv-2m56-2m9x"
+      },
+      {
+        "advisory": "GHSA-p9j2-gv94-2wf4",
+        "package": "next",
+        "maxSeverity": "high",
+        "expires": "2026-08-21",
+        "reference": "docs/security/npm-audit-debt.md#frontend-ghsa-p9j2-gv94-2wf4"
+      },
+      {
+        "advisory": "GHSA-6g55-p6wh-862q",
+        "package": "postcss",
+        "maxSeverity": "high",
+        "expires": "2026-08-21",
+        "reference": "docs/security/npm-audit-debt.md#frontend-ghsa-6g55-p6wh-862q"
+      },
+      {
+        "advisory": "GHSA-mw96-cpmx-2vgc",
+        "package": "rollup",
+        "maxSeverity": "high",
+        "expires": "2026-08-21",
+        "reference": "docs/security/npm-audit-debt.md#frontend-ghsa-mw96-cpmx-2vgc"
+      }
+    ]
+  }
+}

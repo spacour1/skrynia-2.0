@@ -26,7 +26,12 @@ New project/
 │   ├── migrations/          # SQL migration files (numeric timestamp prefix)
 │   ├── src/
 │   │   ├── app.ts           # Express app setup, routes mounted here
-│   │   ├── server.ts        # HTTP + WebSocket server entry point
+│   │   ├── server.ts        # Compatibility import for the API entry point
+│   │   ├── entrypoints/
+│   │   │   ├── api.ts       # HTTP + WebSocket + realtime subscriber
+│   │   │   ├── worker.ts    # BullMQ processors only
+│   │   │   └── outbox.ts    # Transactional-outbox poller only
+│   │   ├── runtime/         # Health, heartbeats, and ordered process lifecycle
 │   │   ├── common/
 │   │   │   ├── cookies.ts   # setAuthCookies, clearAuthCookies, cookie names
 │   │   │   ├── errors.ts    # ApiError, asyncHandler, badRequest, forbidden, notFound
@@ -125,9 +130,23 @@ Refund: debit seller-escrow, credit buyer user-payable.
 
 All helpers live in `orders/accounting.service.ts`. Manual adjustments use `equity:manual-adjustment:{currency}`.
 
+## Production process topology
+
+The production image has independent API, BullMQ worker, and outbox entrypoints.
+Scaling API replicas therefore never changes background-processor concurrency.
+Each process stops accepting work, drains within a configured grace window, closes
+its Redis/PostgreSQL resources, and has a hard shutdown timeout. SQL and encrypted
+legacy-2FA migrations run only through the separate `migrate:deploy` release command,
+under a PostgreSQL advisory lock.
+
+The API exposes dependency-free `GET /health/live` and bounded
+`GET /health/ready` probes. Worker/outbox readiness is an expiring Redis heartbeat
+key scoped by service and `RUNTIME_INSTANCE_ID`.
+
 ## Job queue (BullMQ)
 
-Worker runs in the same backend process when `JOB_WORKER_ENABLED=true`. Job names:
+The dedicated worker entrypoint runs the processors; the API and outbox entrypoints
+never start them. Job names:
 
 | Job | Trigger | Effect |
 |-----|---------|--------|
@@ -147,7 +166,7 @@ and moves exhausted events to `failed`.
 does not create a second notification. Failed events can be reset through
 `POST /admin/outbox/retry`.
 
-The worker runs when `OUTBOX_WORKER_ENABLED=true`. Multiple replicas are safe; a heartbeat
+The dedicated outbox entrypoint runs the poller. Multiple replicas are safe; a heartbeat
 keeps a live claim from being reclaimed, while stale claims become available after
 `OUTBOX_LOCK_TIMEOUT_MS`.
 
@@ -181,7 +200,10 @@ Optional but needed for full functionality:
 - `TELEGRAM_WEBHOOK_SECRET` — webhook signature verification
 - `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` + `TWILIO_VERIFY_SERVICE_SID` — phone OTP
 - `SENTRY_DSN` — error tracking
-- `OUTBOX_WORKER_ENABLED` — durable side-effect worker (defaults to `JOB_WORKER_ENABLED`)
+
+`JOB_WORKER_ENABLED` and `OUTBOX_WORKER_ENABLED` remain accepted for configuration
+compatibility, but production role entrypoints do not consult them: starting
+`start:worker` or `start:outbox` explicitly selects the processor role.
 
 Payment providers (at least one required in production):
 - `LIQPAY_PUBLIC_KEY` + `LIQPAY_PRIVATE_KEY`
@@ -202,6 +224,9 @@ Tuning:
 - `OUTBOX_MAX_ATTEMPTS`, `OUTBOX_BASE_BACKOFF_MS`, `OUTBOX_LOCK_TIMEOUT_MS` — retry and claim policy
 - `REALTIME_CHANNEL`, `REALTIME_INSTANCE_ID` - Pub/Sub channel and optional unique replica ID
 - `PRESENCE_TTL_MS`, `PRESENCE_HEARTBEAT_MS` - global presence expiry and refresh cadence
+- `PG_CONNECTION_TIMEOUT_MS`, `HEALTHCHECK_TIMEOUT_MS` — bounded dependency connections/probes
+- `SHUTDOWN_GRACE_MS`, `SHUTDOWN_HARD_TIMEOUT_MS` — process drain and forced-stop bounds
+- `RUNTIME_HEARTBEAT_INTERVAL_MS`, `RUNTIME_HEARTBEAT_TTL_MS`, `RUNTIME_INSTANCE_ID` — worker/outbox readiness
 
 ## WebSocket
 
@@ -223,7 +248,7 @@ global answer and must not be presented as offline.
 When Redis is unavailable, local socket delivery continues. Realtime operations emitted
 from the transactional outbox fail strictly and leave the durable event retryable;
 non-durable producers degrade to local-only delivery. `GET /health/ready` reports this
-state separately from the always-live `GET /health`.
+state separately from the always-live `GET /health/live` (and `/health` compatibility alias).
 
 ## Roles and permissions
 

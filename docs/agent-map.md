@@ -14,7 +14,11 @@ large route or page files.
 ## Runtime Entry Points
 
 - Backend app wiring: `backend/src/app.ts`
-- Backend server, WebSocket, worker startup: `backend/src/server.ts`
+- API process: `backend/src/entrypoints/api.ts`
+- BullMQ process: `backend/src/entrypoints/worker.ts`
+- Transactional-outbox process: `backend/src/entrypoints/outbox.ts`
+- Release migrations: `backend/src/db/migrate-deploy.ts`
+- Health, heartbeat, shutdown primitives: `backend/src/runtime/`
 - Frontend app shell: `frontend/app/[locale]/layout.tsx`
 - Frontend providers: `frontend/app/[locale]/providers.tsx`
 - Frontend API client: `frontend/lib/api.ts`

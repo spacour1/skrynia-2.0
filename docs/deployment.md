@@ -46,17 +46,39 @@ SENTRY_AUTH_TOKEN=...
 
 ## Backend — Railway, Fly.io, Render, or DigitalOcean App Platform
 
-The backend is a stateless Express API. Multiple replicas can run in parallel as long as all shared state lives in PostgreSQL and Redis.
+The backend image contains four compiled commands with separate ownership:
 
-### Single container (simplest)
+| Process | Command | Responsibility |
+|---|---|---|
+| Release job | `npm run migrate:deploy` | SQL migrations plus encrypted legacy-2FA backfill |
+| API | `npm run start:api` | HTTP, WebSocket, Redis realtime subscriber |
+| Job worker | `npm run start:worker` | BullMQ processors and schedules |
+| Outbox | `npm run start:outbox` | PostgreSQL outbox polling, retries, and stale-claim recovery |
+
+Never use the API, worker, or outbox command as a migration hook. Run exactly one
+release job before rolling out the three long-running process types. The release
+runner holds a repository-stable PostgreSQL advisory lock across both SQL and 2FA
+data migrations, so accidentally concurrent release jobs serialize safely.
+
+### Production-shaped Compose
 
 Use `docker-compose.yml` (root of repo) with a `.env` filled from `.env.example`.
+The `migrate` service must complete successfully before API/worker/outbox start.
 
 ```bash
 cp .env.example .env
 # Edit .env with real secrets
+docker compose config --quiet
+docker compose build
 docker compose up -d
+docker compose ps
 ```
+
+The images use non-root users, direct exec-form Node commands, bounded healthchecks,
+and graceful-stop windows. The frontend uses Next.js standalone output; the backend
+runtime contains compiled code, production dependencies, and migration files only.
+The root Compose topology is suitable for a single Docker host. Do not scale its
+local upload volume across hosts; set `STORAGE_DRIVER=s3` for multi-replica production.
 
 ### Railway
 
@@ -64,7 +86,8 @@ docker compose up -d
 2. Railway auto-detects the `Dockerfile`.
 3. Set all required env vars in Railway → Variables.
 4. Add a `RAILWAY_DEPLOYMENT_ID` tag (Railway sets this automatically) — the backend reads it for the Sentry release.
-5. Health check path: `/health`.
+5. Health check path: `/health/ready` (use `/health/live` only for liveness where
+   the platform supports separate probes).
 
 ### Fly.io
 
@@ -82,26 +105,29 @@ Add to `fly.toml`:
   port = 4000
 
 [deploy]
-  health_checks = [{ path = "/health" }]
+  health_checks = [{ path = "/health/ready" }]
 ```
 
-### API replica vs. Worker replica
+### API, job worker, and outbox replicas
 
-The backend runs both the HTTP API and the BullMQ job worker in the same process by default. For production at scale, split them:
+The API entrypoint cannot start BullMQ or outbox processors. Deploy each process
+type with its command from the table above. Entrypoints, not environment flags,
+select the process role; the flags remain false on API as compatibility metadata.
 
-| Replica type | `JOB_WORKER_ENABLED` | `OUTBOX_WORKER_ENABLED` | Replicas |
-|---|---|---|---|
-| API | `false` | `false` | 2–N (horizontal scale) |
-| Worker | `true` | `true` | 1 |
+| Process | Command | Initial replicas |
+|---|---|---|
+| API | `npm run start:api` | 2–N |
+| Job worker | `npm run start:worker` | 1 |
+| Outbox | `npm run start:outbox` | 1–N |
 
-Set both worker flags to `false` on API replicas and run one separate worker replica with
-both flags set to `true`. The transactional outbox itself is safe to scale horizontally
-because workers claim rows through `FOR UPDATE SKIP LOCKED`.
+Outbox replicas are safe to scale because rows are claimed through
+`FOR UPDATE SKIP LOCKED`. Worker and outbox processes publish expiring readiness
+heartbeats in Redis. Give every replica a unique `RUNTIME_INSTANCE_ID`; the local
+Compose file uses stable `worker` and `outbox` IDs because it runs one of each.
 
-Every API replica subscribes to `REALTIME_CHANNEL`; the worker publishes durable realtime
-events from the outbox. Let the application generate `REALTIME_INSTANCE_ID`, or set a
-different value on every process. Reusing one instance ID across replicas causes them to
-mistake remote events for their own.
+Every API replica subscribes to `REALTIME_CHANNEL`. Let the application generate
+`REALTIME_INSTANCE_ID`, or set a different value on every API process. Reusing one
+realtime instance ID causes replicas to mistake remote events for their own.
 
 ### Required backend env vars (production)
 
@@ -133,7 +159,9 @@ Recommended providers: Supabase Postgres, Neon, Railway Postgres, DigitalOcean M
 
 - Set `DATABASE_URL` to the managed instance's connection string.
 - Set `PG_POOL_MAX` based on your plan's connection limit (see [docs/pgbouncer.md](./pgbouncer.md)).
-- Run migrations on deploy: the Dockerfile `CMD` already runs `node-pg-migrate up` before starting the server.
+- Before rollout, run the built image once with `npm run migrate:deploy`. A clean run
+  applies all SQL migrations and the legacy 2FA secret backfill; a repeated run is a
+  no-op. Do not replace this with migration execution in an application command.
 - Preserve the `Idempotency-Key` request header at every proxy/CDN hop. Order clients must
   retain one UUID only while retrying the same request body; completed results are retained
   for 24 hours.
@@ -164,9 +192,10 @@ REDIS_URL=redis://:password@host:6379
 # TLS: rediss://host:6380
 ```
 
-The process stays alive during a Redis outage and local WebSocket delivery still works.
-`GET /health/ready` returns `503` with realtime, subscriber, Redis, and presence state,
-while `GET /health` remains the liveness probe. Outbox-backed realtime events stay
+The API process stays alive during a Redis outage and local WebSocket delivery still works.
+`GET /health/ready` returns `503` when PostgreSQL, required Redis, or the realtime
+subscriber is unavailable, while `GET /health/live` (and compatibility alias
+`GET /health`) remains the dependency-free liveness probe. Outbox-backed realtime events stay
 retryable until Redis accepts their publication.
 
 ---
@@ -236,11 +265,14 @@ block concurrent writes while that index is built.
 - [ ] `REDIS_URL` is set and reachable
 - [ ] `STORAGE_DRIVER=s3` + S3 credentials set (for multi-replica)
 - [ ] At least one payment provider configured (LiqPay, Monobank, WayForPay, or manual)
-- [ ] Both worker flags are `false` on API replicas and `true` on the worker replica
+- [ ] Release job `npm run migrate:deploy` completed before application rollout
+- [ ] API, job worker, and outbox use their separate compiled commands
+- [ ] API environment keeps legacy worker flags false
+- [ ] Every scaled worker/outbox replica has a unique `RUNTIME_INSTANCE_ID`
 - [ ] `FRONTEND_URL` set to the exact origin (no trailing slash)
 - [ ] `SENTRY_DSN` set on backend; `NEXT_PUBLIC_SENTRY_DSN` set on frontend build
 - [ ] `ENABLE_TEST_PAYMENTS` is `false` (or unset)
-- [ ] `/health` returns 200 from the load balancer
+- [ ] `/health/live` returns 200 and `/health/ready` returns 200 before receiving traffic
 - [ ] `/metrics` requires basic auth and is not publicly reachable without it
 - [ ] Reverse proxies forward `Idempotency-Key` unchanged
-- [ ] Migrations ran successfully (`node-pg-migrate up` output in deploy logs)
+- [ ] Migration logs show the release runner completed SQL and legacy-2FA steps

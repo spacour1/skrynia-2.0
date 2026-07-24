@@ -150,11 +150,18 @@ NEXT_PUBLIC_POSTHOG_HOST=https://eu.i.posthog.com   # EU cloud; US: https://app.
 
 ## Health check
 
-The backend exposes two unauthenticated probes:
+The API exposes two unauthenticated probes:
 
-- `GET /health` returns `{"ok":true}` for process liveness.
-- `GET /health/ready` returns `200` only when Redis publishing and subscription are ready.
-  During degradation it returns `503` and reports Redis, subscriber, and presence state.
+- `GET /health/live` checks only that the process/event loop can answer. The
+  compatibility alias `GET /health` has the same semantics.
+- `GET /health/ready` runs bounded PostgreSQL, required-Redis, and realtime-subscriber
+  checks and returns `503` when the process cannot accept traffic. Public responses use
+  fixed status names and never include connection strings or dependency errors.
+
+The BullMQ worker and outbox have no public HTTP server. They write expiring
+service/instance heartbeat keys to Redis; the image healthcheck verifies connection,
+key TTL, service identity, and timestamp freshness without writing output on either
+success or failure.
 
 Example probe config for Railway:
 
@@ -163,5 +170,5 @@ Health Check Path: /health/ready
 Health Check Timeout: 5s
 ```
 
-Use `/health` for Kubernetes liveness and `/health/ready` for readiness. This keeps Redis
+Use `/health/live` for Kubernetes liveness and `/health/ready` for readiness. This keeps Redis
 outages visible without restarting an otherwise healthy process.

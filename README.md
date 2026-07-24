@@ -32,8 +32,26 @@ docker compose -f docker-compose.dev.yml logs -f backend
 docker compose -f docker-compose.dev.yml logs -f frontend
 ```
 
-The dev compose command installs dependencies, applies migrations, seeds demo
-data, and starts both apps in watch mode.
+The dev compose command installs dependencies, applies migrations, and starts the
+frontend, API, BullMQ worker, and outbox in watch mode. It intentionally does not
+reset or seed data on startup; run `npm run seed` explicitly when a fresh demo
+dataset is required.
+
+For a production-shaped local smoke test, fill a root `.env` from `.env.example`
+and use the root Compose file:
+
+```bash
+docker compose config --quiet
+docker compose build
+docker compose up -d
+docker compose ps
+```
+
+That topology runs one release-only `migrate` job, then independent API, BullMQ
+worker, and transactional-outbox processes. Application containers never run
+migrations in their startup command. See `docs/deployment.md` before using this
+topology outside a local or single-host environment; multi-replica uploads require
+S3-compatible object storage.
 
 ## Demo Accounts
 

@@ -4,9 +4,7 @@ import { logger } from "../../common/logger.js";
 import { jobProcessedTotal } from "../../common/metrics.js";
 import { pool } from "../../db/pool.js";
 import { releaseEscrow } from "../orders/ledger.service.js";
-import { recordOrderEvent } from "../orders/order-events.service.js";
 import { notifyOrderEvent } from "../chat/ws.service.js";
-import { createOrderSystemMessage } from "../chat/system-messages.service.js";
 import { createReconciliationSnapshot } from "../admin/reconciliation.service.js";
 import { createNotification, notifyAdmins } from "../notifications/notifications.service.js";
 import { getNotificationPreferences } from "../notifications/preferences.service.js";
@@ -136,26 +134,7 @@ async function processEscrowRelease(orderId?: string) {
   for (const order of due.rows) {
     try {
       await releaseEscrow(order.id, {
-        source: "auto",
-        afterUpdate: async (client) => {
-          await recordOrderEvent(
-            {
-              orderId: order.id,
-              type: "auto_released",
-              templateKey: "orderEvents.autoReleased"
-            },
-            client
-          );
-          const message = await createOrderSystemMessage(
-            {
-              orderId: order.id,
-              type: "escrow_released",
-              bodyKey: "system.fundsReleased"
-            },
-            client
-          );
-          return { systemMessageIds: message ? [message.id] : [] };
-        }
+        source: "auto"
       });
     } catch (err) {
       // Log and continue — a single bad order (e.g. seed data without matching escrow)

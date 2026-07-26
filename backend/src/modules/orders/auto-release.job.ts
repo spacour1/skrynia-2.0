@@ -1,7 +1,5 @@
 import { pool } from "../../db/pool.js";
 import { releaseEscrow } from "./ledger.service.js";
-import { recordOrderEvent } from "./order-events.service.js";
-import { createOrderSystemMessage } from "../chat/system-messages.service.js";
 
 let running = false;
 
@@ -22,26 +20,7 @@ export async function runAutoReleaseSweep() {
     for (const order of due.rows) {
       try {
         await releaseEscrow(order.id, {
-          source: "auto",
-          afterUpdate: async (client) => {
-            await recordOrderEvent(
-              {
-                orderId: order.id,
-                type: "auto_released",
-                templateKey: "orderEvents.autoReleased"
-              },
-              client
-            );
-            const message = await createOrderSystemMessage(
-              {
-                orderId: order.id,
-                type: "escrow_released",
-                bodyKey: "system.fundsReleased"
-              },
-              client
-            );
-            return { systemMessageIds: message ? [message.id] : [] };
-          }
+          source: "auto"
         });
       } catch (error) {
         console.error("Auto release failed", order.id, error);

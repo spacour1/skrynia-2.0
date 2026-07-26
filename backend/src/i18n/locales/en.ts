@@ -131,6 +131,7 @@ export default {
     delivered: { title: "Result delivered", body: "The seller marked the order delivered and added delivery details." },
     completed: { title: "Buyer confirmed delivery", body: "The deal is complete, funds were released to the seller." },
     autoReleased: { title: "Deal auto-completed", body: "The confirmation window expired, funds were released to the seller." },
+    refunded: { title: "Order refunded", body: "The escrowed funds were returned to the buyer." },
     reviewCreated: { title: "Buyer left a review", body: "Rating: {rating}/5." },
     disputed: { title: "Dispute opened" },
     disputeResolved: { title: "Dispute resolved by admin" },

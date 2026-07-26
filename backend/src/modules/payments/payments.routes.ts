@@ -348,7 +348,10 @@ router.post(
       await persistConfirmedWebhookOutcome({
         provider: "liqpay",
         subject: { orderId: order.id },
-        operation: () => lockEscrow(order.id, order.buyer_id, "liqpay", reference)
+        operation: () =>
+          lockEscrow(order.id, order.buyer_id, "liqpay", reference, {
+            actor: { kind: "service", id: "liqpay", role: "payment_provider" }
+          })
       });
       return res.status(200).send("ok");
     }
@@ -392,7 +395,10 @@ router.post(
       await persistConfirmedWebhookOutcome({
         provider: "monobank",
         subject: { orderId: order.id },
-        operation: () => lockEscrow(order.id, order.buyer_id, "monobank", invoice.invoiceId)
+        operation: () =>
+          lockEscrow(order.id, order.buyer_id, "monobank", invoice.invoiceId, {
+            actor: { kind: "service", id: "monobank", role: "payment_provider" }
+          })
       });
       return res.status(200).send("ok");
     }
@@ -434,7 +440,10 @@ router.post(
         await persistConfirmedWebhookOutcome({
           provider: "wayforpay",
           subject: { orderId: order.id },
-          operation: () => lockEscrow(order.id, order.buyer_id, "wayforpay", orderReference)
+          operation: () =>
+            lockEscrow(order.id, order.buyer_id, "wayforpay", orderReference, {
+              actor: { kind: "service", id: "wayforpay", role: "payment_provider" }
+            })
         });
       } else {
         const topupRow = await pool.query(`select id from wallet_topups where id = $1`, [orderReference]);

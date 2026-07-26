@@ -491,76 +491,65 @@ cycle and may still mix conventions.
 
 ## Stage 7: centralized order state machine
 
-Status: complete (transition-matrix centralization; see remaining constraint for the
-narrower scope actually shipped).
+Status: complete.
 
 Commit: `refactor(orders): enforce centralized order state transitions`
 
 ### Confirmed defect
 
-The order status graph existed only as seven independent, hand-written status lists
-scattered across `lockEscrow`/`releaseEscrow`/`refundEscrow` (`ledger.service.ts`),
-the seller `/start` and `/deliver` routes, the dispute-open route, and the mock
-payment failure path — each a literal array duplicating the same knowledge with no
-shared source of truth and no test that they agreed with each other or with
-`docs/domain-invariants.md`.
+The first Stage 7 pass centralized only the boolean graph. Production code still had
+direct `update orders set status = ...` statements in order routes, escrow accounting,
+dispute opening, and mock-payment failure. Each call site remained responsible for
+its own lock, actor check, timestamps, timeline event, and outbox insert, so a new path
+could still bypass part of the lifecycle contract.
 
 ### Implementation
 
-- `backend/src/modules/orders/order-transitions.ts`: `ORDER_TRANSITIONS` (the
-  canonical `Record<OrderStatus, OrderStatus[]>`, reverse-engineered from the seven
-  existing guards, matching `docs/domain-invariants.md` exactly) and
-  `canTransitionOrder(from, to)`.
-- Wired as a drop-in boolean replacement for the existing inline
-  `[...].includes(status)` checks in `releaseEscrow`, `refundEscrow` (both
-  money-critical; only the source-status *set* changed from a literal array to the
-  shared matrix — no change to fee calculation, ledger entries, wallet updates, or
-  error messages/status codes), the dispute-open route, and `/orders/:id/deliver`
-  (restructured from a single combined `UPDATE ... WHERE seller_id=$2 AND status IN
-  (...)` into `SELECT ... FOR UPDATE` + the shared check + an unconditional `UPDATE
-  ... WHERE id=$1` — same atomicity via the row lock, same error message, same 400
-  status).
-- Left untouched, deliberately: `lockEscrow` (only one valid source status,
-  `pending` — a plain equality check, not a multi-source set the matrix would
-  simplify) and `/orders/:id/start` and the mock payment-failure path (same reason;
-  `/start`'s message is also not asserted by any test but the equality check itself
-  carries no duplicated-array risk to centralize). Status-specific timestamp writes
-  (`paidAt`, `deliveredAt`, `completedAt`, `autoReleaseAt`) stay at each call site,
-  not centralized in this pass.
+- `backend/src/modules/orders/order-transitions.ts` remains the canonical N×N graph
+  and now exposes both `canTransitionOrder` and `assertOrderTransition`.
+- `backend/src/modules/orders/order-transition.service.ts` is the only production
+  writer of `orders.status`. It selects an explicit typed order row `FOR UPDATE`,
+  checks `expectedFrom`, the graph, reason/action policy, and the actor identity.
+  Buyer, seller, and participant IDs are matched to the locked row; an asserted admin
+  role is verified against the persisted user.
+- The actor is a discriminated payload containing `kind`, `id`, and `role`.
+  User actors and internal actors (payment provider, test payment, auto-release,
+  system) have separate allowed reason/action pairs.
+- The service owns `paid_at`, `delivered_at`, `completed_at`, `auto_release_at`, and
+  `updated_at`. Delivery establishes the auto-release deadline; later states preserve
+  that historical deadline (workers filter on `status = 'delivered'`), while
+  completion/refund records `completed_at`.
+- The status write, one localized order timeline event, and one existing public
+  domain-outbox contract commit together. Exact committed retries return the locked
+  row only when the matching transition evidence already exists, so they do not
+  duplicate the event or outbox intent.
+- Seller start/deliver, payment capture (including instant delivery and provider
+  callbacks), mock failure, dispute open, buyer/admin/system release, refund, and both
+  auto-release workers now call this service. Non-status payment/ledger/product/chat
+  writes stay in the caller's same database transaction; the transition service has
+  no provider, Redis, queue, email, or other external side effects.
+- Existing event keys, event types, payloads, and timeline template keys remain
+  stable. Refunds add the previously missing durable `order.refunded` transition
+  intent; dispute resolution continues to own participant-facing resolution
+  notifications.
 
-### Regression coverage (`backend/test/order-transitions.test.ts`, 7 tests)
+### Regression coverage (`backend/test/order-transitions.test.ts`, 11 tests)
 
-Full N×N matrix (`ORDER_STATUSES × ORDER_STATUSES`) asserts every pair's
-allowed/forbidden status against the documented graph; every terminal status
-(`completed`/`refunded`/`canceled`) has zero outgoing transitions; no status
-transitions to itself. Integration tests exercise the *real* `lockEscrow` /
-`releaseEscrow` / `refundEscrow` (not mocked) to prove a forbidden transition leaves
-the DB unchanged, `releaseEscrow` only succeeds from `delivered`/`disputed`,
-`refundEscrow` succeeds from all four escrowed statuses and rejects an
-already-refunded order, and two concurrent resolution attempts on one order
-serialize to exactly one winner (also exercises the Stage 4 retry helper live -
-`serializable_tx_retry` fires during the run).
+The full `ORDER_STATUSES × ORDER_STATUSES` matrix tests both boolean and asserting
+APIs, terminal states, and self-transitions. Service integration covers every
+lifecycle timestamp boundary and the established event/outbox contracts; buyer,
+seller, participant, and persisted-admin authorization; forbidden-transition DB
+immutability; two conflicting parallel transitions serializing to one winner with one
+event/outbox row; and an exact committed retry producing no duplicate evidence.
+The existing real `lockEscrow` / `releaseEscrow` / `refundEscrow` scenarios continue
+to cover the money-moving integration and one-winner financial race.
 
 ### Verification
 
 | Command | Result |
 | --- | --- |
 | `cd backend && npm run lint` | PASS |
-| `npx vitest run test/order-transitions.test.ts` | PASS, 7/7 |
-| `npx vitest run test/ledger.test.ts test/dispute-consistency.test.ts test/test-payments.test.ts` | PASS, 21/21 |
-| `cd backend && npm test` | PASS, 293/293 in 33 files |
-
-### Remaining constraint
-
-A fully generic `transitionOrder(client, {orderId, to, actor, reason, ...})` service
-that every mutation site calls through (per the plan's original sketch) was not
-built — money-critical `lockEscrow`/`releaseEscrow`/`refundEscrow` interleave the
-status write with fee computation, ledger entries, and wallet updates in one
-statement each, and forcing that through one generic helper risked becoming a leaky
-abstraction (an "extra SET clause" parameter) for uncertain benefit. What shipped
-instead is the higher-value, lower-risk half: one tested, canonical definition of the
-graph that the multi-source-status call sites now consume, with zero change to
-money-moving logic, fee formulas, or ledger entries.
+| `npx vitest run test/order-transitions.test.ts` | PASS, 11/11 |
 
 ## Stage 8: frontend test foundation
 

@@ -7,12 +7,14 @@ import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
-import { DISPUTE_DECISIONS, type OrderStatus } from "../../domain/enums.js";
-import { recordOrderEvent } from "../orders/order-events.service.js";
+import { DISPUTE_DECISIONS } from "../../domain/enums.js";
 import { canTransitionOrder } from "../orders/order-transitions.js";
+import {
+  selectOrderForUpdate,
+  transitionOrder
+} from "../orders/order-transition.service.js";
 import { getMessagePage } from "../chat/chat.service.js";
 import { createOrderSystemMessage } from "../chat/system-messages.service.js";
-import { enqueueDomainEvent } from "../outbox/outbox.service.js";
 import {
   createDisputeMessage,
   getOrderDispute,
@@ -79,13 +81,11 @@ router.post(
     // window where the order says 'disputed' but no dispute row exists, and two concurrent
     // opens (or an open racing a confirm/deliver transition) serialize on the row lock.
     const { dispute, repeated, messageSuggested, buyerId, sellerId } = await inTx(async (client) => {
-      const order = await client.query(`select * from orders where id = $1 for update`, [orderId]);
-      const orderRow = order.rows[0];
-      if (!orderRow) throw notFound("Order not found");
+      const orderRow = await selectOrderForUpdate(client, orderId);
       if (orderRow.buyer_id !== req.user.id && orderRow.seller_id !== req.user.id) throw forbidden();
 
       const isRepeat = orderRow.status === "disputed";
-      if (!isRepeat && !canTransitionOrder(orderRow.status as OrderStatus, "disputed")) {
+      if (!isRepeat && !canTransitionOrder(orderRow.status, "disputed")) {
         throw badRequest("Only active escrowed orders can be disputed");
       }
 
@@ -107,7 +107,6 @@ router.post(
         };
       }
 
-      await client.query(`update orders set status = 'disputed', updated_at = now() where id = $1`, [orderId]);
       const inserted = await client.query(
         `insert into disputes(order_id, opened_by, reason)
          values ($1, $2, $3)
@@ -115,17 +114,6 @@ router.post(
         [orderId, req.user.id, input.reason]
       );
       const createdDispute = inserted.rows[0];
-      await recordOrderEvent(
-        {
-          orderId,
-          actorId: req.user.id,
-          type: "disputed",
-          templateKey: "orderEvents.disputed",
-          // The dispute reason is user-generated content - stored raw, never translated.
-          body: input.reason
-        },
-        client
-      );
       const message = await createOrderSystemMessage(
         {
           orderId,
@@ -135,17 +123,16 @@ router.post(
         },
         client
       );
-      await enqueueDomainEvent(client, {
-        eventKey: `dispute.opened:${createdDispute.id}`,
-        eventType: "dispute.opened",
-        aggregateType: "dispute",
-        aggregateId: createdDispute.id,
-        payload: {
+      await transitionOrder(client, {
+        orderId,
+        to: "disputed",
+        actor: { kind: "user", id: req.user.id, role: "participant" },
+        reason: "dispute_opened",
+        expectedFrom: ["paid", "in_progress", "delivered"],
+        metadata: {
           disputeId: createdDispute.id,
-          orderId,
-          buyerId: orderRow.buyer_id,
-          sellerId: orderRow.seller_id,
-          productId: orderRow.product_id,
+          // The dispute reason is user-generated content - stored raw, never translated.
+          disputeReason: input.reason,
           systemMessageIds: message ? [message.id] : []
         }
       });

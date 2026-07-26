@@ -294,7 +294,7 @@ router.post(
     let updated;
     try {
       updated = await lockEscrow(orderId, order.buyer_id, "manual", reference, {
-        actorId: req.user.id
+        actor: { kind: "user", id: req.user.id, role: "admin" }
       });
       paymentAttemptsTotal.labels("manual", "captured").inc();
     } catch (error) {

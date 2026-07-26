@@ -28,8 +28,7 @@ async function waitForBlockedPaymentTransitions(expected: number) {
        where datname = current_database()
          and wait_event_type = 'Lock'
          and (
-           query like '%select * from orders where id = $1 for update%'
-           or query like '%update orders set status = ''canceled''%'
+           query like '%from orders%where id = $1%for update%'
          )`
     );
     if (result.rows[0].count >= expected) return;

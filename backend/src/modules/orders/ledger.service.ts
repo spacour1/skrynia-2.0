@@ -1,7 +1,7 @@
 import { env } from "../../config/env.js";
 import type { DbClient } from "../../db/pool.js";
 import { inSerializableTx } from "../../db/pool.js";
-import { badRequest, forbidden, notFound } from "../../common/errors.js";
+import { badRequest, forbidden } from "../../common/errors.js";
 import { cacheDel, cacheDelPattern } from "../../common/redis.js";
 import { getPaymentProvider, type PaymentProviderName } from "../payments/payment.providers.js";
 import {
@@ -13,7 +13,6 @@ import {
   invalidateProductCaches,
   type ProductCacheContext
 } from "../marketplace/marketplace-cache.service.js";
-import { enqueueDomainEvent } from "../outbox/outbox.service.js";
 import {
   addMoneyCents,
   bigintToMoneyCents,
@@ -23,22 +22,14 @@ import {
   subtractMoneyCents,
   type MoneyCents
 } from "../../domain/money.js";
-import type { OrderStatus } from "../../domain/enums.js";
 import { canTransitionOrder } from "./order-transitions.js";
-import { recordOrderEvent } from "./order-events.service.js";
 import { createOrderSystemMessage } from "../chat/system-messages.service.js";
-
-type OrderRow = {
-  id: string;
-  buyer_id: string;
-  seller_id: string;
-  product_id: string;
-  quantity: number;
-  amount_cents: MoneyCents;
-  fee_cents: MoneyCents;
-  currency: string;
-  status: string;
-};
+import {
+  selectOrderForUpdate,
+  transitionOrder,
+  type OrderRow,
+  type OrderTransitionActor
+} from "./order-transition.service.js";
 
 type ProductEscrowRow = ProductCacheContext & {
   stock: number;
@@ -51,15 +42,11 @@ export type ReleaseEscrowOptions = {
   adminId?: string;
   source?: "buyer_confirmed" | "auto" | "dispute" | "service";
   actorId?: string;
-  afterUpdate?: (
-    client: DbClient,
-    order: OrderRow
-  ) => Promise<{ systemMessageIds?: string[] } | void>;
 };
 
 export type LockEscrowOptions = {
-  /** Defaults to the buyer; manual admin confirmation supplies the reviewing admin. */
-  actorId?: string;
+  /** Defaults to the initiating buyer (or the mock-test buyer for provider=mock). */
+  actor?: OrderTransitionActor;
 };
 
 export async function ensureWallet(client: DbClient, userId: string, currency: string) {
@@ -121,9 +108,7 @@ export async function lockEscrow(
   // side effect) while holding the row lock; an automatic retry would repeat that
   // call. The payment provider path keeps its own idempotency key instead.
   const result = await inSerializableTx(async (client) => {
-    const orderResult = await client.query<OrderRow>(`select * from orders where id = $1 for update`, [orderId]);
-    const order = orderResult.rows[0];
-    if (!order) throw notFound("Order not found");
+    const order = await selectOrderForUpdate(client, orderId);
     if (order.buyer_id !== buyerId) throw forbidden("Only the buyer can pay this order");
     if (order.status !== "pending") throw badRequest("Only pending orders can be paid");
 
@@ -202,43 +187,25 @@ export async function lockEscrow(
     });
 
     const isInstant = product.delivery_type === "instant" && product.delivery_template;
-    const updated = await client.query(
+    await client.query(
       `update orders
-       set status = $5,
-           fee_cents = $2,
+       set fee_cents = $2,
            payment_provider = $3,
            payment_reference = $4,
-           delivery_note = case when $6::text is not null then $6 else delivery_note end,
-           delivered_at = case when $6::text is not null then now() else delivered_at end,
-           auto_release_at = case when $6::text is not null then now() + make_interval(hours => $7::int) else auto_release_at end,
-           paid_at = now(),
-           updated_at = now()
-       where id = $1
-       returning *`,
+           delivery_note = case when $5::text is not null then $5 else delivery_note end
+       where id = $1`,
       [
         order.id,
         feeCents,
         payment.provider,
         payment.reference,
-        isInstant ? "delivered" : "paid",
-        isInstant ? product.delivery_template : null,
-        env.AUTO_RELEASE_HOURS
+        isInstant ? product.delivery_template : null
       ]
     );
 
     // The paid timeline row, system message and durable delivery intent belong to the
     // same transaction as the money/status mutation. A process crash after COMMIT can
     // now delay delivery, but cannot permanently lose evidence or notifications.
-    await recordOrderEvent(
-      {
-        orderId: order.id,
-        actorId: options.actorId ?? order.buyer_id,
-        type: "paid",
-        templateKey: "orderEvents.paid",
-        metadata: { provider: payment.provider }
-      },
-      client
-    );
     const message = await createOrderSystemMessage(
       {
         orderId: order.id,
@@ -247,16 +214,19 @@ export async function lockEscrow(
       },
       client
     );
-    await enqueueDomainEvent(client, {
-      eventKey: `order.paid:${order.id}`,
-      eventType: "order.paid",
-      aggregateType: "order",
-      aggregateId: order.id,
-      payload: {
-        orderId: order.id,
-        buyerId: order.buyer_id,
-        sellerId: order.seller_id,
-        productId: order.product_id,
+    const actor =
+      options.actor ??
+      (providerName === "mock"
+        ? ({ kind: "service", id: order.buyer_id, role: "test_payment" } as const)
+        : ({ kind: "user", id: order.buyer_id, role: "buyer" } as const));
+    const updated = await transitionOrder(client, {
+      orderId: order.id,
+      to: isInstant ? "delivered" : "paid",
+      actor,
+      reason: "payment_captured",
+      expectedFrom: ["pending"],
+      metadata: {
+        provider: payment.provider,
         systemMessageIds: message ? [message.id] : []
       }
     });
@@ -268,7 +238,7 @@ export async function lockEscrow(
     await cacheDelPattern(`order:${order.id}:*`);
     await cacheDelPattern(`orders:${order.buyer_id}:*`);
     await cacheDelPattern(`orders:${order.seller_id}:*`);
-    return { order: updated.rows[0], productContext: product as ProductCacheContext };
+    return { order: updated, productContext: product as ProductCacheContext };
   }, { maxAttempts: 1 });
   await invalidateProductCaches(result.productContext);
   return result.order;
@@ -285,12 +255,73 @@ export async function releaseEscrow(
   const source = options.source ?? (options.adminId ? "dispute" : "service");
 
   return inSerializableTx(async (client) => {
-    const orderResult = await client.query<OrderRow>(`select * from orders where id = $1 for update`, [orderId]);
-    const order = orderResult.rows[0];
-    if (!order) throw notFound("Order not found");
-    if (!canTransitionOrder(order.status as OrderStatus, "completed")) {
+    const order = await selectOrderForUpdate(client, orderId);
+    if (!canTransitionOrder(order.status, "completed")) {
       throw badRequest("Only delivered or disputed orders can be released");
     }
+
+    const message =
+      source === "buyer_confirmed" || source === "auto"
+        ? await createOrderSystemMessage(
+            {
+              orderId,
+              type: "escrow_released",
+              bodyKey:
+                source === "buyer_confirmed"
+                  ? "system.escrowReleased"
+                  : "system.fundsReleased"
+            },
+            client
+          )
+        : null;
+    const transition =
+      source === "buyer_confirmed"
+        ? {
+            actor: {
+              kind: "user",
+              id: options.actorId ?? order.buyer_id,
+              role: "buyer"
+            } as const,
+            reason: "buyer_confirmed" as const,
+            expectedFrom: ["delivered"] as const
+          }
+        : source === "auto"
+          ? {
+              actor: {
+                kind: "service",
+                id: "auto-release-worker",
+                role: "auto_release"
+              } as const,
+              reason: "auto_released" as const,
+              expectedFrom: ["delivered"] as const
+            }
+          : source === "dispute"
+            ? {
+                actor: {
+                  kind: "user",
+                  id: options.adminId ?? "",
+                  role: "admin"
+                } as const,
+                reason: "dispute_released" as const,
+                expectedFrom: ["disputed"] as const
+              }
+            : {
+                actor: {
+                  kind: "service",
+                  id: "escrow-service",
+                  role: "system"
+                } as const,
+                reason: "service_released" as const,
+                expectedFrom: ["delivered", "disputed"] as const
+              };
+    const updated = await transitionOrder(client, {
+      orderId,
+      to: "completed",
+      actor: transition.actor,
+      reason: transition.reason,
+      expectedFrom: transition.expectedFrom,
+      metadata: { systemMessageIds: message ? [message.id] : [] }
+    });
 
     const sellerWalletId = await ensureWallet(client, order.seller_id, order.currency);
     const sellerWallet = await client.query<{
@@ -376,15 +407,7 @@ export async function releaseEscrow(
       adminId: options.adminId ?? null
     });
 
-    const updated = await client.query(
-      `update orders
-       set status = 'completed', completed_at = now(), updated_at = now()
-       where id = $1
-       returning *`,
-      [order.id]
-    );
-
-    const productResult = await client.query<ProductCacheContext>(
+    await client.query<ProductCacheContext>(
       `update products
        set sales_count = sales_count + $2, updated_at = now()
        where id = $1
@@ -393,37 +416,27 @@ export async function releaseEscrow(
       [order.product_id, order.quantity]
     );
 
-    const transition = await options.afterUpdate?.(
-      client,
-      updated.rows[0] as OrderRow
-    );
-    await enqueueDomainEvent(client, {
-      eventKey: `order.completed:${order.id}`,
-      eventType: "order.completed",
-      aggregateType: "order",
-      aggregateId: order.id,
-      payload: {
-        orderId: order.id,
-        buyerId: order.buyer_id,
-        sellerId: order.seller_id,
-        productId: productResult.rows[0].productId,
-        source,
-        actorId: options.actorId ?? null,
-        systemMessageIds: transition?.systemMessageIds ?? []
-      }
-    });
-    return updated.rows[0];
+    return updated;
   });
 }
 
 export async function refundEscrow(orderId: string, adminId?: string) {
   return inSerializableTx(async (client) => {
-    const orderResult = await client.query<OrderRow>(`select * from orders where id = $1 for update`, [orderId]);
-    const order = orderResult.rows[0];
-    if (!order) throw notFound("Order not found");
-    if (!canTransitionOrder(order.status as OrderStatus, "refunded")) {
+    const order = await selectOrderForUpdate(client, orderId);
+    if (!canTransitionOrder(order.status, "refunded")) {
       throw badRequest("Only escrowed orders can be refunded");
     }
+    const updated = await transitionOrder(client, {
+      orderId,
+      to: "refunded",
+      actor: adminId
+        ? { kind: "user", id: adminId, role: "admin" }
+        : { kind: "service", id: "escrow-service", role: "system" },
+      reason: adminId ? "dispute_refunded" : "service_refunded",
+      expectedFrom: adminId
+        ? ["disputed"]
+        : ["paid", "in_progress", "delivered", "disputed"]
+    });
 
     const sellerWalletId = await ensureWallet(client, order.seller_id, order.currency);
     const buyerWalletId = await ensureWallet(client, order.buyer_id, order.currency);
@@ -486,14 +499,6 @@ export async function refundEscrow(orderId: string, adminId?: string) {
       adminId: adminId ?? null
     });
 
-    const updated = await client.query(
-      `update orders
-       set status = 'refunded', completed_at = now(), updated_at = now()
-       where id = $1
-       returning *`,
-      [order.id]
-    );
-
     await cacheDel(
       `user:${order.buyer_id}:wallet`,
       `user:${order.seller_id}:wallet`
@@ -501,6 +506,6 @@ export async function refundEscrow(orderId: string, adminId?: string) {
     await cacheDelPattern(`order:${order.id}:*`);
     await cacheDelPattern(`orders:${order.buyer_id}:*`);
     await cacheDelPattern(`orders:${order.seller_id}:*`);
-    return updated.rows[0];
+    return updated;
   });
 }

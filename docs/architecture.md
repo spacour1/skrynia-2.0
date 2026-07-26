@@ -100,18 +100,19 @@ Access token: 15 min JWT in httpOnly cookie. Refresh token: 90-day JWT in httpOn
 ## Order / escrow state machine
 
 ```
-created
-  └─→ paid (payment webhook confirms hold)
-        └─→ in_progress (seller starts)
-              └─→ delivered (seller marks delivered)
-                    └─→ completed (buyer confirms OR auto-release after 72 h)
-                    └─→ disputed
-                          └─→ resolved → completed or refunded
-
-Any state → canceled (before payment)
+pending ─→ paid ─→ in_progress ─→ delivered ─→ completed
+   │        │            │             │
+   │        ├────────────┴─────────────┼─→ disputed ─→ completed
+   │        └────────────┬─────────────┴─────────────→ refunded
+   ├─→ delivered (instant delivery)
+   └─→ canceled (test/mock payment failure before capture)
 ```
 
-Each transition posts a system message to the order's chat conversation.
+`completed`, `refunded`, and `canceled` are terminal. Every status write goes through
+`transitionOrder`, which locks the row, enforces the graph and actor permission,
+maintains lifecycle timestamps, and atomically records the timeline event plus durable
+outbox intent. User-visible transitions also add the matching system chat message in
+the same database transaction.
 
 ## Double-entry ledger
 
@@ -150,7 +151,7 @@ never start them. Job names:
 
 | Job | Trigger | Effect |
 |-----|---------|--------|
-| `auto_release_order` | Scheduled at order creation (+72 h) | Releases escrow if still `delivered` |
+| `auto_release_order` | Due 72 h after delivery | Releases escrow if still `delivered` |
 | `email_notification` | Enqueued by `notifications.service.ts` | Sends email via Resend + Telegram DM |
 | `reconciliation_daily` | Cron 03:00 UTC | Snapshots ledger, alerts admins on mismatch |
 

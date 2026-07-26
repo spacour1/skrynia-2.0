@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { z } from "zod";
-import { env } from "../../config/env.js";
 import { inTx, pool } from "../../db/pool.js";
 import {
   ApiError,
@@ -16,7 +15,10 @@ import type { AuthedRequest } from "../../common/types.js";
 import { releaseEscrow } from "./ledger.service.js";
 import { recordOrderEvent } from "./order-events.service.js";
 import { canTransitionOrder } from "./order-transitions.js";
-import type { OrderStatus } from "../../domain/enums.js";
+import {
+  selectOrderForUpdate,
+  transitionOrder
+} from "./order-transition.service.js";
 import { getOrCreateOrderConversation } from "../chat/chat.service.js";
 import {
   createOrderSystemMessage,
@@ -287,26 +289,13 @@ router.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const order = await inTx(async (client) => {
-      const result = await client.query(
-        `update orders
-         set status = 'in_progress', updated_at = now()
-         where id = $1 and seller_id = $2 and status = 'paid'
-         returning *`,
-        [id, req.user.id]
-      );
-      const updatedOrder = result.rows[0];
-      if (!updatedOrder) {
+      const existingOrder = await selectOrderForUpdate(client, id);
+      if (
+        existingOrder.seller_id !== req.user.id ||
+        !canTransitionOrder(existingOrder.status, "in_progress")
+      ) {
         throw badRequest("Only the seller can start a paid order");
       }
-      await recordOrderEvent(
-        {
-          orderId: id,
-          actorId: req.user.id,
-          type: "started",
-          templateKey: "orderEvents.started"
-        },
-        client
-      );
       const message = await createOrderSystemMessage(
         {
           orderId: id,
@@ -315,20 +304,14 @@ router.post(
         },
         client
       );
-      await enqueueDomainEvent(client, {
-        eventKey: `order.started:${id}`,
-        eventType: "order.started",
-        aggregateType: "order",
-        aggregateId: id,
-        payload: {
-          orderId: id,
-          buyerId: updatedOrder.buyer_id,
-          sellerId: updatedOrder.seller_id,
-          productId: updatedOrder.product_id,
-          systemMessageIds: message ? [message.id] : []
-        }
+      return transitionOrder(client, {
+        orderId: id,
+        to: "in_progress",
+        actor: { kind: "user", id: req.user.id, role: "seller" },
+        reason: "seller_started",
+        expectedFrom: ["paid"],
+        metadata: { systemMessageIds: message ? [message.id] : [] }
       });
-      return updatedOrder;
     });
     res.json({ order: mapOrderRowDto(order) });
   })
@@ -342,35 +325,18 @@ router.post(
     const id = z.string().uuid().parse(req.params.id);
     const input = deliverSchema.parse(req.body);
     const order = await inTx(async (client) => {
-      const existing = await client.query(`select * from orders where id = $1 for update`, [id]);
-      const existingOrder = existing.rows[0];
+      const existingOrder = await selectOrderForUpdate(client, id);
       if (
-        !existingOrder ||
         existingOrder.seller_id !== req.user.id ||
-        !canTransitionOrder(existingOrder.status as OrderStatus, "delivered")
+        !canTransitionOrder(existingOrder.status, "delivered")
       ) {
         throw badRequest("Only the seller can deliver an active escrowed order");
       }
-      const result = await client.query(
+      await client.query(
         `update orders
-         set status = 'delivered',
-             delivery_note = $2,
-             delivered_at = now(),
-             auto_release_at = now() + make_interval(hours => $3::int),
-             updated_at = now()
-         where id = $1
-         returning *`,
-        [id, input.deliveryNote, env.AUTO_RELEASE_HOURS]
-      );
-      const updatedOrder = result.rows[0];
-      await recordOrderEvent(
-        {
-          orderId: id,
-          actorId: req.user.id,
-          type: "delivered",
-          templateKey: "orderEvents.delivered"
-        },
-        client
+         set delivery_note = $2
+         where id = $1`,
+        [id, input.deliveryNote]
       );
       const message = await createOrderSystemMessage(
         {
@@ -380,20 +346,14 @@ router.post(
         },
         client
       );
-      await enqueueDomainEvent(client, {
-        eventKey: `order.delivered:${id}`,
-        eventType: "order.delivered",
-        aggregateType: "order",
-        aggregateId: id,
-        payload: {
-          orderId: id,
-          buyerId: updatedOrder.buyer_id,
-          sellerId: updatedOrder.seller_id,
-          productId: updatedOrder.product_id,
-          systemMessageIds: message ? [message.id] : []
-        }
+      return transitionOrder(client, {
+        orderId: id,
+        to: "delivered",
+        actor: { kind: "user", id: req.user.id, role: "seller" },
+        reason: "seller_delivered",
+        expectedFrom: ["paid", "in_progress"],
+        metadata: { systemMessageIds: message ? [message.id] : [] }
       });
-      return updatedOrder;
     });
     res.json({ order: mapOrderRowDto(order) });
   })
@@ -413,27 +373,7 @@ router.post(
 
     const updated = await releaseEscrow(id, {
       source: "buyer_confirmed",
-      actorId: req.user.id,
-      afterUpdate: async (client) => {
-        await recordOrderEvent(
-          {
-            orderId: id,
-            actorId: req.user.id,
-            type: "completed",
-            templateKey: "orderEvents.completed"
-          },
-          client
-        );
-        const message = await createOrderSystemMessage(
-          {
-            orderId: id,
-            type: "escrow_released",
-            bodyKey: "system.escrowReleased"
-          },
-          client
-        );
-        return { systemMessageIds: message ? [message.id] : [] };
-      }
+      actorId: req.user.id
     });
     res.json({ order: mapOrderRowDto(updated) });
   })

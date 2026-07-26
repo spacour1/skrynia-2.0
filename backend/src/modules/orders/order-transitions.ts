@@ -22,3 +22,19 @@ export const ORDER_TRANSITIONS: Readonly<Record<OrderStatus, readonly OrderStatu
 export function canTransitionOrder(from: OrderStatus, to: OrderStatus): boolean {
   return ORDER_TRANSITIONS[from]?.includes(to) ?? false;
 }
+
+export class InvalidOrderTransitionError extends Error {
+  constructor(
+    readonly from: OrderStatus,
+    readonly to: OrderStatus
+  ) {
+    super(`Order cannot transition from ${from} to ${to}`);
+    this.name = "InvalidOrderTransitionError";
+  }
+}
+
+export function assertOrderTransition(from: OrderStatus, to: OrderStatus): void {
+  if (!canTransitionOrder(from, to)) {
+    throw new InvalidOrderTransitionError(from, to);
+  }
+}

@@ -352,6 +352,14 @@ async function handleOrderCompleted(event: DomainOutboxEvent) {
   await broadcastStoredMessages(payload.systemMessageIds);
 }
 
+async function handleOrderRefunded(event: DomainOutboxEvent) {
+  const payload = orderTransitionPayload.parse(event.payload);
+  // Dispute resolution owns participant notifications. This transition intent owns
+  // the status/wallet cache boundary and remains useful for non-dispute refunds too.
+  await invalidateOrderCaches({ ...payload, wallet: true });
+  await broadcastStoredMessages(payload.systemMessageIds);
+}
+
 async function handleReviewCreated(event: DomainOutboxEvent) {
   const payload = reviewCreatedPayload.parse(event.payload);
   await createOutboxNotification(event, {
@@ -555,6 +563,8 @@ export async function handleDomainEvent(event: DomainOutboxEvent): Promise<void>
       return handleOrderDelivered(event);
     case "order.completed":
       return handleOrderCompleted(event);
+    case "order.refunded":
+      return handleOrderRefunded(event);
     case "review.created":
       return handleReviewCreated(event);
     case "dispute.opened":

@@ -7,6 +7,7 @@ export const domainEventTypes = [
   "order.started",
   "order.delivered",
   "order.completed",
+  "order.refunded",
   "review.created",
   "dispute.opened",
   "dispute.resolved",

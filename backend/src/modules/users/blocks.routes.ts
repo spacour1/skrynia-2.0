@@ -5,6 +5,11 @@ import { asyncHandler, badRequest, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import type { AuthedRequest } from "../../common/types.js";
+import {
+  buildLookaheadNextCursor,
+  keysetWhereClause,
+  parseCursorPage
+} from "../../common/pagination.js";
 
 const router = Router();
 
@@ -39,15 +44,29 @@ router.get(
   "/me/blocked",
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
+    const { limit, cursor } = parseCursorPage(req.query);
+    const values: unknown[] = [req.user.id];
+    const cursorWhere = keysetWhereClause(values, cursor, "ub.created_at", "ub.blocked_id");
+    values.push(limit + 1);
     const result = await pool.query(
-      `select u.id, u.display_name as "displayName", u.avatar_url as "avatarUrl", ub.created_at as "createdAt"
+      `select u.id, u.display_name as "displayName", u.avatar_url as "avatarUrl",
+              ub.created_at as "createdAt", ub.created_at::text as "cursorCreatedAt"
        from user_blocks ub
        join users u on u.id = ub.blocked_id
        where ub.blocker_id = $1
-       order by ub.created_at desc`,
-      [req.user.id]
+         ${cursorWhere ? `and ${cursorWhere}` : ""}
+       order by ub.created_at desc, ub.blocked_id desc
+       limit $${values.length}`,
+      values
     );
-    res.json({ blocked: result.rows });
+    const nextCursor = buildLookaheadNextCursor(
+      result.rows.map((row) => ({ id: row.id, createdAt: row.cursorCreatedAt })),
+      limit
+    );
+    const blocked = result.rows
+      .slice(0, limit)
+      .map(({ cursorCreatedAt: _cursor, ...row }) => row);
+    res.json({ blocked, nextCursor });
   })
 );
 

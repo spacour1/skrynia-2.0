@@ -26,6 +26,7 @@ import { firstProductMedia } from "@/lib/product-media";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
 import { showAppToast } from "@/lib/toast-events";
+import { fetchAllCursorItems } from "@/lib/cursor-pages";
 
 type MetaFilterValue = string | { min: string; max: string };
 
@@ -128,7 +129,12 @@ export function GameCatalogClient({ slug }: { slug: string }) {
   });
   const favoriteIds = useQuery({
     queryKey: ["favorite-ids"],
-    queryFn: () => apiFetch<{ productIds: string[] }>("/marketplace/favorites/ids"),
+    queryFn: async () => ({
+      productIds: await fetchAllCursorItems<"productIds", string>(
+        "/marketplace/favorites/ids",
+        "productIds"
+      )
+    }),
     enabled: Boolean(user)
   });
   const favoriteMutation = useMutation({

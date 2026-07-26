@@ -7,6 +7,11 @@ import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { moneyToCents } from "../../common/validation.js";
 import type { AuthedRequest } from "../../common/types.js";
+import {
+  buildLookaheadNextCursor,
+  keysetWhereClause,
+  parseCursorPage
+} from "../../common/pagination.js";
 import { DELIVERY_TYPES, PRODUCT_TYPES } from "../../domain/enums.js";
 import { resolveActiveSectionChain, validateLotMetadata } from "../catalog/catalog.service.js";
 import {
@@ -60,13 +65,17 @@ router.get(
   "/seller/products",
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
+    const { limit, cursor } = parseCursorPage(req.query);
+    const values: unknown[] = [req.user.id];
+    const cursorWhere = keysetWhereClause(values, cursor, "p.created_at", "p.id");
+    values.push(limit + 1);
     const result = await pool.query(
       `select p.id, p.title, p.description, p.price_cents as "priceCents", p.currency, p.stock,
               p.status, p.delivery_type as "deliveryType", p.server, p.platform, p.metadata,
               p.section_id as "sectionId", p.schema_version as "schemaVersion",
               p.product_type as "productType", p.old_price_cents as "oldPriceCents",
               p.sales_count as "salesCount", p.is_hot as "isHot", p.is_recommended as "isRecommended",
-              p.created_at as "createdAt",
+              p.created_at as "createdAt", p.created_at::text as "cursorCreatedAt",
               c.id as "categoryId", c.name as "categoryName",
               g.id as "gameId", g.name as "gameName",
               gs.name as "sectionName",
@@ -77,14 +86,25 @@ router.get(
        left join game_sections gs on gs.id = p.section_id
        left join product_media pm on pm.product_id = p.id
        where p.seller_id = $1 and p.status != 'deleted'
+         ${cursorWhere ? `and ${cursorWhere}` : ""}
        group by p.id, c.id, g.id, gs.id
-       order by p.created_at desc`,
-      [req.user.id]
+       order by p.created_at desc, p.id desc
+       limit $${values.length}`,
+      values
     );
+    const nextCursor = buildLookaheadNextCursor(
+      result.rows.map((row) => ({
+        id: row.id as string,
+        createdAt: row.cursorCreatedAt as string
+      })),
+      limit
+    );
+    const pageRows = result.rows.slice(0, limit).map(({ cursorCreatedAt: _cursor, ...row }) => row);
     res.json({
       products: await attachCardMetadata(
-        await addSellerPresence(result.rows.map(mapProductMoneyFields))
-      )
+        await addSellerPresence(pageRows.map(mapProductMoneyFields))
+      ),
+      nextCursor
     });
   })
 );

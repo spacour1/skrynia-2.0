@@ -31,6 +31,7 @@ import { useAuth } from "../../lib/auth-store";
 import { SECTION_PATTERNS, getGameTileTheme, type CategoryTile, type GameTileThemeConfig } from "../../lib/game-catalog";
 import { useI18n } from "../../lib/i18n";
 import { formatDate, formatNumber } from "../../lib/locale-format";
+import { fetchAllCursorItems } from "../../lib/cursor-pages";
 
 export default function HomePage() {
   const { t } = useI18n();
@@ -423,7 +424,12 @@ function FreshOffers() {
 
   const favoriteIds = useQuery({
     queryKey: ["favorite-ids"],
-    queryFn: () => apiFetch<{ productIds: string[] }>("/marketplace/favorites/ids"),
+    queryFn: async () => ({
+      productIds: await fetchAllCursorItems<"productIds", string>(
+        "/marketplace/favorites/ids",
+        "productIds"
+      )
+    }),
     enabled: Boolean(user)
   });
   const favorites = new Set(favoriteIds.data?.productIds ?? []);

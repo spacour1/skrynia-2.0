@@ -40,7 +40,10 @@ export function decodeCursor(raw: string): DecodedCursor {
   if (Number.isNaN(Date.parse(createdAt)) || !cursorIdSchema.safeParse(id).success) {
     throw badRequest("Invalid pagination cursor");
   }
-  return { createdAt: new Date(createdAt).toISOString(), id };
+  // Preserve sub-millisecond precision emitted by PostgreSQL (`created_at::text`).
+  // Normalizing through `Date#toISOString()` truncates microseconds and can make the
+  // resume predicate skip every tied row that falls later in that same millisecond.
+  return { createdAt, id };
 }
 
 export type CursorPage = { limit: number; cursor: DecodedCursor | null };
@@ -104,4 +107,20 @@ export function buildNextCursor<T extends { createdAt: Date | string; id: string
   if (rows.length < limit) return null;
   const last = rows[rows.length - 1];
   return encodeCursor(last.createdAt, last.id);
+}
+
+/**
+ * Builds an exact `nextCursor` for queries that fetch `limit + 1` rows. Unlike
+ * `buildNextCursor` (kept for older callers that fetch exactly `limit`), this does
+ * not advertise a continuation when the result has exactly one full final page.
+ * The cursor always points at the last row returned to the client, never at the
+ * look-ahead row.
+ */
+export function buildLookaheadNextCursor<T extends { createdAt: Date | string; id: string }>(
+  rows: T[],
+  limit: number
+): string | null {
+  if (rows.length <= limit) return null;
+  const lastVisible = rows[limit - 1];
+  return encodeCursor(lastVisible.createdAt, lastVisible.id);
 }

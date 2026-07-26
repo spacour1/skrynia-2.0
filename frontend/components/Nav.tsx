@@ -104,7 +104,7 @@ export function Nav() {
   const isStaff = user?.role === "admin" || user?.role === "moderator";
   const sellerProducts = useQuery({
     queryKey: ["nav-seller-products"],
-    queryFn: () => apiFetch<{ products: unknown[] }>("/marketplace/seller/products"),
+    queryFn: () => apiFetch<{ products: unknown[] }>("/marketplace/seller/products?limit=1"),
     enabled: Boolean(user) && !isStaff,
     staleTime: 5 * 60 * 1000
   });

@@ -1,7 +1,12 @@
 "use client";
 
 import Link from "@/lib/navigation";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+  type InfiniteData
+} from "@tanstack/react-query";
 import { BadgePercent, Heart, PackageOpen, Star, Store, Timer } from "lucide-react";
 import { GameIcon } from "@/components/GameIcon";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -10,6 +15,12 @@ import { calculateDiscountPercent, isPositiveMoneyCents, useMoney } from "@/lib/
 import { firstProductMedia } from "@/lib/product-media";
 import { showAppToast } from "@/lib/toast-events";
 import { useI18n } from "@/lib/i18n";
+import {
+  cursorPagePath,
+  type CursorItemsPage
+} from "@/lib/cursor-pages";
+
+type FavoritePage = CursorItemsPage<"products", Product>;
 
 export default function FavoritesPage() {
   return (
@@ -22,9 +33,12 @@ export default function FavoritesPage() {
 function FavoritesContent() {
   const client = useQueryClient();
   const { t } = useI18n();
-  const favorites = useQuery({
+  const favorites = useInfiniteQuery({
     queryKey: ["favorites"],
-    queryFn: () => apiFetch<{ products: Product[] }>("/marketplace/favorites")
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      apiFetch<FavoritePage>(cursorPagePath("/marketplace/favorites", pageParam)),
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined
   });
 
   const removeFavorite = useMutation({
@@ -32,11 +46,19 @@ function FavoritesContent() {
     onMutate: async (productId) => {
       await client.cancelQueries({ queryKey: ["favorites"] });
       await client.cancelQueries({ queryKey: ["favorite-ids"] });
-      const previousFavorites = client.getQueryData<{ products: Product[] }>(["favorites"]);
+      const previousFavorites = client.getQueryData<InfiniteData<FavoritePage>>(["favorites"]);
       const previousIds = client.getQueryData<{ productIds: string[] }>(["favorite-ids"]);
-      client.setQueryData<{ products: Product[] }>(["favorites"], (current) => ({
-        products: (current?.products ?? []).filter((product) => product.id !== productId)
-      }));
+      client.setQueryData<InfiniteData<FavoritePage>>(["favorites"], (current) =>
+        current
+          ? {
+              ...current,
+              pages: current.pages.map((page) => ({
+                ...page,
+                products: page.products.filter((product) => product.id !== productId)
+              }))
+            }
+          : current
+      );
       client.setQueryData<{ productIds: string[] }>(["favorite-ids"], (current) => ({
         productIds: (current?.productIds ?? []).filter((id) => id !== productId)
       }));
@@ -59,7 +81,7 @@ function FavoritesContent() {
     }
   });
 
-  const products = favorites.data?.products ?? [];
+  const products = favorites.data?.pages.flatMap((page) => page.products) ?? [];
 
   return (
     <div className="mx-auto max-w-[1120px] space-y-5">
@@ -73,17 +95,29 @@ function FavoritesContent() {
       {favorites.isLoading ? <section className="app-card p-8 text-center text-muted">{t("favorites.loading")}</section> : null}
 
       {!favorites.isLoading && products.length ? (
-        <section className="overflow-hidden rounded-lg border border-line bg-card">
-          {products.map((product, index) => (
-            <FavoriteOfferRow
-              key={product.id}
-              product={product}
-              index={index}
-              removing={removeFavorite.isPending}
-              onRemove={() => removeFavorite.mutate(product.id)}
-            />
-          ))}
-        </section>
+        <>
+          <section className="overflow-hidden rounded-lg border border-line bg-card">
+            {products.map((product, index) => (
+              <FavoriteOfferRow
+                key={product.id}
+                product={product}
+                index={index}
+                removing={removeFavorite.isPending}
+                onRemove={() => removeFavorite.mutate(product.id)}
+              />
+            ))}
+          </section>
+          {favorites.hasNextPage ? (
+            <button
+              className="app-button-secondary mx-auto px-5 py-3"
+              type="button"
+              disabled={favorites.isFetchingNextPage}
+              onClick={() => void favorites.fetchNextPage()}
+            >
+              {favorites.isFetchingNextPage ? t("common.loading") : t("catalog.showMore")}
+            </button>
+          ) : null}
+        </>
       ) : null}
 
       {!favorites.isLoading && !products.length ? (

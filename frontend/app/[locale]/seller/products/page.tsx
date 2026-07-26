@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Bookmark, Rocket } from "lucide-react";
 import { apiFetch, type Category, type Game, type GameSection } from "@/lib/api";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -14,6 +14,11 @@ import { SellerListings } from "./_components/SellerListings";
 import type { EditProduct, LotForm, SelectedMedia, SellerProduct } from "./_components/types";
 import { uploadImage } from "@/lib/storage";
 import { createClientUuid } from "@/lib/uuid";
+import {
+  cursorPagePath,
+  type CursorItemsPage
+} from "@/lib/cursor-pages";
+import { useI18n } from "@/lib/i18n";
 
 export default function SellerProductsPage() {
   return (
@@ -25,6 +30,7 @@ export default function SellerProductsPage() {
 
 function SellerProductsContent() {
   const client = useQueryClient();
+  const { t } = useI18n();
   const user = useAuth((state) => state.user);
   const [form, setForm] = useState<LotForm>(initialForm);
   const [error, setError] = useState("");
@@ -47,9 +53,14 @@ function SellerProductsContent() {
     queryFn: () => apiFetch<{ game: Game; sections: GameSection[] }>(`/marketplace/games/${selectedGame?.slug}`),
     enabled: Boolean(selectedGame?.slug)
   });
-  const products = useQuery({
+  const products = useInfiniteQuery({
     queryKey: ["seller-products"],
-    queryFn: () => apiFetch<{ products: SellerProduct[] }>("/marketplace/seller/products")
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      apiFetch<CursorItemsPage<"products", SellerProduct>>(
+        cursorPagePath("/marketplace/seller/products", pageParam)
+      ),
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined
   });
 
   useEffect(() => {
@@ -237,7 +248,23 @@ function SellerProductsContent() {
         </aside>
       </div>
 
-      <SellerListings products={products.data?.products ?? []} editing={editing} setEditing={setEditing} update={update.mutate} remove={remove.mutate} />
+      <SellerListings
+        products={products.data?.pages.flatMap((page) => page.products) ?? []}
+        editing={editing}
+        setEditing={setEditing}
+        update={update.mutate}
+        remove={remove.mutate}
+      />
+      {products.hasNextPage ? (
+        <button
+          className="app-button-secondary mx-auto px-5 py-3"
+          type="button"
+          disabled={products.isFetchingNextPage}
+          onClick={() => void products.fetchNextPage()}
+        >
+          {products.isFetchingNextPage ? t("common.loading") : t("catalog.showMore")}
+        </button>
+      ) : null}
     </div>
   );
 }

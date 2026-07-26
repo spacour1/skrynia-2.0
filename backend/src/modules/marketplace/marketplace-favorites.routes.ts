@@ -5,6 +5,11 @@ import { asyncHandler, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import type { AuthedRequest } from "../../common/types.js";
 import {
+  buildLookaheadNextCursor,
+  keysetWhereClause,
+  parseCursorPage
+} from "../../common/pagination.js";
+import {
   addSellerPresence,
   attachCardMetadata,
   mapProductMoneyFields
@@ -17,11 +22,23 @@ router.get(
   "/favorites/ids",
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const result = await pool.query(
-      `select product_id as "productId" from product_favorites where user_id = $1 order by created_at desc`,
-      [req.user.id]
+    const { limit, cursor } = parseCursorPage(req.query);
+    const values: unknown[] = [req.user.id];
+    const cursorWhere = keysetWhereClause(values, cursor, "pf.created_at", "pf.product_id");
+    values.push(limit + 1);
+    const result = await pool.query<{ id: string; productId: string; createdAt: Date | string }>(
+      `select pf.product_id as id, pf.product_id as "productId", pf.created_at::text as "createdAt"
+       from product_favorites pf
+       where pf.user_id = $1
+         ${cursorWhere ? `and ${cursorWhere}` : ""}
+       order by pf.created_at desc, pf.product_id desc
+       limit $${values.length}`,
+      values
     );
-    res.json({ productIds: result.rows.map((row) => row.productId) });
+    res.json({
+      productIds: result.rows.slice(0, limit).map((row) => row.productId),
+      nextCursor: buildLookaheadNextCursor(result.rows, limit)
+    });
   })
 );
 
@@ -29,18 +46,51 @@ router.get(
   "/favorites",
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const result = await pool.query(
-      `${productSelect}
-       join product_favorites own_favorite on own_favorite.product_id = p.id and own_favorite.user_id = $1
-       where p.status = 'active' and p.stock > 0 and u.is_banned = false
-       group by p.id, c.id, g.id, gs.id, u.id
-       order by max(own_favorite.created_at) desc`,
-      [req.user.id]
+    const { limit, cursor } = parseCursorPage(req.query);
+    const favoriteValues: unknown[] = [req.user.id];
+    const cursorWhere = keysetWhereClause(
+      favoriteValues,
+      cursor,
+      "pf.created_at",
+      "pf.product_id"
     );
+    favoriteValues.push(limit + 1);
+    const favorites = await pool.query<{ id: string; productId: string; createdAt: Date | string }>(
+      `select pf.product_id as id, pf.product_id as "productId", pf.created_at::text as "createdAt"
+       from product_favorites pf
+       join products p on p.id = pf.product_id
+       join users u on u.id = p.seller_id
+       where pf.user_id = $1
+         and p.status = 'active'
+         and p.stock > 0
+         and u.is_banned = false
+         ${cursorWhere ? `and ${cursorWhere}` : ""}
+       order by pf.created_at desc, pf.product_id desc
+       limit $${favoriteValues.length}`,
+      favoriteValues
+    );
+    const pageFavorites = favorites.rows.slice(0, limit);
+    const productIds = pageFavorites.map((favorite) => favorite.productId);
+    const result = productIds.length
+      ? await pool.query(
+      `${productSelect}
+       where p.id = any($1::uuid[]) and p.status = 'active' and p.stock > 0 and u.is_banned = false
+       group by p.id, c.id, g.id, gs.id, u.id
+       order by p.created_at desc, p.id desc`,
+          [productIds]
+        )
+      : { rows: [] };
+    const productsById = new Map(
+      result.rows.map((row) => [row.id as string, mapProductMoneyFields(row)])
+    );
+    const orderedProducts = productIds
+      .map((productId) => productsById.get(productId))
+      .filter((product): product is NonNullable<typeof product> => Boolean(product));
     res.json({
       products: await attachCardMetadata(
-        await addSellerPresence(result.rows.map(mapProductMoneyFields))
-      )
+        await addSellerPresence(orderedProducts)
+      ),
+      nextCursor: buildLookaheadNextCursor(favorites.rows, limit)
     });
   })
 );

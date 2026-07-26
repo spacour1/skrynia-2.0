@@ -31,6 +31,7 @@ import type { CatalogField } from "@/lib/catalog-api";
 import { showAppToast } from "@/lib/toast-events";
 import { captureEvent } from "@/lib/posthog";
 import { createClientUuid } from "@/lib/uuid";
+import { fetchAllCursorItems } from "@/lib/cursor-pages";
 
 const HIDDEN_METADATA_KEYS = new Set(["catalogKind", "shortDescription", "region", "rank"]);
 
@@ -104,7 +105,12 @@ export function ProductPageClient({ id }: { id: string }) {
 
   const blockedUsers = useQuery({
     queryKey: ["blocked-users"],
-    queryFn: () => apiFetch<{ blocked: { id: string }[] }>("/users/me/blocked"),
+    queryFn: async () => ({
+      blocked: await fetchAllCursorItems<"blocked", { id: string }>(
+        "/users/me/blocked",
+        "blocked"
+      )
+    }),
     enabled: Boolean(user)
   });
   const isBlocked = Boolean(productItem && blockedUsers.data?.blocked.some((blocked) => blocked.id === productItem.sellerId));

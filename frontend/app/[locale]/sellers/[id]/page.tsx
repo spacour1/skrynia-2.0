@@ -15,6 +15,7 @@ import { EditSellerProfileModal } from "./EditSellerProfileModal";
 import { SellerHero } from "./SellerHero";
 import { SellerListingRow } from "./SellerListingRow";
 import { buildSellerTabs, SellerTabs } from "./SellerTabs";
+import { fetchAllCursorItems } from "@/lib/cursor-pages";
 
 type SellerResponse = {
   user: {
@@ -82,13 +83,23 @@ export default function SellerPage({ params }: { params: { id: string } }) {
 
   const sellerFavorites = useQuery({
     queryKey: ["seller-favorites"],
-    queryFn: () => apiFetch<{ sellerIds: string[] }>("/users/me/seller-favorites"),
+    queryFn: async () => ({
+      sellerIds: await fetchAllCursorItems<"sellerIds", string>(
+        "/users/me/seller-favorites",
+        "sellerIds"
+      )
+    }),
     enabled: Boolean(userSession)
   });
 
   const productFavoriteIds = useQuery({
     queryKey: ["favorite-ids"],
-    queryFn: () => apiFetch<{ productIds: string[] }>("/marketplace/favorites/ids"),
+    queryFn: async () => ({
+      productIds: await fetchAllCursorItems<"productIds", string>(
+        "/marketplace/favorites/ids",
+        "productIds"
+      )
+    }),
     enabled: Boolean(userSession)
   });
 

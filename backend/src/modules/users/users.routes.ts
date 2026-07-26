@@ -47,6 +47,11 @@ import {
   toPublicSellerStatsDto,
   type PublicSellerOverviewRow
 } from "./public-seller.dto.js";
+import {
+  buildLookaheadNextCursor,
+  keysetWhereClause,
+  parseCursorPage
+} from "../../common/pagination.js";
 
 const router = Router();
 
@@ -536,22 +541,39 @@ router.get(
   "/me/seller-favorites",
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
+    const { limit, cursor } = parseCursorPage(req.query);
+    const values: unknown[] = [req.user.id];
+    const cursorWhere = keysetWhereClause(values, cursor, "sf.created_at", "sf.seller_id");
+    values.push(limit + 1);
     const result = await pool.query(
       `select u.id, u.display_name as "displayName", u.avatar_url as "avatarUrl",
               coalesce(avg(r.rating), 0)::float as "ratingAverage",
               count(distinct r.id)::int as "reviewCount",
               count(distinct p.id) filter (where p.status = 'active')::int as "activeListings",
-              sf.created_at as "createdAt"
+              sf.created_at as "createdAt", sf.created_at::text as "cursorCreatedAt"
        from seller_favorites sf
        join users u on u.id = sf.seller_id
        left join reviews r on r.seller_id = u.id
        left join products p on p.seller_id = u.id
        where sf.user_id = $1 and u.is_banned = false
+         ${cursorWhere ? `and ${cursorWhere}` : ""}
        group by u.id, sf.created_at
-       order by sf.created_at desc`,
-      [req.user.id]
+       order by sf.created_at desc, u.id desc
+       limit $${values.length}`,
+      values
     );
-    res.json({ sellers: result.rows, sellerIds: result.rows.map((row) => row.id) });
+    const nextCursor = buildLookaheadNextCursor(
+      result.rows.map((row) => ({ id: row.id, createdAt: row.cursorCreatedAt })),
+      limit
+    );
+    const pageRows = result.rows
+      .slice(0, limit)
+      .map(({ cursorCreatedAt: _cursor, ...row }) => row);
+    res.json({
+      sellers: pageRows,
+      sellerIds: pageRows.map((row) => row.id),
+      nextCursor
+    });
   })
 );
 

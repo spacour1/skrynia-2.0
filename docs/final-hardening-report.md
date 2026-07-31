@@ -1,9 +1,9 @@
 # Final production-hardening report
 
 This report is an evidence ledger for the hardening branch, not a production-readiness
-certificate. It was prepared from committed changes in `origin/main..42f3ddc`. The final
-commit SHA and the final validation results must be updated after the current working-tree
-changes are committed.
+certificate. It now reconciles committed changes from `36ea677` through the current
+`origin/main` at `dab02a8`. The final branch SHA and validation results must be updated
+after the closeout phases are committed and verified.
 
 ## 1. Executive summary
 
@@ -14,24 +14,26 @@ fixes for session epochs, exact money representation, payment/webhook recovery, 
 storage cleanup, bounded pagination, WebSocket acknowledgement/race handling, and one
 central order-transition service.
 
-The implementation is not yet certified for deployment. The final tree has not completed
-the validation matrix in section 5, the API-contract consolidation was still partial at
-the committed snapshot, and production-provider prerequisites and dependency exceptions
-remain open. No real payment-provider implementation or validation was added.
+The implementation is not yet certified for deployment. The API-contract consolidation
+is committed in `dab02a8` but has not yet completed its Phase B boundary review or the
+final validation matrix in section 5. Production-provider prerequisites and dependency
+exceptions also remain open. No real payment-provider implementation or validation was
+added.
 
 Snapshot:
 
 | Item | Value |
 | --- | --- |
-| Base | `origin/main` at `36ea677` |
-| Committed snapshot | `42f3ddc` on `codex/finish-big-plan` |
-| Final HEAD | **NOT RECORDED - update after the final commit** |
-| Final working-tree state | **NOT RUN - confirm clean before publication** |
+| Historical hardening base | `36ea677` |
+| Closeout base | `origin/main` at `dab02a8` |
+| Closeout branch | `codex/final-hardening-closeout` |
+| Final HEAD | `dab02a8` at closeout start; replace after the final commit. |
+| Final working-tree state | Clean at closeout start; re-check before publication. |
 
 ## 2. Commits
 
-The following is the complete chronological `origin/main..42f3ddc` history at the
-documentation snapshot:
+The following is the complete chronological hardening history from `36ea677` through the
+closeout base at `dab02a8`:
 
 | Commit | Purpose |
 | --- | --- |
@@ -62,9 +64,10 @@ documentation snapshot:
 | `070ad8c` | Correct money and session documentation contracts. |
 | `5d44960` | Route order lifecycle writes through the centralized transition service. |
 | `42f3ddc` | Add cursor bounds and indexes to the remaining authenticated lists. |
+| `dab02a8` | Finish shared marketplace contracts, DTO mappers, contract tests, and the associated closeout documentation. |
 
-Final range audit: **NOT RUN - regenerate `git log --reverse origin/main..HEAD` after
-the final commit and add any later commits above.**
+Final branch range audit: **NOT RUN - regenerate `git log --reverse
+origin/main..HEAD` after the final commit and add closeout commits above.**
 
 ## 3. Root causes
 
@@ -156,14 +159,14 @@ Committed changes improve order response mapping, exact money serialization, pub
 DTOs, pagination envelopes, locale consumption, and consistent order status handling.
 They also remove several direct database-row response paths.
 
-At `42f3ddc`, the earlier Stage 6 progress document still correctly described the complete
-shared-contract goal as partial: one shared contract source and explicit DTO mappers/tests
-for every public Product, Order, Message, DisputeMessage, and Seller shape were not yet all
-committed. The final working tree contains contract-related work that is deliberately not
-credited here until it is reviewed, committed, and tested.
+At `42f3ddc`, the Stage 6 goal was still partial. Commit `dab02a8` adds the shared
+Product, Order, Message, DisputeMessage, and Seller contracts, explicit backend DTO
+mappers, a synchronized frontend mirror, and contract tests. The implementation is now
+credited as committed, but not yet as verified: Phase B must still prove that public
+routes use those boundaries and do not expose raw database fields.
 
 Final contract scan and mapper/synchronization tests: **NOT RUN - update after the
-contract closeout commit.**
+Phase B commands complete.**
 
 ## 9. Deployment plan
 
@@ -189,8 +192,8 @@ contract closeout commit.**
 
 - Final lint, build, migration, unit/integration, Docker, security, and Playwright
   verification is not yet recorded for the final tree.
-- API contracts were partial at the committed snapshot; the in-progress closeout must be
-  reviewed for accidental internal-field leakage and frontend/backend drift.
+- API contracts are committed in `dab02a8`; the closeout still requires review for
+  accidental internal-field leakage and frontend/backend drift.
 - Production PostgreSQL may not permit `CREATE EXTENSION`; search rollout must stop if
   `pg_trgm` or `unaccent` is unavailable.
 - The search migration is batched but remains one release transaction; production-sized

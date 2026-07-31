@@ -1,7 +1,8 @@
 # Remaining production-hardening plan
 
-Stages 8-13 are implemented on `codex/finish-big-plan` through the committed
-documentation snapshot `42f3ddc`. This document now tracks closeout and residual risk;
+Stages 8-13 and the API-contract closeout are committed on the current `main` through
+`dab02a8` (`finish production hardening and shared contracts`). Closeout work continues
+on `codex/final-hardening-closeout`. This document tracks validation and residual risk;
 it is not a production-readiness certificate. Final status belongs in
 [`final-hardening-report.md`](final-hardening-report.md) after every validation
 placeholder is replaced with observed results.
@@ -23,8 +24,9 @@ central order-transition service.
 
 ## Release-blocking closeout
 
-1. Finish and commit the API-contract closeout. At `42f3ddc`, the full shared
-   Product/Order/Message/DisputeMessage/Seller contract objective was still partial.
+1. Review and validate the API-contract closeout committed in `dab02a8`. Prove that the
+   shared Product/Order/Message/DisputeMessage/Seller contracts replaced parallel public
+   shapes and that DTO mappers prevent internal database fields from leaking.
 2. Confirm `git status --short` is clean and record the final branch SHA and complete
    `origin/main..HEAD` commit list.
 3. Run the final backend lint/build/full-test suite.

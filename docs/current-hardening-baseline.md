@@ -7,13 +7,23 @@ supersedes the stale statement that Stages 8-13 were missing.
 
 | Item | Value |
 | --- | --- |
-| Date | 2026-07-26 |
-| Branch | `codex/finish-big-plan` |
-| Base | `origin/main` at `36ea677` |
-| Committed snapshot | `42f3ddc` (`fix(api): bound remaining authenticated lists`) |
-| Final HEAD | **NOT RECORDED - update after current changes are committed** |
-| Working tree | Dirty at documentation time; uncommitted code/E2E changes are excluded from committed evidence. |
+| Date | 2026-07-31 |
+| Branch | `codex/final-hardening-closeout`, created from the current `main` |
+| Base | `origin/main` at `dab02a8` |
+| Committed snapshot | `dab02a8` (`finish production hardening and shared contracts`) |
+| Final HEAD | `dab02a8` at closeout start; replace with the final branch SHA after validation commits. |
+| Working tree | Clean at closeout start (`git status --short`, exit code 0). |
 | Production readiness | Not certified. |
+
+## Closeout reconciliation
+
+| Item | Current fact | Documented fact before reconciliation | Drift | Required update |
+| --- | --- | --- | --- | --- |
+| Commit | `main` and `origin/main` point to `dab02a8`. | The latest recorded snapshot was `42f3ddc`; final HEAD was not recorded. | Yes | Use `dab02a8` as the closeout baseline and record the final branch SHA after validation. |
+| Branch | Closeout work starts on `codex/final-hardening-closeout`. | The snapshot named `codex/finish-big-plan`. | Yes | Refer to the current closeout branch while retaining historical commit evidence. |
+| Working tree | Clean before the closeout branch was created. | The tree was described as dirty with uncommitted contract work. | Yes | Treat the committed `dab02a8` tree as the implementation under validation. |
+| API-contract closeout | Shared contracts, backend DTO mappers, frontend mirror, and synchronization tests are committed in `dab02a8`. | The closeout was described as partial and uncommitted. | Yes | Review the boundaries and run the targeted/full suites before marking the closeout verified. |
+| Final validation | No final-tree gate has been rerun during this closeout yet. | All final-tree gates were `NOT RUN`. | No | Preserve `NOT RUN` until each exact command exits successfully. |
 
 ## Implemented scope
 
@@ -22,7 +32,7 @@ reconciliation, atomic registration, versioned session revocation, transaction r
 resource-abuse controls, partial contract centralization, and order-state-machine
 hardening.
 
-The current branch adds:
+The history from `36ea677` through the current `main` adds:
 
 | Stage | Status at committed snapshot | Evidence |
 | --- | --- | --- |
@@ -36,6 +46,10 @@ The current branch adds:
 Cross-stage hardening on this branch also covers session epoch enforcement, order DTO
 mapping, payment capture/webhook recovery, durable storage operation states, exact money
 cents, bounded list pagination, trace propagation, and centralized lifecycle writes.
+Commit `dab02a8` additionally commits the shared Product, Order, Message, Dispute, and
+Seller contracts, backend DTO mappers, the synchronized frontend mirror, and their
+contract tests. Those changes are implementation evidence; Phase B validation remains
+required before they are recorded as verified.
 
 ## Historical verification baseline
 
@@ -76,9 +90,9 @@ Populate exact commands, statuses, durations, and test counts in
 
 ## Current blockers and limits
 
-- The committed API-contract work is not the complete shared Product/Order/Message/
-  DisputeMessage/Seller contract target. Do not mark it complete until the current
-  contract closeout is committed and tested.
+- The API-contract closeout is committed in `dab02a8`, but its DTO boundaries and
+  synchronization tests still require the Phase B review and final-tree rerun before it
+  can be marked verified.
 - CI jobs exist but no green final workflow run is recorded here.
 - Production `pg_trgm`/`unaccent` permissions and production-sized search rollout
   behavior are unverified.

@@ -64,21 +64,25 @@ function isDefinitiveAnonymous(error: unknown) {
 }
 
 let hydrationInFlight: Promise<AuthStatus> | null = null;
+let authStateEpoch = 0;
 
 export const useAuth = create<AuthState>((set, get) => {
   const setAuthenticated = (user: User) => {
+    authStateEpoch += 1;
     writeCachedUser(user);
     Sentry.setUser({ id: user.id, segment: user.role });
     set({ user, status: "authenticated", hydrated: true });
   };
 
   const setAnonymous = () => {
+    authStateEpoch += 1;
     writeCachedUser(null);
     Sentry.setUser(null);
     set({ user: null, status: "anonymous", hydrated: true });
   };
 
   const setDegraded = () => {
+    authStateEpoch += 1;
     const retainedUser = get().user ?? readCachedUser();
     if (retainedUser) Sentry.setUser({ id: retainedUser.id, segment: retainedUser.role });
     else Sentry.setUser(null);
@@ -87,13 +91,18 @@ export const useAuth = create<AuthState>((set, get) => {
 
   const hydrate = () => {
     if (!hydrationInFlight) {
+      const hydrationEpoch = authStateEpoch;
       hydrationInFlight = (async () => {
         try {
           const response = await apiFetch<{ user: unknown }>("/auth/me");
           if (!isUser(response.user)) throw new Error("Invalid auth response");
+          // A definitive logout or a newer login may have changed auth state while
+          // /auth/me was in flight. Never let that stale response overwrite it.
+          if (hydrationEpoch !== authStateEpoch) return get().status;
           setAuthenticated(response.user);
           return "authenticated" as const;
         } catch (error) {
+          if (hydrationEpoch !== authStateEpoch) return get().status;
           if (isDefinitiveAnonymous(error)) {
             setAnonymous();
             return "anonymous" as const;

@@ -4,6 +4,7 @@ import { readCachedUser, useAuth } from "@/lib/auth-store";
 import { installFetchMock, jsonResponse } from "./helpers/fetch";
 
 const apiMock = vi.hoisted(() => ({
+  broadcastSessionEnded: vi.fn(),
   sessionEndedHandler: undefined as (() => void) | undefined
 }));
 
@@ -13,7 +14,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
-    broadcastSessionEnded: vi.fn(),
+    broadcastSessionEnded: apiMock.broadcastSessionEnded,
     onSessionEnded: vi.fn((handler: () => void) => {
       apiMock.sessionEndedHandler = handler;
       return () => undefined;
@@ -43,6 +44,7 @@ const recoveredUser: User = {
 };
 
 function resetAuthState() {
+  apiMock.broadcastSessionEnded.mockReset();
   useAuth.setState({ user: null, status: "unknown", hydrated: false });
   document.cookie = "csrf_token=; max-age=0; path=/";
 }
@@ -132,5 +134,56 @@ describe("auth hydration reliability", () => {
       hydrated: true
     });
     expect(readCachedUser()).toBeNull();
+  });
+
+  it("does not let a delayed hydrate restore a definitively logged-out session", async () => {
+    useAuth.getState().setAuthenticated(cachedUser);
+    let resolveHydrate!: (response: Response) => void;
+    const requests = installFetchMock([
+      {
+        path: "/api/auth/me",
+        response: () => new Promise((resolve) => {
+          resolveHydrate = resolve;
+        })
+      }
+    ]);
+
+    const hydration = useAuth.getState().hydrate();
+    await vi.waitFor(() => expect(requests.fetchMock).toHaveBeenCalledOnce());
+    apiMock.sessionEndedHandler?.();
+    resolveHydrate(jsonResponse({ user: recoveredUser }));
+
+    await expect(hydration).resolves.toBe("anonymous");
+    expect(useAuth.getState()).toMatchObject({
+      user: null,
+      status: "anonymous",
+      hydrated: true
+    });
+    expect(readCachedUser()).toBeNull();
+    requests.assertAllUsed();
+  });
+
+  it("clears state and broadcasts logout even when the logout request fails", async () => {
+    useAuth.getState().setAuthenticated(cachedUser);
+    const requests = installFetchMock([
+      {
+        method: "POST",
+        path: "/api/auth/logout",
+        response: () => {
+          throw new TypeError("offline");
+        }
+      }
+    ]);
+
+    await expect(useAuth.getState().logout()).rejects.toThrow("offline");
+
+    expect(useAuth.getState()).toMatchObject({
+      user: null,
+      status: "anonymous",
+      hydrated: true
+    });
+    expect(readCachedUser()).toBeNull();
+    expect(apiMock.broadcastSessionEnded).toHaveBeenCalledOnce();
+    requests.assertAllUsed();
   });
 });

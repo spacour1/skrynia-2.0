@@ -380,7 +380,7 @@ export function GameCatalogClient({ slug }: { slug: string }) {
             ) : null}
 
             {visibleList.map((product, index) => (
-              <OfferRow
+              <GameCatalogOfferRow
                 key={product.id}
                 index={index}
                 product={product}
@@ -410,7 +410,7 @@ export function GameCatalogClient({ slug }: { slug: string }) {
   );
 }
 
-function OfferRow({
+export function GameCatalogOfferRow({
   product,
   index,
   liked,
@@ -515,7 +515,7 @@ function OfferRow({
   );
 }
 
-function RelatedGames({ currentSlug }: { currentSlug: string }) {
+export function RelatedGames({ currentSlug }: { currentSlug: string }) {
   const { t } = useI18n();
   const games = useQuery({
     queryKey: ["games"],

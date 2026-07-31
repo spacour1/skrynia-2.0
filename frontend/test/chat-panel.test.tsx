@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatPanel } from "@/components/ChatPanel";
 import { useAuth } from "@/lib/auth-store";
+import { CurrencyProvider, useCurrency } from "@/lib/currency";
 import { RealtimeMessageError } from "@/lib/realtime-client";
 import { renderWithProviders } from "./helpers/render";
 
@@ -257,5 +258,29 @@ describe("ChatPanel", () => {
       body: "Transport fallback"
     });
     expect(await screen.findByText("Sent")).toBeVisible();
+  });
+
+  it("keeps the real chat draft when display currency changes", async () => {
+    const user = userEvent.setup();
+
+    function CurrencySwitch() {
+      const { setDisplayCurrency } = useCurrency();
+      return <button onClick={() => setDisplayCurrency("USD")}>Show USD</button>;
+    }
+
+    renderWithProviders(
+      <CurrencyProvider>
+        <CurrencySwitch />
+        <ChatPanel conversationId="existing-conversation-id" mode="compact" />
+      </CurrencyProvider>,
+      { locale: "en" }
+    );
+
+    const draft = screen.getByPlaceholderText("Write a message");
+    await user.type(draft, "Unsent chat draft");
+    await user.click(screen.getByRole("button", { name: "Show USD" }));
+
+    expect(draft).toHaveValue("Unsent chat draft");
+    expect(screen.getByPlaceholderText("Write a message")).toBe(draft);
   });
 });

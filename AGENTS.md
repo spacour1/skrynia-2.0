@@ -79,3 +79,18 @@ Verify ledger is balanced: `sum(debit_cents) = sum(credit_cents)` across all `le
 ## Environment
 
 Local dev runs via Docker Compose (`docker-compose.dev.yml`). Backend on port 4000, frontend on port 3000. See `docs/architecture.md` for full env var reference.
+
+## Graph-assisted navigation
+
+- Start with `docs/agent-map.md`.
+- Use Graphify only for cross-domain dependencies, call paths, architecture questions,
+  and blast-radius analysis.
+- Do not use Graphify for isolated leaf changes when direct source navigation is sufficient.
+- Prefer a scoped `graphify query`, `path`, or `explain` operation over reading full graph reports.
+- Never load `graphify-out/graph.json` wholesale.
+- `EXTRACTED` edges are navigation evidence, not proof of runtime behavior.
+- `INFERRED` and `AMBIGUOUS` edges must be verified in source.
+- Open and verify every source file before editing it.
+- Run `graphify update .` only when relevant source structure changed.
+- Graphify does not replace tests, migrations, CI, runtime tracing, authorization review,
+  or financial invariant checks.

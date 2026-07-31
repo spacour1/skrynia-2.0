@@ -42,7 +42,16 @@ const authenticatedUser = {
   id: "buyer-id",
   email: "buyer@example.com",
   displayName: "Buyer",
-  role: "user" as const
+  role: "user" as const,
+  avatarUrl: null,
+  pushEnabled: false,
+  twoFactorEnabled: false,
+  createdAt: "2026-07-31T12:00:00.000Z",
+  online: null,
+  emailVerified: true,
+  phone: null,
+  phoneVerified: false,
+  telegramConnected: false
 };
 
 const originalScrollTo = HTMLElement.prototype.scrollTo;

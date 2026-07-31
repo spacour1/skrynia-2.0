@@ -64,6 +64,9 @@ export type Role = (typeof ROLES)[number];
 export const MESSAGE_KINDS = ["user", "system"] as const;
 export type MessageKind = (typeof MESSAGE_KINDS)[number];
 
+export const CURRENCY_CODES = ["UAH", "USD", "EUR"] as const;
+export type CurrencyCode = (typeof CURRENCY_CODES)[number];
+
 function includes<T extends string>(values: readonly T[], value: string): value is T {
   return (values as readonly string[]).includes(value);
 }
@@ -75,3 +78,4 @@ export const isDeliveryType = (value: string): value is DeliveryType => includes
 export const isProductType = (value: string): value is ProductType => includes(PRODUCT_TYPES, value);
 export const isCatalogStatus = (value: string): value is CatalogStatus => includes(CATALOG_STATUSES, value);
 export const isRole = (value: string): value is Role => includes(ROLES, value);
+export const isCurrencyCode = (value: string): value is CurrencyCode => includes(CURRENCY_CODES, value);

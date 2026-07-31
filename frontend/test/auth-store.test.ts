@@ -25,7 +25,16 @@ const cachedUser: User = {
   id: "user-cached",
   email: "cached@example.com",
   displayName: "Cached User",
-  role: "user"
+  role: "user",
+  avatarUrl: null,
+  pushEnabled: false,
+  twoFactorEnabled: false,
+  createdAt: "2026-07-31T12:00:00.000Z",
+  online: null,
+  emailVerified: true,
+  phone: null,
+  phoneVerified: false,
+  telegramConnected: false
 };
 
 const recoveredUser: User = {

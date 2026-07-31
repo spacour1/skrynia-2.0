@@ -17,7 +17,17 @@ import {
 } from "../marketplace/marketplace-cache.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
 import { retryFailedOutboxEvents } from "../outbox/outbox.worker.js";
-import { mapAdminOrderDto } from "../orders/orders.dto.js";
+import {
+  mapAdminOrderMutationDto,
+  mapAdminPendingOrderDto,
+  type AdminPendingOrderRow
+} from "../orders/orders.dto.js";
+import {
+  mapAdminProductMutationDto,
+  mapAdminProductSummaryDto,
+  type AdminProductMutationRow,
+  type AdminProductSummaryRow
+} from "../marketplace/product.dto.js";
 
 const router = Router();
 const adminOnly = requireRole("admin");
@@ -155,7 +165,7 @@ router.get(
     const values: unknown[] = [];
     const cursorWhere = keysetWhereClause(values, cursor, "p.created_at", "p.id");
     values.push(limit);
-    const result = await pool.query(
+    const result = await pool.query<AdminProductSummaryRow>(
       `select p.id, p.title, p.status, p.price_cents as "priceCents", p.currency,
               p.created_at as "createdAt", c.name as "categoryName",
               g.name as "gameName", gs.name as "sectionName",
@@ -171,7 +181,10 @@ router.get(
        limit $${values.length}`,
       values
     );
-    res.json({ listings: result.rows, nextCursor: buildNextCursor(result.rows, limit) });
+    res.json({
+      listings: result.rows.map(mapAdminProductSummaryDto),
+      nextCursor: buildNextCursor(result.rows, limit)
+    });
   })
 );
 
@@ -195,15 +208,7 @@ router.patch(
       );
       if (!existing.rows[0]) throw notFound("Listing not found");
 
-      const result = await client.query<
-        ProductCacheContext & {
-          id: string;
-          title: string;
-          status: string;
-          isHot: boolean;
-          isRecommended: boolean;
-        }
-      >(
+      const result = await client.query<ProductCacheContext & AdminProductMutationRow>(
         `update products
          set status = coalesce($2, status),
              is_hot = coalesce($3, is_hot),
@@ -236,15 +241,7 @@ router.patch(
       return { listing: updatedListing, blockedTransition: wasBlocked };
     });
     if (!blockedTransition) await invalidateProductCaches(listing);
-    const {
-      productId: _productId,
-      sellerId: _sellerId,
-      categoryId: _categoryId,
-      gameId: _gameId,
-      sectionId: _sectionId,
-      ...publicListing
-    } = listing;
-    res.json({ listing: publicListing });
+    res.json({ listing: mapAdminProductMutationDto(listing) });
   })
 );
 
@@ -256,7 +253,7 @@ router.get(
     const values: unknown[] = [];
     const cursorWhere = keysetWhereClause(values, cursor, "o.created_at", "o.id");
     values.push(limit);
-    const result = await pool.query(
+    const result = await pool.query<AdminPendingOrderRow>(
       `select o.id, o.amount_cents as "amountCents", o.currency, o.created_at as "createdAt",
               p.title as "productTitle",
               buyer.id as "buyerId", buyer.display_name as "buyerDisplayName", buyer.email as "buyerEmail",
@@ -271,7 +268,10 @@ router.get(
        limit $${values.length}`,
       values
     );
-    res.json({ orders: result.rows, nextCursor: buildNextCursor(result.rows, limit) });
+    res.json({
+      orders: result.rows.map(mapAdminPendingOrderDto),
+      nextCursor: buildNextCursor(result.rows, limit)
+    });
   })
 );
 
@@ -302,7 +302,7 @@ router.post(
       logger.warn({ orderId, error }, "manual_payment_confirm_failed");
       throw badRequest("Could not confirm this order's payment");
     }
-    res.json({ order: mapAdminOrderDto(updated) });
+    res.json({ order: mapAdminOrderMutationDto(updated) });
   })
 );
 

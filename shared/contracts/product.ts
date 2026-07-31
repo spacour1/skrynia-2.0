@@ -117,6 +117,27 @@ export type AdminProductDto = SellerProductDto & {
   moderationReason: string | null;
 };
 
+export type AdminProductSummaryDto = {
+  id: string;
+  title: string;
+  status: ProductStatus;
+  priceCents: MoneyCents;
+  currency: CurrencyCode;
+  createdAt: IsoDateString;
+  categoryName: string;
+  gameName: string | null;
+  sectionName: string | null;
+  sellerDisplayName: string;
+};
+
+export type AdminProductMutationDto = {
+  id: string;
+  title: string;
+  status: ProductStatus;
+  isHot: boolean;
+  isRecommended: boolean;
+};
+
 export type ProductSuggestionDto = {
   id: string;
   title: string;

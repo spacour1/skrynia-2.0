@@ -32,7 +32,7 @@ import {
   type DisputeParticipantRow,
   type DisputeStaffSummaryRow
 } from "./dispute.dto.js";
-import { mapAdminOrderDto } from "../orders/orders.dto.js";
+import { mapAdminOrderMutationDto } from "../orders/orders.dto.js";
 import { cacheDelPattern } from "../../common/redis.js";
 
 const router = Router();
@@ -371,7 +371,7 @@ router.post(
     const dispute = await selectDisputeDetail(id);
     res.json({
       dispute: mapDisputeAdminDto(dispute),
-      order: result.order ? mapAdminOrderDto(result.order) : null,
+      order: result.order ? mapAdminOrderMutationDto(result.order) : null,
       operationId: result.operationId,
       idempotent: !result.newlyResolved
     });

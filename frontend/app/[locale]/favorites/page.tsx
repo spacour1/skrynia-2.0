@@ -156,7 +156,7 @@ function FavoriteOfferRow({
         {imageUrl ? (
           <img className="h-full w-full object-cover" src={imageUrl} alt="" />
         ) : (
-          <GameIcon name={product.gameName ?? product.categoryName ?? product.title} slug={product.gameSlug} className="h-full w-full rounded-xl" />
+          <GameIcon name={product.gameName ?? product.categoryName ?? product.title} slug={product.gameSlug ?? undefined} className="h-full w-full rounded-xl" />
         )}
       </div>
 

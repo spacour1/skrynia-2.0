@@ -438,7 +438,7 @@ function OfferRow({
           {image ? (
             <img className="h-full w-full object-cover transition duration-300 group-hover:scale-105" src={image} alt="" loading="lazy" draggable={false} />
           ) : (
-            <GameIcon name={product.gameName ?? product.title} slug={product.gameSlug} className="h-full w-full rounded-none" />
+            <GameIcon name={product.gameName ?? product.title} slug={product.gameSlug ?? undefined} className="h-full w-full rounded-none" />
           )}
         </div>
 

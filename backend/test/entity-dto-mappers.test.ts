@@ -607,6 +607,8 @@ const cases = [
     keys: [
       "amountCents",
       "autoReleaseAt",
+      "buyerAvatarUrl",
+      "buyerDisplayName",
       "buyerId",
       "completedAt",
       "createdAt",
@@ -616,8 +618,12 @@ const cases = [
       "feeCents",
       "id",
       "paidAt",
+      "productDescription",
       "productId",
+      "productTitle",
       "quantity",
+      "sellerAvatarUrl",
+      "sellerDisplayName",
       "sellerId",
       "status",
       "updatedAt"
@@ -630,6 +636,8 @@ const cases = [
     keys: [
       "amountCents",
       "autoReleaseAt",
+      "buyerAvatarUrl",
+      "buyerDisplayName",
       "buyerId",
       "completedAt",
       "createdAt",
@@ -641,8 +649,12 @@ const cases = [
       "paidAt",
       "paymentProvider",
       "paymentReference",
+      "productDescription",
       "productId",
+      "productTitle",
       "quantity",
+      "sellerAvatarUrl",
+      "sellerDisplayName",
       "sellerId",
       "status",
       "updatedAt"

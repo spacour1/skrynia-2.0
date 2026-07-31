@@ -40,7 +40,7 @@ export function ProductCard({ product }: { product: Product }) {
               </div>
               <h3 className="mt-3 line-clamp-2 text-base font-extrabold text-ink transition group-hover:text-brand">{product.title}</h3>
             </div>
-            {product.gameName ? <GameIcon name={product.gameName} slug={product.gameSlug} className="h-11 w-11" /> : null}
+            {product.gameName ? <GameIcon name={product.gameName} slug={product.gameSlug ?? undefined} className="h-11 w-11" /> : null}
           </div>
         </div>
         <div className="relative z-0 p-4">

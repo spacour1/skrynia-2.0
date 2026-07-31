@@ -1,6 +1,6 @@
 import type pg from "pg";
 import { env } from "../../config/env.js";
-import type { OrderStatus } from "../../domain/enums.js";
+import type { CurrencyCode, OrderStatus } from "../../domain/enums.js";
 import type { MoneyCents } from "../../domain/money.js";
 import { badRequest, forbidden, notFound } from "../../common/errors.js";
 import { enqueueDomainEvent, type EnqueueDomainEventInput } from "../outbox/outbox.service.js";
@@ -47,7 +47,7 @@ export type OrderRow = {
   quantity: number;
   amount_cents: MoneyCents;
   fee_cents: MoneyCents;
-  currency: string;
+  currency: CurrencyCode;
   status: OrderStatus;
   payment_provider: string | null;
   payment_reference: string | null;

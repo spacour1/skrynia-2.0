@@ -1,4 +1,5 @@
 import type {
+  CurrencyCode,
   DeliveryType,
   ProductStatus,
   ProductType
@@ -49,7 +50,7 @@ export type ProductCardRow = {
   description: string;
   priceCents: MoneyCentsInput;
   oldPriceCents?: MoneyCentsInput | null;
-  currency: string;
+  currency: CurrencyCode;
   stock: number | string;
   deliveryType: DeliveryType;
   productType: ProductType;
@@ -91,7 +92,7 @@ export type SellerProductRow = {
   description: string;
   priceCents: MoneyCentsInput;
   oldPriceCents?: MoneyCentsInput | null;
-  currency: string;
+  currency: CurrencyCode;
   stock: number | string;
   status: ProductStatus;
   deliveryType: DeliveryType;
@@ -120,13 +121,34 @@ export type AdminProductRow = SellerProductRow & {
   moderationReason?: string | null;
 };
 
+export type AdminProductSummaryRow = {
+  id: string;
+  title: string;
+  status: ProductStatus;
+  priceCents: MoneyCentsInput;
+  currency: CurrencyCode;
+  createdAt: DbDate;
+  categoryName: string;
+  gameName: string | null;
+  sectionName: string | null;
+  sellerDisplayName: string;
+};
+
+export type AdminProductMutationRow = {
+  id: string;
+  title: string;
+  status: ProductStatus;
+  isHot: boolean;
+  isRecommended: boolean;
+};
+
 export type ProductSuggestionRow = {
   id: string;
   title: string;
   description: string;
   priceCents: MoneyCentsInput;
   oldPriceCents?: MoneyCentsInput | null;
-  currency: string;
+  currency: CurrencyCode;
   productType: ProductType;
   deliveryType: DeliveryType;
   isHot?: boolean;
@@ -320,6 +342,31 @@ export function mapAdminProductDto(row: AdminProductRow) {
     sellerId: row.sellerId,
     sellerDisplayName: row.sellerDisplayName,
     moderationReason: toNullableString(row.moderationReason)
+  };
+}
+
+export function mapAdminProductSummaryDto(row: AdminProductSummaryRow) {
+  return {
+    id: row.id,
+    title: row.title,
+    status: row.status,
+    priceCents: toMoneyCents(row.priceCents),
+    currency: row.currency,
+    createdAt: toIsoDate(row.createdAt),
+    categoryName: row.categoryName,
+    gameName: row.gameName,
+    sectionName: row.sectionName,
+    sellerDisplayName: row.sellerDisplayName
+  };
+}
+
+export function mapAdminProductMutationDto(row: AdminProductMutationRow) {
+  return {
+    id: row.id,
+    title: row.title,
+    status: row.status,
+    isHot: row.isHot,
+    isRecommended: row.isRecommended
   };
 }
 

@@ -20,7 +20,7 @@ import {
   UserRound,
   XCircle
 } from "lucide-react";
-import { apiFetch, type Order } from "@/lib/api";
+import { apiFetch, type OrderDetailDto } from "@/lib/api";
 import { useMoney } from "@/lib/currency";
 import { useAuth } from "@/lib/auth-store";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -56,7 +56,7 @@ type OrderEvent = {
 };
 
 type OrderDetailResponse = {
-  order: Order;
+  order: OrderDetailDto;
   events: OrderEvent[];
 };
 

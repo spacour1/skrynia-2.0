@@ -32,7 +32,9 @@ import { enqueueDomainEvent } from "../outbox/outbox.service.js";
 import {
   mapAdminOrderDto,
   mapOrderDetailDto,
-  mapOrderMoneyFields
+  mapOrderMutationDto,
+  mapOrderSummaryDto,
+  type OrderSummaryRow
 } from "./orders.dto.js";
 import {
   bigintToMoneyCents,
@@ -172,7 +174,7 @@ router.post(
 
         return {
           statusCode: 201,
-          body: { order: mapOrderDetailDto(createdOrder), conversationId },
+          body: { order: mapOrderMutationDto(createdOrder), conversationId },
           resourceId: createdOrder.id as string
         };
       }
@@ -216,7 +218,7 @@ router.get(
     if (cursorWhere) where.push(cursorWhere);
     values.push(limit);
 
-    const result = await pool.query(
+    const result = await pool.query<OrderSummaryRow>(
       `select o.id, o.status, o.quantity, o.amount_cents as "amountCents", o.fee_cents as "feeCents",
               o.currency, o.created_at as "createdAt", o.paid_at as "paidAt", o.delivered_at as "deliveredAt",
               o.auto_release_at as "autoReleaseAt",
@@ -232,7 +234,7 @@ router.get(
        limit $${values.length}`,
       values
     );
-    const orders = result.rows.map(mapOrderMoneyFields);
+    const orders = result.rows.map(mapOrderSummaryDto);
     const payload = { orders, nextCursor: buildNextCursor(result.rows, limit) };
     await cacheSet(cacheKey, payload, 15);
     res.json(payload);
@@ -328,7 +330,7 @@ router.post(
         metadata: { systemMessageIds: message ? [message.id] : [] }
       });
     });
-    res.json({ order: mapOrderDetailDto(order) });
+    res.json({ order: mapOrderMutationDto(order) });
   })
 );
 
@@ -370,7 +372,7 @@ router.post(
         metadata: { systemMessageIds: message ? [message.id] : [] }
       });
     });
-    res.json({ order: mapOrderDetailDto(order) });
+    res.json({ order: mapOrderMutationDto(order) });
   })
 );
 
@@ -390,7 +392,7 @@ router.post(
       source: "buyer_confirmed",
       actorId: req.user.id
     });
-    res.json({ order: mapOrderDetailDto(updated) });
+    res.json({ order: mapOrderMutationDto(updated) });
   })
 );
 

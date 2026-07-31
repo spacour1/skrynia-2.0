@@ -2,6 +2,25 @@ import type { IsoDateString } from "./common.js";
 import type { CurrencyCode, OrderStatus } from "./enums.js";
 import type { MoneyCents } from "./money.js";
 
+export type OrderMutationDto = {
+  id: string;
+  status: OrderStatus;
+  productId: string;
+  buyerId: string;
+  sellerId: string;
+  quantity: number;
+  amountCents: MoneyCents;
+  feeCents: MoneyCents;
+  currency: CurrencyCode;
+  deliveryNote: string | null;
+  autoReleaseAt: IsoDateString | null;
+  paidAt: IsoDateString | null;
+  deliveredAt: IsoDateString | null;
+  completedAt: IsoDateString | null;
+  createdAt: IsoDateString;
+  updatedAt: IsoDateString;
+};
+
 export type OrderSummaryDto = {
   id: string;
   status: OrderStatus;
@@ -33,4 +52,21 @@ export type OrderDetailDto = OrderSummaryDto & {
 export type AdminOrderDto = OrderDetailDto & {
   paymentProvider: string | null;
   paymentReference: string | null;
+};
+
+export type AdminOrderMutationDto = OrderMutationDto & {
+  paymentProvider: string | null;
+  paymentReference: string | null;
+};
+
+export type AdminPendingOrderDto = {
+  id: string;
+  amountCents: MoneyCents;
+  currency: CurrencyCode;
+  createdAt: IsoDateString;
+  productTitle: string;
+  buyerId: string;
+  buyerDisplayName: string;
+  buyerEmail: string;
+  sellerDisplayName: string;
 };

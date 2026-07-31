@@ -6,6 +6,7 @@ import {
   type DbDate
 } from "../../common/dto.js";
 import type {
+  CurrencyCode,
   DisputeDecision,
   DisputeStatus,
   OrderStatus
@@ -28,7 +29,7 @@ export type DisputeStaffContextRow = DisputeParticipantRow & {
   buyerId: string;
   sellerId: string;
   amountCents: MoneyCentsInput;
-  currency: string;
+  currency: CurrencyCode;
   orderStatus: OrderStatus;
   productTitle: string;
 };

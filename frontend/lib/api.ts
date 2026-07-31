@@ -1,18 +1,41 @@
-import type { CatalogField } from "./catalog-api";
 import type {
-  DeliveryType,
+  AuthUserDto,
+  OrderSummaryDto,
   OrderStatus,
-  ProductStatus,
-  ProductType,
+  ProductCardDto,
   Role
 } from "./contracts";
 import type { WireMoneyCents } from "./money";
 
 export type {
+  AdminDisputeMessageDto,
+  AdminOrderDto,
+  AdminOrderMutationDto,
+  AdminPendingOrderDto,
+  AdminProductDto,
+  AdminProductMutationDto,
+  AdminProductSummaryDto,
+  AuthUserDto,
   DeliveryType,
+  DisputeAdminDto,
+  DisputeAdminSummaryDto,
+  DisputeDecision,
+  DisputeMessageDto,
+  DisputeModeratorDto,
+  DisputeModeratorSummaryDto,
+  DisputeParticipantDto,
+  MessageDto,
+  OrderDetailDto,
+  OrderMutationDto,
+  OrderSummaryDto,
   OrderStatus,
+  ProductCardDto,
+  ProductDetailDto,
+  ProductMetadataFieldDto,
   ProductStatus,
   ProductType,
+  PublicSellerDto,
+  PublicSellerStatsDto,
   Role
 } from "./contracts";
 
@@ -22,21 +45,8 @@ export type {
 export const API_URL = "/api";
 export const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4000/ws";
 
-export type User = {
-  id: string;
-  email: string;
-  displayName: string;
-  role: Role;
-  avatarUrl?: string | null;
-  pushEnabled?: boolean;
-  twoFactorEnabled?: boolean;
+export type User = AuthUserDto & {
   settings?: Record<string, unknown>;
-  createdAt?: string;
-  online?: boolean | null;
-  emailVerified?: boolean;
-  phone?: string | null;
-  phoneVerified?: boolean;
-  telegramConnected?: boolean;
 };
 
 export type Category = {
@@ -67,7 +77,7 @@ export type Game = {
   isPopular?: boolean;
   isRecommended?: boolean;
   homepageOrder?: number;
-  createdAt?: string;
+  createdAt: string;
 };
 
 export type GameSection = {
@@ -83,70 +93,10 @@ export type GameSection = {
   categoryRiskLevel?: "low" | "medium" | "high";
 };
 
-export type Product = {
-  id: string;
-  title: string;
-  description: string;
-  priceCents: WireMoneyCents;
-  currency: string;
-  stock: number;
-  status?: ProductStatus;
-  categoryId?: string;
-  categorySlug?: string;
-  categoryName?: string;
-  gameId?: string;
-  gameSlug?: string;
-  gameName?: string;
-  sectionId?: string;
-  sectionSlug?: string;
-  sectionName?: string;
-  server?: string;
-  platform?: string;
-  metadata?: Record<string, unknown>;
-  // Set on the section the lot was created under - schema-driven metadata is only ever
-  // labeled/validated against the schema version active at creation time, never whatever
-  // is current for the section now (see catalog.service.ts:getSchemaByVersion).
-  schemaVersion?: number | null;
-  // Only present on the /products/:id detail response - the full field schema (key, label,
-  // type, etc.) the lot's metadata was created under, for rendering specs by proper labels.
-  metadataFields?: CatalogField[];
-  // Only present on list/favorites/seller-products responses - precomputed showInCard fields.
-  cardMetadata?: { key: string; label: string; value: unknown }[];
-  deliveryTemplate?: string;
-  deliveryType?: DeliveryType;
-  productType?: ProductType;
-  oldPriceCents?: WireMoneyCents | null;
-  salesCount?: number;
-  isHot?: boolean;
-  isRecommended?: boolean;
-  favoriteCount?: number;
-  media?: { id: string; url: string; type: string; status?: string }[];
-  sellerId: string;
-  sellerDisplayName: string;
-  sellerRating: number;
-  sellerReviewCount: number;
-  sellerOnline?: boolean | null;
-};
-
-export type Order = {
-  id: string;
-  status: OrderStatus;
-  productId?: string;
-  productTitle?: string;
-  buyerId?: string;
-  buyerDisplayName?: string;
-  buyerAvatarUrl?: string | null;
-  sellerId?: string;
-  sellerDisplayName?: string;
-  sellerAvatarUrl?: string | null;
-  quantity: number;
-  amountCents?: WireMoneyCents;
-  feeCents?: WireMoneyCents;
-  currency: string;
-  deliveryNote?: string;
-  autoReleaseAt?: string;
-  createdAt?: string;
-};
+/** @deprecated Prefer the endpoint-specific DTO type exported above. */
+export type Product = ProductCardDto;
+/** @deprecated Prefer `OrderSummaryDto`, `OrderDetailDto`, or `OrderMutationDto`. */
+export type Order = OrderSummaryDto;
 
 export type Conversation = {
   id: string;
@@ -167,7 +117,7 @@ export type Conversation = {
   unreadCount?: number;
   blocked?: boolean;
   canSendMessage?: boolean;
-  createdAt?: string;
+  createdAt: string;
 };
 
 export type ConversationContextType = "direct" | "product" | "order";
@@ -187,7 +137,7 @@ export type ConversationContext = {
   lastMessageBody?: string | null;
   blocked?: boolean;
   canSendMessage?: boolean;
-  createdAt?: string;
+  createdAt: string;
 };
 
 export type ConversationGroup = {

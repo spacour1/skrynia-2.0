@@ -67,7 +67,7 @@ export function SearchSuggest({
                   {image ? (
                     <img className="h-11 w-11 shrink-0 rounded-xl object-cover" src={image} alt="" />
                   ) : (
-                    <GameIcon name={product.gameName ?? product.categoryName ?? "Product"} slug={product.gameSlug} className="h-11 w-11 rounded-xl" />
+                    <GameIcon name={product.gameName ?? product.categoryName ?? "Product"} slug={product.gameSlug ?? undefined} className="h-11 w-11 rounded-xl" />
                   )}
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-black text-ink">{product.title}</span>

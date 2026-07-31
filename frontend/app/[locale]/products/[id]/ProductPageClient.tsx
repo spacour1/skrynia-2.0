@@ -23,12 +23,16 @@ import { ChatPanel } from "@/components/ChatPanel";
 import { EmailNotVerifiedNotice } from "@/components/EmailNotVerifiedNotice";
 import { QueryErrorState } from "@/components/QueryErrorState";
 import { ReportModal } from "@/components/ReportModal";
-import { apiFetch, isEmailNotVerifiedError, type Product } from "@/lib/api";
+import {
+  apiFetch,
+  isEmailNotVerifiedError,
+  type ProductDetailDto,
+  type ProductMetadataFieldDto
+} from "@/lib/api";
 import { calculateDiscountPercent, isPositiveMoneyCents, useMoney } from "@/lib/currency";
 import { useAuth } from "@/lib/auth-store";
 import { useI18n } from "@/lib/i18n";
 import { fieldLabel, formatFieldValue } from "@/lib/product-fields";
-import type { CatalogField } from "@/lib/catalog-api";
 import { showAppToast } from "@/lib/toast-events";
 import { captureEvent } from "@/lib/posthog";
 import { createClientUuid } from "@/lib/uuid";
@@ -66,7 +70,7 @@ export function ProductPageClient({ id }: { id: string }) {
 
   const product = useQuery({
     queryKey: ["product", id],
-    queryFn: () => apiFetch<{ product: Product; reviews: ProductReview[] }>(`/marketplace/products/${id}`)
+    queryFn: () => apiFetch<{ product: ProductDetailDto; reviews: ProductReview[] }>(`/marketplace/products/${id}`)
   });
 
   const productItem = product.data?.product;
@@ -539,7 +543,7 @@ function Spec({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
-function formatSchemaFieldValue(field: CatalogField, value: unknown, t: (key: string) => string): string {
+function formatSchemaFieldValue(field: ProductMetadataFieldDto, value: unknown, t: (key: string) => string): string {
   switch (field.type) {
     case "boolean":
     case "checkbox":
@@ -557,7 +561,7 @@ function productTypeLabel(t: (key: string) => string, productType?: string | nul
   return key ? t(key) : productType;
 }
 
-function shortText(item: Product) {
+function shortText(item: ProductDetailDto) {
   const shortDescription = item.metadata?.shortDescription;
   if (typeof shortDescription === "string" && shortDescription.trim()) return shortDescription;
   return item.description.length > 180 ? `${item.description.slice(0, 180)}...` : item.description;

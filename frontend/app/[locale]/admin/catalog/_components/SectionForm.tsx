@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Trash2 } from "lucide-react";
 import { SchemaBuilder } from "@/components/admin/catalog/SchemaBuilder";
 import { ApiError } from "@/lib/api";
+import { DELIVERY_TYPES, PRODUCT_TYPES } from "@/lib/contracts";
 import { useI18n } from "@/lib/i18n";
 import { showAppToast } from "@/lib/toast-events";
 import { catalogApi, type AdminCatalogSection } from "@/lib/catalog-api";
@@ -12,10 +13,8 @@ import { Field, FormError, StatusPill } from "./catalog-ui";
 import type { Selection } from "./types";
 import { useAutoSlug } from "./useAutoSlug";
 
-const LISTING_TYPES = ["account", "key", "topup", "boosting", "service", "item", "currency"];
 // "service" is a listing (product) type, not a delivery mechanism — the backend and
 // products.delivery_type accept manual/instant only.
-const DELIVERY_TYPES = ["manual", "instant"];
 
 export function SectionForm({ section, itemId, onSelect }: { section?: AdminCatalogSection; itemId: string; onSelect: (s: Selection) => void }) {
   const { t } = useI18n();
@@ -118,7 +117,7 @@ export function SectionForm({ section, itemId, onSelect }: { section?: AdminCata
         </Field>
         <Field label="Listing type">
           <select className="app-input h-10" value={listingType} onChange={(e) => setListingType(e.target.value)}>
-            {LISTING_TYPES.map((type) => (
+            {PRODUCT_TYPES.map((type) => (
               <option key={type} value={type}>
                 {type}
               </option>

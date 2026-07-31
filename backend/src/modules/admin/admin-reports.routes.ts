@@ -14,7 +14,11 @@ router.get(
     const status = z.enum(["pending", "in_review", "resolved", "rejected"]).optional().parse(req.query.status);
     const { page, limit, offset } = parseOffsetPage(req.query, { defaultLimit: 100 });
     const userReports = await pool.query(
-      `select * from (
+      `select id, kind, reason, description, status, priority,
+              "moderatorNote", "createdAt", "resolvedAt",
+              "reporterId", "reporterDisplayName",
+              "reportedUserId", "reportedDisplayName", "messageId"
+       from (
        select ur.id, 'user' as kind, ur.reason, ur.description, ur.status, ur.priority,
               ur.moderator_note as "moderatorNote", ur.created_at as "createdAt", ur.resolved_at as "resolvedAt",
               ur.reporter_id as "reporterId", reporter.display_name as "reporterDisplayName",

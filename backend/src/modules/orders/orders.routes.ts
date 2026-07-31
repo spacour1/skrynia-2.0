@@ -29,7 +29,11 @@ import {
   runIdempotentTransaction
 } from "../idempotency/idempotency.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
-import { mapOrderMoneyFields, mapOrderRowDto } from "./orders.dto.js";
+import {
+  mapAdminOrderDto,
+  mapOrderDetailDto,
+  mapOrderMoneyFields
+} from "./orders.dto.js";
 import {
   bigintToMoneyCents,
   parseMoneyCents,
@@ -105,7 +109,10 @@ router.post(
         const orderResult = await client.query(
           `insert into orders(buyer_id, seller_id, product_id, quantity, amount_cents, currency)
            values ($1, $2, $3, $4, $5, $6)
-           returning *`,
+           returning id, buyer_id, seller_id, product_id, quantity, amount_cents,
+                     fee_cents, currency, status, delivery_note,
+                     auto_release_at, paid_at, delivered_at, completed_at,
+                     created_at, updated_at`,
           [
             req.user.id,
             product.seller_id,
@@ -165,7 +172,7 @@ router.post(
 
         return {
           statusCode: 201,
-          body: { order: mapOrderRowDto(createdOrder), conversationId },
+          body: { order: mapOrderDetailDto(createdOrder), conversationId },
           resourceId: createdOrder.id as string
         };
       }
@@ -237,17 +244,23 @@ router.get(
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
     const id = z.string().uuid().parse(req.params.id);
-    const cached = await cacheGet(`order:${id}:${req.user.id}`);
+    const cacheKey = `order:${id}:${req.user.id}:${req.user.role}`;
+    const cached = await cacheGet(cacheKey);
     if (cached) return res.json(cached);
+    const adminPaymentColumns =
+      req.user.role === "admin"
+        ? ", o.payment_provider, o.payment_reference"
+        : "";
     const result = await pool.query(
-      `select o.id, o.buyer_id as "buyerId", o.seller_id as "sellerId", o.product_id as "productId",
-              o.quantity, o.amount_cents as "amountCents", o.fee_cents as "feeCents", o.currency,
-              o.status, o.payment_provider as "paymentProvider", o.payment_reference as "paymentReference",
-              o.delivery_note as "deliveryNote", o.auto_release_at as "autoReleaseAt",
-              o.paid_at as "paidAt", o.delivered_at as "deliveredAt", o.completed_at as "completedAt",
-              o.created_at as "createdAt", o.updated_at as "updatedAt",
-              p.title as "productTitle", p.description as "productDescription",
-              b.display_name as "buyerDisplayName", s.display_name as "sellerDisplayName"
+      `select o.id, o.buyer_id, o.seller_id, o.product_id,
+              o.quantity, o.amount_cents, o.fee_cents, o.currency,
+              o.status${adminPaymentColumns},
+              o.delivery_note, o.auto_release_at,
+              o.paid_at, o.delivered_at, o.completed_at,
+              o.created_at, o.updated_at,
+              p.title as product_title, p.description as product_description,
+              b.display_name as buyer_display_name, b.avatar_url as buyer_avatar_url,
+              s.display_name as seller_display_name, s.avatar_url as seller_avatar_url
        from orders o
        join products p on p.id = o.product_id
        join users b on b.id = o.buyer_id
@@ -255,13 +268,11 @@ router.get(
        where o.id = $1`,
       [id]
     );
-    const order = result.rows[0]
-      ? mapOrderMoneyFields(result.rows[0])
-      : null;
-    if (!order) throw notFound("Order not found");
+    const orderRow = result.rows[0];
+    if (!orderRow) throw notFound("Order not found");
     if (
       !canSeeOrder(
-        { buyerId: order.buyerId, sellerId: order.sellerId },
+        { buyerId: orderRow.buyer_id, sellerId: orderRow.seller_id },
         req.user
       )
     ) {
@@ -276,8 +287,12 @@ router.get(
        order by e.created_at asc`,
       [id]
     );
+    const order =
+      req.user.role === "admin"
+        ? mapAdminOrderDto(orderRow)
+        : mapOrderDetailDto(orderRow);
     const payload = { order, events: events.rows };
-    await cacheSet(`order:${id}:${req.user.id}`, payload, 15);
+    await cacheSet(cacheKey, payload, 15);
     res.json(payload);
   })
 );
@@ -313,7 +328,7 @@ router.post(
         metadata: { systemMessageIds: message ? [message.id] : [] }
       });
     });
-    res.json({ order: mapOrderRowDto(order) });
+    res.json({ order: mapOrderDetailDto(order) });
   })
 );
 
@@ -355,7 +370,7 @@ router.post(
         metadata: { systemMessageIds: message ? [message.id] : [] }
       });
     });
-    res.json({ order: mapOrderRowDto(order) });
+    res.json({ order: mapOrderDetailDto(order) });
   })
 );
 
@@ -375,7 +390,7 @@ router.post(
       source: "buyer_confirmed",
       actorId: req.user.id
     });
-    res.json({ order: mapOrderRowDto(updated) });
+    res.json({ order: mapOrderDetailDto(updated) });
   })
 );
 
@@ -388,7 +403,10 @@ router.post(
     const input = reviewSchema.parse(req.body);
     const result = await inTx(async (client) => {
       const orderResult = await client.query(
-        `select * from orders where id = $1 for update`,
+        `select buyer_id, seller_id, status
+         from orders
+         where id = $1
+         for update`,
         [id]
       );
       const order = orderResult.rows[0];
@@ -398,7 +416,10 @@ router.post(
       }
 
       const existing = await client.query(
-        `select * from reviews where order_id = $1`,
+        `select id, order_id as "orderId", seller_id as "sellerId",
+                buyer_id as "buyerId", rating, comment, created_at as "createdAt"
+         from reviews
+         where order_id = $1`,
         [id]
       );
       if (existing.rows[0]) {
@@ -423,7 +444,8 @@ router.post(
       const result = await client.query(
         `insert into reviews(order_id, seller_id, buyer_id, rating, comment)
          values ($1, $2, $3, $4, $5)
-         returning *`,
+         returning id, order_id as "orderId", seller_id as "sellerId",
+                   buyer_id as "buyerId", rating, comment, created_at as "createdAt"`,
         [id, order.seller_id, order.buyer_id, input.rating, input.comment ?? null]
       );
       const createdReview = result.rows[0];

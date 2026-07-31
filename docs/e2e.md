@@ -40,9 +40,13 @@ provider credentials to `docker-compose.e2e.yml`.
 
 ## Covered flows
 
-- `golden.spec.ts`: verified accounts, public listing, favorite, first-message
-  WebSocket ACK in browser UI, idempotent order creation, test capture,
-  start/deliver/confirm, and idempotent review.
+- `golden.spec.ts`: registration, email verification, a fresh login, manual
+  listing creation, public detail, first-message WebSocket ACK, checkout, test
+  capture, start/deliver/confirm, and the first review all run through browser
+  UI. The exact idempotency replay and duplicate-review attempt reuse the
+  browser requests through the API helper. Adding the favorite is a real product
+  detail button click, and its persisted result is then asserted on the browser
+  favorites page.
 - `dispute.spec.ts`: participant opens a dispute in browser UI, seller replies
   in the dedicated participant thread, admin sees those messages in browser UI,
   resolves the dispute, and terminal/immutable/read-only rules are asserted.
@@ -54,7 +58,9 @@ provider credentials to `docker-compose.e2e.yml`.
   plus UI retry, currency switch preserving an unsaved draft, real category
   filter links, and opening a product link in a new Chromium tab.
 
-API helpers are used only for deterministic setup and invariant assertions.
+API helpers are used for deterministic catalog/setup operations and invariant
+assertions, including exact request replay where reproducing browser request
+headers is the behavior under test.
 Chat ACK, participant dispute interaction, admin dispute-message visibility,
 password rotation, retry, currency draft, and link behavior execute through the
 real frontend.

@@ -10,6 +10,7 @@ import {
   Clock,
   CreditCard,
   Flag,
+  Heart,
   MessageCircle,
   PackageCheck,
   ShieldOff,
@@ -114,6 +115,41 @@ export function ProductPageClient({ id }: { id: string }) {
     enabled: Boolean(user)
   });
   const isBlocked = Boolean(productItem && blockedUsers.data?.blocked.some((blocked) => blocked.id === productItem.sellerId));
+  const favoriteIds = useQuery({
+    queryKey: ["favorite-ids"],
+    queryFn: async () => ({
+      productIds: await fetchAllCursorItems<"productIds", string>(
+        "/marketplace/favorites/ids",
+        "productIds"
+      )
+    }),
+    enabled: Boolean(user)
+  });
+  const isFavorite = Boolean(favoriteIds.data?.productIds.includes(id));
+
+  const toggleFavorite = useMutation({
+    mutationFn: () =>
+      apiFetch(`/marketplace/favorites/${id}`, {
+        method: isFavorite ? "DELETE" : "PUT"
+      }),
+    onSuccess: () => {
+      queryClient.setQueryData<{ productIds: string[] }>(
+        ["favorite-ids"],
+        (current) => {
+          const ids = new Set(current?.productIds ?? []);
+          if (isFavorite) ids.delete(id);
+          else ids.add(id);
+          return { productIds: [...ids] };
+        }
+      );
+      queryClient.invalidateQueries({ queryKey: ["favorites"] });
+      showAppToast({
+        title: isFavorite
+          ? t("seller.listingFavoriteRemoved")
+          : t("seller.listingFavoriteAdded")
+      });
+    }
+  });
 
   const blockSeller = useMutation({
     mutationFn: () => apiFetch(`/users/${productItem!.sellerId}/block`, { method: "POST" }),
@@ -234,6 +270,26 @@ export function ProductPageClient({ id }: { id: string }) {
                   {t("product.loginAndBuy")}
                 </button>
               )}
+              {!isOwn && user ? (
+                <button
+                  className="app-button-secondary mt-2 w-full py-3"
+                  type="button"
+                  aria-label={
+                    isFavorite
+                      ? t("product.removeFavorite")
+                      : t("product.addFavorite")
+                  }
+                  disabled={favoriteIds.isLoading || toggleFavorite.isPending}
+                  onClick={() => toggleFavorite.mutate()}
+                >
+                  <Heart
+                    className={`h-5 w-5 ${isFavorite ? "fill-current text-rose-400" : ""}`}
+                  />
+                  {isFavorite
+                    ? t("product.removeFavorite")
+                    : t("product.addFavorite")}
+                </button>
+              ) : null}
               {buyError ? (
                 isEmailNotVerifiedError(buyError) ? (
                   <div className="mt-3">

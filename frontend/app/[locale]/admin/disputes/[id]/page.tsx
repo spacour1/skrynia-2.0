@@ -9,13 +9,25 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useI18n } from "@/lib/i18n";
 import { formatDate } from "@/lib/locale-format";
+import { useAuth } from "@/lib/auth-store";
+import { getDisputeFinancialAction } from "@/lib/admin-disputes";
+import type {
+  DisputeDecision,
+  DisputeStatus
+} from "@/lib/contracts";
 
 type DisputeDetail = {
   id: string;
   orderId: string;
-  status: string;
+  status: DisputeStatus;
   reason: string;
-  resolution?: string;
+  resolution?: DisputeDecision | null;
+  resolutionDecision?: DisputeDecision | null;
+  resolutionAttempts?: number;
+  lastResolutionError?: string | null;
+  resolvingStartedAt?: string | null;
+  createdAt: string;
+  resolvedAt?: string | null;
   orderStatus: string;
   amountCents: WireMoneyCents;
   currency: string;
@@ -43,17 +55,19 @@ type ParticipantDisputeMessage = {
 
 export default function AdminDisputeDetailPage({ params }: { params: { id: string } }) {
   return (
-    <RequireAuth roles={["admin"]}>
+    <RequireAuth roles={["admin", "moderator"]}>
       <AdminDisputeDetailContent params={params} />
     </RequireAuth>
   );
 }
 
 function AdminDisputeDetailContent({ params }: { params: { id: string } }) {
+  const user = useAuth((state) => state.user);
   const money = useMoney();
   const client = useQueryClient();
   const { t, locale } = useI18n();
   const [adminNote, setAdminNote] = useState("");
+  const [replyBody, setReplyBody] = useState("");
   const detail = useQuery({
     queryKey: ["admin-dispute", params.id],
     queryFn: () =>
@@ -69,9 +83,20 @@ function AdminDisputeDetailContent({ params }: { params: { id: string } }) {
         method: "POST",
         body: JSON.stringify({ decision, adminNote: adminNote || decision })
       }),
-    onSuccess: () => {
+    onSettled: () => {
       client.invalidateQueries({ queryKey: ["admin-dispute", params.id] });
       client.invalidateQueries({ queryKey: ["admin-disputes"] });
+    }
+  });
+  const reply = useMutation({
+    mutationFn: () =>
+      apiFetch(`/disputes/${params.id}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ body: replyBody.trim() })
+      }),
+    onSuccess: () => {
+      setReplyBody("");
+      client.invalidateQueries({ queryKey: ["admin-dispute", params.id] });
     }
   });
 
@@ -84,6 +109,14 @@ function AdminDisputeDetailContent({ params }: { params: { id: string } }) {
   if (!detail.data) return <p className="text-rose-600">{t("orders.notFound")}</p>;
 
   const dispute = detail.data.dispute;
+  const financialAction = getDisputeFinancialAction(user?.role, dispute);
+  const decision = dispute.resolutionDecision ?? dispute.resolution;
+  const decisionLabel =
+    decision === "refund"
+      ? t("admin.refundBuyer")
+      : decision === "release"
+        ? t("admin.releaseSeller")
+        : null;
 
   return (
     <div className="space-y-6">
@@ -108,27 +141,117 @@ function AdminDisputeDetailContent({ params }: { params: { id: string } }) {
         </div>
       </section>
 
-      {dispute.status === "open" && (
-        <section className="app-card p-5">
-          <h2 className="text-lg font-semibold">{t("admin.resolveDispute")}</h2>
+      <section className="app-card p-5" data-testid="admin-dispute-lifecycle">
+        <h2 className="text-lg font-semibold">{t("admin.resolutionLifecycle")}</h2>
+        <dl className="mt-4 grid gap-3 text-sm md:grid-cols-2">
+          <div>
+            <dt className="font-semibold text-muted">{t("common.status")}</dt>
+            <dd className="mt-1"><StatusBadge status={dispute.status} /></dd>
+          </div>
+          {decisionLabel ? (
+            <div>
+              <dt className="font-semibold text-muted">{t("admin.resolutionDecision")}</dt>
+              <dd className="mt-1">{decisionLabel}</dd>
+            </div>
+          ) : null}
+          <div>
+            <dt className="font-semibold text-muted">{t("admin.createdAt")}</dt>
+            <dd className="mt-1">{formatDate(dispute.createdAt, locale)}</dd>
+          </div>
+          {dispute.resolvingStartedAt ? (
+            <div>
+              <dt className="font-semibold text-muted">{t("admin.resolvingStartedAt")}</dt>
+              <dd className="mt-1">{formatDate(dispute.resolvingStartedAt, locale)}</dd>
+            </div>
+          ) : null}
+          {dispute.resolvedAt ? (
+            <div>
+              <dt className="font-semibold text-muted">{t("admin.resolvedAt")}</dt>
+              <dd className="mt-1">{formatDate(dispute.resolvedAt, locale)}</dd>
+            </div>
+          ) : null}
+          {user?.role === "admin" && typeof dispute.resolutionAttempts === "number" ? (
+            <div>
+              <dt className="font-semibold text-muted">{t("admin.resolutionAttempts")}</dt>
+              <dd className="mt-1">{dispute.resolutionAttempts}</dd>
+            </div>
+          ) : null}
+        </dl>
+
+        {user?.role === "admin" && dispute.lastResolutionError ? (
+          <div className="mt-4 rounded-md border border-rose-300 bg-rose-50 p-3 dark:border-rose-900 dark:bg-rose-950/30">
+            <p className="text-xs font-bold uppercase text-rose-700 dark:text-rose-300">
+              {t("admin.lastResolutionError")}
+            </p>
+            <p className="mt-2 whitespace-pre-wrap text-sm text-rose-700 dark:text-rose-200">
+              {dispute.lastResolutionError}
+            </p>
+          </div>
+        ) : null}
+
+        {dispute.status === "resolving" ? (
+          <p className="mt-4 text-sm text-amber-700 dark:text-amber-300">
+            {t("admin.resolutionInProgress")}
+          </p>
+        ) : dispute.status === "resolution_failed" ? (
+          <p className="mt-4 text-sm text-rose-700 dark:text-rose-300">
+            {t("admin.resolutionFailed")}
+          </p>
+        ) : dispute.status === "resolved" ? (
+          <p className="mt-4 text-sm text-emerald-700 dark:text-emerald-300">
+            {t("admin.resolutionCompleted")}
+          </p>
+        ) : null}
+
+        {financialAction.kind === "choose" || financialAction.kind === "retry" ? (
+          <div className="mt-5 border-t border-line pt-5">
+            <h3 className="font-semibold">
+              {financialAction.kind === "retry"
+                ? t("admin.retryResolution")
+                : t("admin.resolveDispute")}
+            </h3>
           <textarea
             className="app-input mt-3 h-24 w-full"
             placeholder={t("admin.adminNote")}
             value={adminNote}
             onChange={(event) => setAdminNote(event.target.value)}
           />
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <form onSubmit={(event) => submit(event, "refund")}>
-              <button className="app-button-danger w-full">
-                {t("admin.refundBuyer")}
-              </button>
-            </form>
-            <form onSubmit={(event) => submit(event, "release")}>
-              <button className="app-button w-full">{t("admin.releaseSeller")}</button>
-            </form>
+            {financialAction.kind === "choose" ? (
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <form onSubmit={(event) => submit(event, "refund")}>
+                  <button className="app-button-danger w-full" disabled={resolve.isPending}>
+                    {t("admin.refundBuyer")}
+                  </button>
+                </form>
+                <form onSubmit={(event) => submit(event, "release")}>
+                  <button className="app-button w-full" disabled={resolve.isPending}>
+                    {t("admin.releaseSeller")}
+                  </button>
+                </form>
+              </div>
+            ) : (
+              <form
+                className="mt-3"
+                onSubmit={(event) => submit(event, financialAction.decision)}
+              >
+                <button className="app-button w-full" disabled={resolve.isPending}>
+                  {t("admin.retryResolution")}: {decisionLabel}
+                </button>
+              </form>
+            )}
           </div>
-        </section>
-      )}
+        ) : financialAction.kind === "in_progress" ? (
+          <button className="app-button mt-5" type="button" disabled>
+            {t("admin.resolutionInProgress")}
+          </button>
+        ) : user?.role === "admin" && dispute.status === "resolution_failed" ? (
+          <p className="mt-4 text-sm text-rose-600">{t("admin.retryUnavailable")}</p>
+        ) : null}
+
+        {resolve.error ? (
+          <p className="mt-4 text-sm text-rose-600">{resolve.error.message}</p>
+        ) : null}
+      </section>
 
       <section className="app-card p-5">
         <h2 className="text-lg font-semibold">{t("admin.orderChatHistory")}</h2>
@@ -168,7 +291,7 @@ function AdminDisputeDetailContent({ params }: { params: { id: string } }) {
                 <span className="text-muted">{formatDate(message.createdAt, locale)}</span>
               </div>
               <p className="mt-2 whitespace-pre-wrap text-sm">{message.body}</p>
-              {message.hiddenAt ? (
+              {user?.role === "admin" && message.hiddenAt ? (
                 <p className="mt-2 text-xs font-bold text-rose-500">
                   {t("admin.disputeMessageHidden")}
                   {message.moderationReason ? `: ${message.moderationReason}` : ""}
@@ -185,6 +308,40 @@ function AdminDisputeDetailContent({ params }: { params: { id: string } }) {
             <p className="text-sm text-muted">{t("admin.noDisputeMessages")}</p>
           ) : null}
         </div>
+        {dispute.status !== "resolved" ? (
+          <form
+            className="mt-4 space-y-3 border-t border-line pt-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (replyBody.trim()) reply.mutate();
+            }}
+          >
+            <label className="block text-sm font-semibold text-ink" htmlFor="staff-dispute-reply">
+              {t("orders.disputeReply")}
+            </label>
+            <textarea
+              id="staff-dispute-reply"
+              className="app-input h-24 w-full"
+              placeholder={t("orders.disputeReplyPlaceholder")}
+              value={replyBody}
+              onChange={(event) => setReplyBody(event.target.value)}
+              maxLength={5000}
+              required
+            />
+            <button
+              className="app-button"
+              type="submit"
+              disabled={reply.isPending || !replyBody.trim()}
+            >
+              {reply.isPending
+                ? t("orders.sendingDisputeReply")
+                : t("orders.sendDisputeReply")}
+            </button>
+            {reply.error ? (
+              <p className="text-sm text-rose-600">{reply.error.message}</p>
+            ) : null}
+          </form>
+        ) : null}
       </section>
     </div>
   );

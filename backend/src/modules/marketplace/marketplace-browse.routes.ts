@@ -10,8 +10,7 @@ import { getActiveSchemaForSection, getSchemaByVersion } from "../catalog/catalo
 import { buildMetadataFilterClauses } from "../catalog/catalog.validation.js";
 import {
   addSellerPresence,
-  attachCardMetadata,
-  mapProductMoneyFields
+  attachCardMetadata
 } from "./marketplace.helpers.js";
 import {
   buildMarketplaceSearchCtes,
@@ -21,6 +20,11 @@ import {
   MARKETPLACE_SEARCH_SELECT
 } from "./marketplace-search.sql.js";
 import { mediaAgg } from "./marketplace.sql.js";
+import {
+  mapProductCardDto,
+  mapProductDetailDto,
+  mapProductSuggestionDto
+} from "./product.dto.js";
 
 const router = Router();
 
@@ -259,7 +263,7 @@ router.get(
           searchSimilarity: _searchSimilarity,
           searchFullTextRank: _searchFullTextRank,
           ...row
-        }) => mapProductMoneyFields(row)
+        }) => mapProductSuggestionDto(row)
       )
     });
   })
@@ -384,7 +388,8 @@ router.get(
               coalesce(avg(r.rating), 0)::float as "sellerRating",
               count(distinct r.id)::int as "sellerReviewCount",
               count(distinct pf.user_id)::int as "favoriteCount",
-              ${mediaAgg}
+              ${mediaAgg},
+              count(*) over()::int as total
       from products p
       ${searchJoin}
       join categories c on c.id = p.category_id
@@ -399,9 +404,8 @@ router.get(
       ${having.length ? `having ${having.join(" and ")}` : ""}
     `;
     const result = await pool.query(
-      `with ${searchCtes ? `${searchCtes},` : ""} filtered as (${baseQuery})
-       select filtered.*, count(*) over()::int as total
-       from filtered
+      `${searchCtes ? `with ${searchCtes}` : ""}
+       ${baseQuery}
        order by ${orderBy}
        limit $${values.length - 1} offset $${values.length}`,
       values
@@ -415,10 +419,12 @@ router.get(
           searchSimilarity: _searchSimilarity,
           searchFullTextRank: _searchFullTextRank,
           ...row
-        }) => mapProductMoneyFields(row)
+        }) => row
       )
     );
-    const products = await attachCardMetadata(productsWithPresence);
+    const products = (await attachCardMetadata(productsWithPresence)).map(
+      mapProductCardDto
+    );
     const payload = { products, page: input.page, limit: input.limit, total };
     await cacheSet(cacheKey, payload, 30);
     res.json(payload);
@@ -486,7 +492,7 @@ router.get(
        limit 5`,
       [result.rows[0].sellerId]
     );
-    const row = mapProductMoneyFields(result.rows[0]);
+    const row = result.rows[0];
     // Labels come from the *exact* schema version the lot was created under, not whatever
     // is currently active for the section - a later schema edit must never change how an
     // already-created lot displays.
@@ -495,7 +501,7 @@ router.get(
     const { sellerIsBanned: _sellerIsBanned, ...publicRow } = row;
     const [productWithPresence] = await addSellerPresence([publicRow]);
     const payload = {
-      product: { ...productWithPresence, metadataFields },
+      product: mapProductDetailDto({ ...productWithPresence, metadataFields }),
       reviews: reviews.rows
     };
     // Never cache non-public payloads: owner/staff previews of paused or blocked listings

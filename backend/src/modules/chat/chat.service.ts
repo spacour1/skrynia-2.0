@@ -20,26 +20,16 @@ import {
   keysetWhereClause,
   type DecodedCursor
 } from "../../common/pagination.js";
+import {
+  mapMessageDto,
+  type MessageRow
+} from "./message.dto.js";
 
 export { createSystemMessage, getConversationIdForOrder };
 
 export type ConversationParties = { buyerId: string; sellerId: string };
 
-export type Message = {
-  id: string;
-  conversationId: string;
-  senderId: string | null;
-  clientMessageId?: string | null;
-  senderDisplayName: string;
-  body: string;
-  attachmentUrl: string | null;
-  attachmentUploadId?: string | null;
-  createdAt: string;
-  hidden?: boolean;
-  kind?: "user" | "system";
-  systemType?: string | null;
-  metadata?: Record<string, unknown>;
-};
+export type Message = ReturnType<typeof mapMessageDto>;
 
 export type ConversationContextType = "direct" | "product" | "order";
 
@@ -229,32 +219,32 @@ async function findMessageByClientId(
   client: DbClient,
   senderId: string,
   clientMessageId: string
-): Promise<Message | null> {
-  const result = await client.query(
+): Promise<MessageRow | null> {
+  const result = await client.query<MessageRow>(
     `select m.id, m.conversation_id as "conversationId",
             m.sender_id as "senderId",
             m.client_message_id as "clientMessageId",
             u.display_name as "senderDisplayName",
             m.body, m.attachment_url as "attachmentUrl",
-            m.attachment_storage_object_id as "attachmentUploadId",
+            m.attachment_storage_object_id as "attachmentStorageObjectId",
             m.created_at as "createdAt"
      from messages m
      join users u on u.id = m.sender_id
      where m.sender_id = $1 and m.client_message_id = $2`,
     [senderId, clientMessageId]
   );
-  return (result.rows[0] as Message | undefined) ?? null;
+  return result.rows[0] ?? null;
 }
 
 function verifyMessageReplay(
-  existing: Message,
+  existing: MessageRow,
   input: IdempotentSendMessageInput,
   body: string
 ) {
   if (
     existing.conversationId !== input.conversationId ||
     existing.body !== body ||
-    (existing.attachmentUploadId ?? null) !==
+    (existing.attachmentStorageObjectId ?? null) !==
       (input.attachmentUploadId ?? null)
   ) {
     throw new ApiError(
@@ -263,7 +253,10 @@ function verifyMessageReplay(
       "client_message_id_reused"
     );
   }
-  return { message: existing, created: false } satisfies SendMessageResult;
+  return {
+    message: mapMessageDto(existing),
+    created: false
+  } satisfies SendMessageResult;
 }
 
 export async function sendMessageIdempotently(
@@ -301,7 +294,7 @@ export async function sendMessageIdempotently(
         })
       : null;
 
-    const result = await client.query(
+    const result = await client.query<MessageRow>(
       `insert into messages(
          conversation_id, sender_id, client_message_id, body, attachment_url,
          attachment_storage_object_id
@@ -314,7 +307,7 @@ export async function sendMessageIdempotently(
                  client_message_id as "clientMessageId",
                  (select display_name from users where id = $2) as "senderDisplayName",
                  body, attachment_url as "attachmentUrl",
-                 attachment_storage_object_id as "attachmentUploadId",
+                 attachment_storage_object_id as "attachmentStorageObjectId",
                  created_at as "createdAt"`,
       [
         input.conversationId,
@@ -325,8 +318,8 @@ export async function sendMessageIdempotently(
         attachment?.id ?? null
       ]
     );
-    const message = result.rows[0] as Message | undefined;
-    if (!message) {
+    const messageRow = result.rows[0];
+    if (!messageRow) {
       const concurrentReplay = await findMessageByClientId(
         client,
         input.senderId,
@@ -339,13 +332,13 @@ export async function sendMessageIdempotently(
     }
 
     await enqueueDomainEvent(client, {
-      eventKey: `message.created:${message.id}`,
+      eventKey: `message.created:${messageRow.id}`,
       eventType: "message.created",
       aggregateType: "message",
-      aggregateId: message.id,
-      payload: { messageId: message.id }
+      aggregateId: messageRow.id,
+      payload: { messageId: messageRow.id }
     });
-    return { message, created: true };
+    return { message: mapMessageDto(messageRow), created: true };
   });
 }
 
@@ -398,7 +391,10 @@ export async function getMessagePage(
     params
   );
   const nextCursor = buildNextCursor(result.rows, limit);
-  return { messages: result.rows.reverse(), nextCursor };
+  return {
+    messages: result.rows.reverse().map((row) => mapMessageDto(row as MessageRow)),
+    nextCursor
+  };
 }
 
 export async function getMessages(

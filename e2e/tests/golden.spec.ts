@@ -1,11 +1,10 @@
-import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import {
   api,
   closeActors,
-  createOrder,
-  createProduct,
-  registerVerifiedActor,
+  createProductThroughUi,
+  rawApi,
+  registerVerifiedActorThroughUi,
   runId,
   waitForPageSocketFrame
 } from "./helpers.js";
@@ -13,37 +12,57 @@ import {
 test("golden marketplace order flow is idempotent and acknowledges the first chat message", async ({
   browser
 }) => {
-  const seller = await registerVerifiedActor(browser, "golden-seller");
-  const buyer = await registerVerifiedActor(browser, "golden-buyer");
+  const seller = await registerVerifiedActorThroughUi(browser, "golden-seller");
+  const buyer = await registerVerifiedActorThroughUi(browser, "golden-buyer");
   const anonymous = await browser.newContext();
 
   try {
-    const product = await createProduct(seller, "golden");
+    const product = await createProductThroughUi(seller, "golden");
 
     const publicPage = await anonymous.newPage();
     await publicPage.goto(`/en/products/${product.id}`);
     await expect(publicPage.getByRole("heading", { name: product.title })).toBeVisible();
 
-    await api(buyer.context, "PUT", `/marketplace/favorites/${product.id}`);
-    const favoritesPage = await buyer.context.newPage();
-    await favoritesPage.goto("/en/favorites");
-    await expect(favoritesPage.getByRole("link", { name: product.title })).toBeVisible();
-    await favoritesPage.close();
-
-    // A fresh page guarantees that the captured socket belongs to this document,
-    // rather than to the preceding hard navigation from Favorites.
+    // Capture the socket on the same product document that exercises favorite,
+    // conversation, and checkout controls.
     const buyerPage = await buyer.context.newPage();
     const socketConnected = waitForPageSocketFrame(
       buyerPage,
       (payload) => payload.includes('"type":"connected"')
     );
+    await buyerPage.goto(`/en/products/${product.id}`);
+    await socketConnected;
+
+    const favoriteResponsePromise = buyerPage.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname ===
+          `/api/marketplace/favorites/${product.id}` &&
+        response.request().method() === "PUT"
+    );
+    await buyerPage
+      .getByRole("button", { name: "Add to favorites", exact: true })
+      .click();
+    expect((await favoriteResponsePromise).status()).toBe(200);
+    await expect(
+      buyerPage.getByRole("button", {
+        name: "Remove from favorites",
+        exact: true
+      })
+    ).toBeVisible();
+    const favoritesPage = await buyer.context.newPage();
+    await favoritesPage.goto("/en/favorites");
+    await expect(
+      favoritesPage.getByRole("link", { name: product.title })
+    ).toBeVisible();
+    await favoritesPage.close();
+
     const messageBody = `First websocket message ${runId}`;
     const ack = waitForPageSocketFrame(
       buyerPage,
-      (payload) => payload.includes('"type":"message_ack"') && payload.includes(messageBody)
+      (payload) =>
+        payload.includes('"type":"message_ack"') &&
+        payload.includes(messageBody)
     );
-    await buyerPage.goto(`/en/products/${product.id}`);
-    await socketConnected;
     await buyerPage.getByPlaceholder("Write a message").fill(messageBody);
     await buyerPage.getByRole("button", { name: "Send message" }).click();
     const failedDelivery = buyerPage
@@ -64,48 +83,114 @@ test("golden marketplace order flow is idempotent and acknowledges the first cha
     await expect(buyerPage.getByText(messageBody, { exact: true })).toBeVisible();
     await expect(buyerPage.getByText("Sent", { exact: true })).toBeVisible();
 
-    const key = randomUUID();
-    const created = await createOrder(buyer, product.id, key);
-    const replayed = await createOrder(buyer, product.id, key);
+    const orderResponsePromise = buyerPage.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/orders" &&
+        response.request().method() === "POST"
+    );
+    await buyerPage
+      .getByRole("button", { name: "Buy securely", exact: true })
+      .click();
+    const orderResponse = await orderResponsePromise;
+    expect(orderResponse.status()).toBe(201);
+    const created = (await orderResponse.json()) as {
+      order: { id: string; status: string };
+    };
+    const orderRequest = orderResponse.request();
+    const key = orderRequest.headers()["idempotency-key"];
+    expect(key, "the browser checkout must send an Idempotency-Key").toBeTruthy();
+    const replayResponse = await rawApi(buyer.context, "POST", "/orders", {
+      headers: { "Idempotency-Key": key },
+      data: orderRequest.postDataJSON()
+    });
+    expect(replayResponse.status()).toBe(201);
+    expect(replayResponse.headers()["idempotency-replayed"]).toBe("true");
+    const replayed = (await replayResponse.json()) as {
+      order: { id: string };
+    };
     expect(replayed.order.id).toBe(created.order.id);
 
-    await api(buyer.context, "POST", `/payments/test/orders/${created.order.id}/success`);
-    await api(seller.context, "POST", `/orders/${created.order.id}/start`);
-    await api(seller.context, "POST", `/orders/${created.order.id}/deliver`, {
-      data: { deliveryNote: `Golden delivery ${runId}` }
-    });
-    await api(buyer.context, "POST", `/orders/${created.order.id}/confirm`);
+    await buyerPage.waitForURL(
+      (url) => url.pathname.endsWith(`/orders/${created.order.id}`)
+    );
+    await buyerPage
+      .getByRole("button", { name: "Success", exact: true })
+      .click();
+    await expect(buyerPage.getByText("paid", { exact: true })).toBeVisible();
 
-    await expect
-      .poll(async () => {
-        const detail = await api<{ order: { status: string } }>(
-          buyer.context,
-          "GET",
-          `/orders/${created.order.id}`
-        );
-        return detail.order.status;
+    const sellerOrderPage = await seller.context.newPage();
+    await sellerOrderPage.goto(`/en/orders/${created.order.id}`);
+    await expect(sellerOrderPage.getByText("paid", { exact: true })).toBeVisible();
+    await sellerOrderPage
+      .getByRole("button", { name: "Start work", exact: true })
+      .click();
+    await expect(
+      sellerOrderPage.getByText("in progress", { exact: true })
+    ).toBeVisible();
+    const deliveryNote = `Golden delivery ${runId}`;
+    await sellerOrderPage
+      .getByPlaceholder("Delivery details, credentials, or completion notes")
+      .fill(deliveryNote);
+    await sellerOrderPage
+      .getByRole("button", { name: "Mark delivered", exact: true })
+      .click();
+    await expect(
+      sellerOrderPage.getByText("delivered", { exact: true })
+    ).toBeVisible();
+
+    await buyerPage.reload();
+    await expect(buyerPage.getByText(deliveryNote, { exact: true })).toBeVisible();
+    await buyerPage
+      .getByRole("button", {
+        name: "Confirm delivery and release funds",
+        exact: true
       })
-      .toBe("completed");
+      .click();
+    await expect(
+      buyerPage.getByText("completed", { exact: true })
+    ).toBeVisible();
 
     const reviewInput = {
       data: { rating: 5, comment: `Golden review ${runId}` }
     };
-    const firstReview = await api<{ review: { id: string } }>(
+    await buyerPage
+      .getByPlaceholder("Review", { exact: true })
+      .fill(reviewInput.data.comment);
+    const reviewResponsePromise = buyerPage.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname ===
+          `/api/orders/${created.order.id}/review` &&
+        response.request().method() === "POST"
+    );
+    await buyerPage
+      .getByRole("button", { name: "Submit review", exact: true })
+      .click();
+    const reviewResponse = await reviewResponsePromise;
+    expect(reviewResponse.status()).toBe(201);
+    const firstReview = (await reviewResponse.json()) as {
+      review: { id: string };
+    };
+    const duplicateReviewResponse = await rawApi(
       buyer.context,
       "POST",
       `/orders/${created.order.id}/review`,
       reviewInput
     );
-    const duplicateReview = await api<{ review: { id: string } }>(
-      buyer.context,
-      "POST",
-      `/orders/${created.order.id}/review`,
-      reviewInput
-    );
+    expect(duplicateReviewResponse.status()).toBe(200);
+    const duplicateReview = (await duplicateReviewResponse.json()) as {
+      review: { id: string };
+    };
     expect(duplicateReview.review.id).toBe(firstReview.review.id);
-
-    await buyerPage.goto(`/en/orders/${created.order.id}`);
-    await expect(buyerPage.getByText("completed", { exact: true })).toBeVisible();
+    await expect(
+      buyerPage.getByText("completed", { exact: true })
+    ).toBeVisible();
+    await sellerOrderPage.close();
+    const detail = await api<{ order: { status: string } }>(
+      buyer.context,
+      "GET",
+      `/orders/${created.order.id}`
+    );
+    expect(detail.order.status).toBe("completed");
   } finally {
     await Promise.all([
       anonymous.close(),

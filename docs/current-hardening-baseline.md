@@ -1,122 +1,93 @@
-# Current hardening baseline (after stages 0–7)
+# Current hardening baseline
 
-This is the baseline for the remaining production-hardening work. It replaces the
-pre-cycle snapshot that was written before the completed hardening commits.
+This file distinguishes implementation evidence from final validation evidence. It
+supersedes the stale statement that Stages 8-13 were missing.
 
-## Environment
+## Snapshot
 
-- Branch / baseline HEAD: `codex/finish-big-plan` at `36ea677`
-  (`refactor(orders): enforce centralized order state transitions`).
-- Stages 0–7 are complete: domain/schema reconciliation, atomic account creation,
-  DB-backed session revocation, transaction retries, resource-abuse protections,
-  API contracts, and the centralized order state machine.
-- The working tree is intentionally not described as production-ready: stages 8–13
-  below still have implementation and verification work.
+| Item | Value |
+| --- | --- |
+| Date | 2026-07-26 |
+| Branch | `codex/finish-big-plan` |
+| Base | `origin/main` at `36ea677` |
+| Committed snapshot | `42f3ddc` (`fix(api): bound remaining authenticated lists`) |
+| Final HEAD | **NOT RECORDED - update after current changes are committed** |
+| Working tree | Dirty at documentation time; uncommitted code/E2E changes are excluded from committed evidence. |
+| Production readiness | Not certified. |
 
-## Verified baseline checks
+## Implemented scope
 
-| Command | Result |
+Stages 0-7 remain represented by the base at `36ea677`: domain/schema
+reconciliation, atomic registration, versioned session revocation, transaction retries,
+resource-abuse controls, partial contract centralization, and order-state-machine
+hardening.
+
+The current branch adds:
+
+| Stage | Status at committed snapshot | Evidence |
+| --- | --- | --- |
+| 8 - frontend test foundation | Implemented | `3697ea2` |
+| 9 - frontend reliability | Implemented | `925af5d`, `567c052`, `da934c2`, `49db14e`, `0d9dd52`, `b398e60` |
+| 10 - production runtime and operations | Implemented | `2746d42`, `26b619b`, `81972bb` |
+| 11 - CI gates | Implemented in workflow | `0f1c225` |
+| 12 - isolated Playwright E2E | Implemented | `d3db9a5`, plus `df87afb`, `c68aa21`, `419e095` |
+| 13 - multilingual typo-tolerant search | Implemented | `958e9d0`, `7fb46eb` |
+
+Cross-stage hardening on this branch also covers session epoch enforcement, order DTO
+mapping, payment capture/webhook recovery, durable storage operation states, exact money
+cents, bounded list pagination, trace propagation, and centralized lifecycle writes.
+
+## Historical verification baseline
+
+Before the later Stage 8-13 implementation, the recorded baseline at `36ea677` had:
+
+| Command | Recorded result |
 | --- | --- |
 | `cd backend && npm ci` | PASS |
 | `cd backend && npm run lint` | PASS |
 | `cd backend && npm run build` | PASS |
-| `cd backend && npm test` | PASS — 293/293 tests in 33 files (277.77s) |
+| `cd backend && npm test` | PASS - 293/293 tests in 33 files (277.77s) |
 | `cd frontend && npm ci` | PASS |
 | `cd frontend && npm run typecheck` | PASS |
-| `cd frontend && npm run i18n:check` | PASS — 0 errors, 25 baseline warnings |
-| `cd frontend && npm test` | PASS — 6/6 (`node:test` realtime client) |
+| `cd frontend && npm run i18n:check` | PASS - 0 errors, 25 baseline warnings |
+| `cd frontend && npm test` | PASS - 6/6 legacy realtime-client tests |
 | `cd frontend && npm run build` | PASS |
-| production Compose config | PASS |
-| development Compose config | PASS |
+| Production and development Compose config | PASS |
 | `docker compose build` | PASS |
 
-These are recorded command results, not a claim that the application is ready for
-production deployment. In particular, no Playwright, multilingual-search load, or
-production payment-provider validation is represented by this baseline.
+These results establish the old base only. They must not be quoted as validation of
+`42f3ddc` or the final tree.
 
-## Completed stages 0–7
+## Final-tree verification
 
-| Stage | Status | Evidence |
-| --- | --- | --- |
-| 0 — baseline and invariants | complete | `da6571b fix(domain): reconcile marketplace lifecycle invariants` |
-| 1 — atomic account creation | complete | `4ab7064 fix(auth): make account creation atomic` |
-| 2 — versioned session revocation | complete | `192db73 fix(auth): enforce versioned session revocation` |
-| 3 — transaction retry | complete | `cac7211 fix(db): retry serialization failures and deadlocks` |
-| 4 — resource abuse and pagination | complete | `a515829`, `98096bb`, `0bab42d` |
-| 5 — shared API contracts | complete | `8905964 refactor(api): centralize marketplace response contracts` |
-| 6–7 — order-state-machine hardening | complete | `36ea677 refactor(orders): enforce centralized order state transitions` |
+| Check | Status |
+| --- | --- |
+| Backend lint/build/full tests | **NOT RUN - final tree** |
+| Clean/repeat migrations and schema contracts | **NOT RUN - final tree** |
+| Frontend typecheck/i18n/tests/build | **NOT RUN - final tree** |
+| Production/dev/E2E Compose config | **NOT RUN - final tree** |
+| Production Docker builds | **NOT RUN - final tree** |
+| Isolated Playwright suite | **NOT RUN - final tree** |
+| Audit-policy checks and npm audits | **NOT RUN - final tree** |
+| Full-history secret scan | **NOT RUN - final tree** |
 
-Existing completed capabilities that must not be reimplemented include transactional
-outbox delivery/recovery, Redis realtime distribution, idempotency for orders/messages/
-reviews, message ACKs, marketplace cache invalidation, encrypted 2FA lifecycle,
-dispute recovery, storage ownership/quotas, audit sanitization, and public seller DTOs.
+Populate exact commands, statuses, durations, and test counts in
+[`final-hardening-report.md`](final-hardening-report.md).
 
-## Remaining work: stages 8–13
+## Current blockers and limits
 
-### Stage 8 — frontend test foundation
+- The committed API-contract work is not the complete shared Product/Order/Message/
+  DisputeMessage/Seller contract target. Do not mark it complete until the current
+  contract closeout is committed and tested.
+- CI jobs exist but no green final workflow run is recorded here.
+- Production `pg_trgm`/`unaccent` permissions and production-sized search rollout
+  behavior are unverified.
+- Time-limited high-advisory exceptions remain in
+  `docs/security/npm-audit-debt.md`; they expire on 2026-08-21.
+- Real payment, email, SMS, Telegram, and S3 integrations are not validated by the
+  automated suite.
+- Upload malware scanning, read replicas, and production capacity validation remain
+  outside this hardening branch.
 
-- Frontend test coverage is still one `tsx --test` realtime-client file; there is no
-  Vitest + React Testing Library foundation for UI and failure-state tests.
-- Add focused tests for authentication state, retry/error rendering, currency draft
-  preservation, filter links, and keyboard/new-tab-safe product links.
-
-### Stage 9 — frontend reliability
-
-- Verify and complete degraded-auth behaviour: temporary network/429/5xx responses
-  must not turn into a logout.
-- Verify currency changes do not discard an in-progress draft or remount unrelated
-  application state.
-- Verify category navigation carries a real marketplace filter and product cards are
-  accessible links that open correctly in a new tab.
-- Add visible degraded/error/retry states where main marketplace queries fail.
-
-### Stage 10 — production runtime and operations
-
-- `backend/src/server.ts` still uses one startup entry point; add and verify orderly
-  SIGTERM shutdown for HTTP, WebSocket, BullMQ/outbox, Redis, and PostgreSQL.
-- Separate API and worker runtime entry points, retain explicit worker enablement, and
-  make migrations a release step rather than an API-container startup side effect.
-- Complete live/readiness probes with bounded dependency checks; verify container user,
-  healthcheck, restart, and shutdown behaviour.
-
-### Stage 11 — CI gates
-
-- Current CI has backend migration/lint/test plus frontend typecheck/i18n/build, but no
-  frontend test job, Playwright job, clean-DB migration smoke, Docker build job, audit
-  gate, or secret scan.
-- Add those checks only after their local workflows are reproducible and documented.
-
-### Stage 12 — Playwright E2E
-
-- No Playwright dependency, config, `e2e/` directory, dedicated Compose stack, browser
-  fixtures, or CI job exists.
-- Current dev Compose uses persistent local data rather than a clean isolated E2E DB;
-  it has no deterministic browser accounts or E2E bootstrap.
-- Mock payment routes exist, but are mounted in every environment and allowed in every
-  non-production environment. They must be limited to an explicit test-only mode.
-- Backend integration tests cover order/review idempotency, mock payment, cache
-  invalidation, dispute recovery, session revocation, and WebSocket ACKs; none is a
-  browser E2E proof.
-- The frontend lacks participant dispute-message UI, so the planned seller dispute
-  response cannot currently be performed as a normal browser action.
-
-### Stage 13 — multilingual search
-
-- `/marketplace/products?q=` uses English FTS plus `ILIKE`; no `pg_trgm` or `unaccent`
-  migration, normalized representation, typo tolerance, or search performance plan exists.
-- Main product search only considers title, description, game name, and category name.
-  It omits game aliases, section, product type, server, and platform.
-- Catalog aliases are stored and used by `/marketplace/suggest`, but are absent from the
-  main products query; production seed data does not backfill the required multilingual
-  aliases.
-- Ranking is the normal product sort, not exact title → prefix → alias/game → trigram →
-  full-text → popularity/recency. There are no required RU/UA/EN query fixtures or
-  realistic-data `EXPLAIN ANALYZE` records.
-
-## Non-goals and constraints
-
-- Real LiqPay, Monobank, WayForPay, Resend, Twilio, Telegram, and other external
-  integrations remain out of scope for automated validation; tests must use existing
-  mocks only.
-- Do not call the application production-ready until stages 8–13 have been implemented
-  and their applicable checks have actually passed.
+Do not describe the application as production-ready until the final report has no
+unexplained `NOT RUN`, `FAIL`, or `BLOCKED` release gate.

@@ -11,10 +11,10 @@ import {
 } from "../../common/pagination.js";
 import {
   addSellerPresence,
-  attachCardMetadata,
-  mapProductMoneyFields
+  attachCardMetadata
 } from "./marketplace.helpers.js";
 import { productSelect } from "./marketplace.sql.js";
+import { mapProductCardDto } from "./product.dto.js";
 
 const router = Router();
 
@@ -81,15 +81,16 @@ router.get(
         )
       : { rows: [] };
     const productsById = new Map(
-      result.rows.map((row) => [row.id as string, mapProductMoneyFields(row)])
+      result.rows.map((row) => [row.id as string, row])
     );
     const orderedProducts = productIds
       .map((productId) => productsById.get(productId))
       .filter((product): product is NonNullable<typeof product> => Boolean(product));
+    const products = (
+      await attachCardMetadata(await addSellerPresence(orderedProducts))
+    ).map(mapProductCardDto);
     res.json({
-      products: await attachCardMetadata(
-        await addSellerPresence(orderedProducts)
-      ),
+      products,
       nextCursor: buildLookaheadNextCursor(favorites.rows, limit)
     });
   })

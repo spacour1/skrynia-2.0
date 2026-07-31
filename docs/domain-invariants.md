@@ -117,12 +117,16 @@ sender (DB CHECK enforces both directions).
 | Read dispute + thread | participants, moderator, admin | any |
 | Post dispute message | participants, moderator, admin (until resolved) | `disputed` |
 | Hide dispute message | admin | any |
-| Resolve (release/refund) | **admin only** — financially significant | `disputed` (`open`/`resolving` dispute) |
+| Resolve or retry the persisted decision (release/refund) | **admin only** — financially significant | `disputed` (`open` or `resolution_failed`; stale `resolving` claims are recovered with the same operation identity) |
 
 - The original `opened_by`, `reason`, and `created_at` of a dispute are immutable
   (DB triggers). A repeated open never rewrites evidence.
 - Moderators intentionally have no resolution rights; do not widen this without an
   explicit product decision.
+- A `resolution_failed` retry must reuse its persisted decision and operation
+  identity. The admin cannot replace `refund` with `release` (or vice versa).
+  While a claim is `resolving`, the UI stays read-only; background/stale recovery
+  continues the same operation instead of starting a second financial action.
 
 ## Where these values are enforced
 

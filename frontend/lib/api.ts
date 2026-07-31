@@ -1,13 +1,26 @@
 import type { CatalogField } from "./catalog-api";
+import type {
+  DeliveryType,
+  OrderStatus,
+  ProductStatus,
+  ProductType,
+  Role
+} from "./contracts";
 import type { WireMoneyCents } from "./money";
+
+export type {
+  DeliveryType,
+  OrderStatus,
+  ProductStatus,
+  ProductType,
+  Role
+} from "./contracts";
 
 // Routed through the Next.js rewrite in next.config.mjs so the browser always talks to
 // its own origin — this keeps auth/CSRF cookies same-site even when the backend lives on
 // a different domain (e.g. Vercel frontend + Railway backend).
 export const API_URL = "/api";
 export const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4000/ws";
-
-export type Role = "user" | "moderator" | "admin";
 
 export type User = {
   id: string;
@@ -77,7 +90,7 @@ export type Product = {
   priceCents: WireMoneyCents;
   currency: string;
   stock: number;
-  status?: string;
+  status?: ProductStatus;
   categoryId?: string;
   categorySlug?: string;
   categoryName?: string;
@@ -100,8 +113,8 @@ export type Product = {
   // Only present on list/favorites/seller-products responses - precomputed showInCard fields.
   cardMetadata?: { key: string; label: string; value: unknown }[];
   deliveryTemplate?: string;
-  deliveryType?: "manual" | "instant";
-  productType?: "account" | "key" | "topup" | "boosting" | "service" | "item" | "currency";
+  deliveryType?: DeliveryType;
+  productType?: ProductType;
   oldPriceCents?: WireMoneyCents | null;
   salesCount?: number;
   isHot?: boolean;
@@ -117,7 +130,7 @@ export type Product = {
 
 export type Order = {
   id: string;
-  status: string;
+  status: OrderStatus;
   productId?: string;
   productTitle?: string;
   buyerId?: string;
@@ -142,7 +155,7 @@ export type Conversation = {
   productId?: string | null;
   productTitle?: string | null;
   orderId?: string | null;
-  orderStatus?: string | null;
+  orderStatus?: OrderStatus | null;
   buyerDisplayName?: string;
   buyerAvatarUrl?: string | null;
   sellerDisplayName?: string;
@@ -166,7 +179,7 @@ export type ConversationContext = {
   productId?: string | null;
   productTitle?: string | null;
   orderId?: string | null;
-  orderStatus?: string | null;
+  orderStatus?: OrderStatus | null;
   amountCents?: WireMoneyCents | null;
   currency?: string | null;
   unreadCount?: number;

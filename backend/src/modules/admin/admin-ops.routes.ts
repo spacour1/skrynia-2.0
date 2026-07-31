@@ -17,7 +17,7 @@ import {
 } from "../marketplace/marketplace-cache.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
 import { retryFailedOutboxEvents } from "../outbox/outbox.worker.js";
-import { mapOrderRowDto } from "../orders/orders.dto.js";
+import { mapAdminOrderDto } from "../orders/orders.dto.js";
 
 const router = Router();
 const adminOnly = requireRole("admin");
@@ -302,7 +302,7 @@ router.post(
       logger.warn({ orderId, error }, "manual_payment_confirm_failed");
       throw badRequest("Could not confirm this order's payment");
     }
-    res.json({ order: mapOrderRowDto(updated) });
+    res.json({ order: mapAdminOrderDto(updated) });
   })
 );
 

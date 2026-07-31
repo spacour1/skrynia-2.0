@@ -6,7 +6,7 @@ import { requireEmailVerified } from "../../common/middleware/require-email-veri
 import { env } from "../../config/env.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { simulateTestPaymentFailure, simulateTestPaymentSuccess, simulateTestPaymentWaitAccept } from "./test-payments.service.js";
-import { mapOrderRowDto } from "../orders/orders.dto.js";
+import { mapOrderDetailDto } from "../orders/orders.dto.js";
 import { testPaymentsEnabled } from "./test-payments.gate.js";
 
 const router = Router();
@@ -31,7 +31,7 @@ router.post(
     assertTestPaymentsEnabled();
     const orderId = z.string().uuid().parse(req.params.orderId);
     const order = await simulateTestPaymentSuccess(orderId, req.user.id);
-    res.json({ order: mapOrderRowDto(order) });
+    res.json({ order: mapOrderDetailDto(order) });
   })
 );
 
@@ -43,7 +43,7 @@ router.post(
     assertTestPaymentsEnabled();
     const orderId = z.string().uuid().parse(req.params.orderId);
     const order = await simulateTestPaymentFailure(orderId, req.user.id);
-    res.json({ order: mapOrderRowDto(order) });
+    res.json({ order: mapOrderDetailDto(order) });
   })
 );
 
@@ -55,7 +55,7 @@ router.post(
     assertTestPaymentsEnabled();
     const orderId = z.string().uuid().parse(req.params.orderId);
     const order = await simulateTestPaymentWaitAccept(orderId, req.user.id);
-    res.json({ order: mapOrderRowDto(order), waiting: true });
+    res.json({ order: mapOrderDetailDto(order), waiting: true });
   })
 );
 

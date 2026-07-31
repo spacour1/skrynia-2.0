@@ -27,7 +27,7 @@ import { buildLiqpayCheckout, decodeLiqpayCallback, isLiqpaySuccessStatus, verif
 import { createMonobankInvoice, getMonobankInvoiceStatus, isMonobankSuccessStatus } from "./monobank.service.js";
 import { buildWayforpayAck, createWayforpayInvoice, getWayforpayStatus, isWayforpaySuccessStatus } from "./wayforpay.service.js";
 import { bigintToMoneyCents, parseMoneyCents } from "../../domain/money.js";
-import { mapOrderRowDto } from "../orders/orders.dto.js";
+import { mapOrderDetailDto } from "../orders/orders.dto.js";
 import {
   moneyCentsToProviderDecimal,
   moneyCentsToProviderInteger
@@ -110,7 +110,7 @@ router.post(
       reference: updated.payment_reference,
       status: "captured" as const
     };
-    res.json({ order: mapOrderRowDto(updated), payment });
+    res.json({ order: mapOrderDetailDto(updated), payment });
   })
 );
 

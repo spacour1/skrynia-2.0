@@ -2,21 +2,14 @@ import type { DbClient } from "../../db/pool.js";
 import { pool } from "../../db/pool.js";
 import { defaultLocale } from "../../i18n/config.js";
 import { t, type TranslateParams } from "../../i18n/t.js";
+import {
+  mapMessageDto,
+  type MessageRow
+} from "./message.dto.js";
 
 export const SYSTEM_SENDER_DISPLAY_NAME = "\u0421\u0438\u0441\u0442\u0435\u043c\u0430";
 
-export type SystemMessage = {
-  id: string;
-  conversationId: string;
-  senderId: null;
-  senderDisplayName: string;
-  body: string;
-  attachmentUrl: null;
-  createdAt: string;
-  kind: "system";
-  systemType: string;
-  metadata: Record<string, unknown>;
-};
+export type SystemMessage = ReturnType<typeof mapMessageDto>;
 
 export async function createSystemMessage(
   input: {
@@ -34,7 +27,7 @@ export async function createSystemMessage(
     bodyKey: input.bodyKey,
     ...(input.params ? { params: input.params } : {})
   };
-  const result = await client.query(
+  const result = await client.query<MessageRow>(
     `insert into messages(conversation_id, sender_id, kind, system_type, body, metadata)
      values ($1, null, 'system', $2, $3, $4)
      returning id, conversation_id as "conversationId", sender_id as "senderId",
@@ -49,7 +42,7 @@ export async function createSystemMessage(
       SYSTEM_SENDER_DISPLAY_NAME
     ]
   );
-  return result.rows[0] as SystemMessage;
+  return mapMessageDto(result.rows[0]);
 }
 
 export async function getConversationIdForOrder(

@@ -15,10 +15,8 @@ import {
 import { DELIVERY_TYPES, PRODUCT_TYPES } from "../../domain/enums.js";
 import { resolveActiveSectionChain, validateLotMetadata } from "../catalog/catalog.service.js";
 import {
-  addSellerPresence,
   attachCardMetadata,
   buildDynamicUpdate,
-  mapProductMoneyFields
 } from "./marketplace.helpers.js";
 import { mediaAggWithStatus } from "./marketplace.sql.js";
 import {
@@ -31,6 +29,7 @@ import {
   buildMediaUrl,
   enqueueStorageDeletion
 } from "../storage/storage.service.js";
+import { mapSellerProductDto } from "./product.dto.js";
 
 const router = Router();
 
@@ -100,12 +99,10 @@ router.get(
       limit
     );
     const pageRows = result.rows.slice(0, limit).map(({ cursorCreatedAt: _cursor, ...row }) => row);
-    res.json({
-      products: await attachCardMetadata(
-        await addSellerPresence(pageRows.map(mapProductMoneyFields))
-      ),
-      nextCursor
-    });
+    const products = (await attachCardMetadata(pageRows)).map(
+      mapSellerProductDto
+    );
+    res.json({ products, nextCursor });
   })
 );
 

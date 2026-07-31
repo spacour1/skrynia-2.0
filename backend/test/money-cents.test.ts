@@ -116,6 +116,12 @@ describe("MoneyCents order and ledger integration", () => {
     expect(captureResponse.body.order.amountCents).toBe(amountCents);
     expect(captureResponse.body.order.feeCents).toBe(feeCents);
     expect(typeof captureResponse.body.order.amountCents).toBe("string");
+    expect(captureResponse.body.order).not.toHaveProperty("paymentProvider");
+    expect(captureResponse.body.order).not.toHaveProperty("paymentReference");
+    expect(captureResponse.body.payment).toMatchObject({
+      provider: "mock",
+      status: "captured"
+    });
     const captured = await getOrder(orderId);
     expect(captured.amount_cents).toBe(amountCents);
     expect(captured.fee_cents).toBe(feeCents);

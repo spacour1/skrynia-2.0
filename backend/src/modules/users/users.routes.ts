@@ -37,9 +37,10 @@ import {
 import { locales } from "../../i18n/config.js";
 import { getRequestLocale } from "../../i18n/t.js";
 import {
-  attachCardMetadata,
-  mapProductMoneyFields
+  attachCardMetadata
 } from "../marketplace/marketplace.helpers.js";
+import { mediaAgg } from "../marketplace/marketplace.sql.js";
+import { mapProductCardDto } from "../marketplace/product.dto.js";
 import { normalizedRequestEndpoint, requestPath } from "../../common/request-url.js";
 import { bigintToMoneyCents, parseMoneyCents } from "../../domain/money.js";
 import {
@@ -676,12 +677,14 @@ router.get(
               c.slug as "categorySlug", c.name as "categoryName",
               g.slug as "gameSlug", g.name as "gameName",
               gs.slug as "sectionSlug", gs.name as "sectionName",
-              count(distinct pf.user_id)::int as "favoriteCount"
+              count(distinct pf.user_id)::int as "favoriteCount",
+              ${mediaAgg}
        from products p
        join categories c on c.id = p.category_id
        left join games g on g.id = p.game_id
        left join game_sections gs on gs.id = p.section_id
        left join product_favorites pf on pf.product_id = p.id
+       left join product_media pm on pm.product_id = p.id and pm.status = 'approved'
        where p.seller_id = $1 and p.status = 'active'
        group by p.id, c.id, g.id, gs.id
        order by p.created_at desc limit 24`,
@@ -705,15 +708,21 @@ router.get(
     const seller = toPublicSellerDto(overview.rows[0], sellerPresence);
     const stats = toPublicSellerStatsDto(overview.rows[0]);
     const productsWithCardMetadata = await attachCardMetadata(
-      products.rows.map(mapProductMoneyFields)
+      products.rows
     );
     res.json({
       user: seller,
       stats,
-      products: productsWithCardMetadata.map((product) => ({
-        ...product,
-        sellerOnline: sellerPresence
-      })),
+      products: productsWithCardMetadata.map((product) =>
+        mapProductCardDto({
+          ...product,
+          sellerId: seller.id,
+          sellerDisplayName: seller.displayName,
+          sellerRating: seller.ratingAverage,
+          sellerReviewCount: seller.reviewCount,
+          sellerOnline: sellerPresence
+        })
+      ),
       reviews: reviews.rows
     });
   })

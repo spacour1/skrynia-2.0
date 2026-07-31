@@ -19,8 +19,8 @@ PostCSS exception.
 
 | Project | Command | Status | low | moderate | high | critical | total package findings |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| Backend | `npm audit --omit=dev --audit-level=high --json` | FAIL, exit 1 before policy exceptions | 1 | 19 | 2 | 0 | 22 |
-| Frontend | `npm audit --omit=dev --audit-level=high --json` | FAIL, exit 1 before policy exceptions | 1 | 21 | 6 | 0 | 28 |
+| Backend | `npm audit --omit=dev --audit-level=high --json` | FAIL, exit 1 before policy exceptions | 1 | 19 | 1 | 0 | 21 |
+| Frontend | `npm audit --omit=dev --audit-level=high --json` | FAIL, exit 1 before policy exceptions | 1 | 20 | 9 | 0 | 30 |
 
 The npm totals count vulnerable package nodes, not unique advisories. In particular,
 `@sentry/nextjs` is a high aggregate node whose concrete high root is the Rollup advisory
@@ -28,19 +28,6 @@ listed below. The policy resolves npm's string-valued `via` chains and permits o
 GHSA records.
 
 ## Backend exceptions
-
-<a id="backend-ghsa-3jxr-9vmj-r5cp"></a>
-
-### Backend GHSA-3jxr-9vmj-r5cp
-
-- Affected path: `node-pg-migrate@8.0.4 -> glob@11.1.0 -> minimatch@10.2.5 -> brace-expansion@5.0.6`.
-- Risk: exponential-time expansion can cause denial of service if attacker-controlled glob
-  expressions reach this build/release dependency.
-- Remediation owner: backend/runtime maintainers.
-- Plan: refresh the lockfile to a patched transitive version and run clean/repeat migration,
-  schema-contract, and full backend tests.
-- Maximum allowed severity: high.
-- Expiry: 2026-08-21.
 
 <a id="backend-ghsa-f88m-g3jw-g9cj"></a>
 
@@ -61,14 +48,19 @@ exceptions require a supported Next.js upgrade and complete typecheck, unit, pro
 and E2E verification; they must not be silently renewed because they affect the public web
 runtime.
 
-<a id="frontend-ghsa-3jxr-9vmj-r5cp"></a>
+<a id="frontend-ghsa-mh99-v99m-4gvg"></a>
 
-### Frontend GHSA-3jxr-9vmj-r5cp
+### Frontend GHSA-mh99-v99m-4gvg
 
-- Affected path: `@sentry/nextjs@8.55.2 -> @sentry/webpack-plugin -> glob -> minimatch -> brace-expansion@2.1.1`.
+- Affected path: `@sentry/nextjs@8.55.2 -> @sentry/webpack-plugin -> glob -> minimatch -> brace-expansion@2.1.2`.
+- Risk: an attacker-controlled brace pattern could exhaust the build process heap. The
+  application does not expose glob compilation to web requests, but the vulnerable package
+  remains in the production dependency graph used by the Sentry build plugin.
 - Remediation owner: frontend/observability maintainers.
-- Plan: update the Sentry build toolchain or its patched transitive lock entry, then run the
-  full frontend checks and production Docker build.
+- Plan: update the Sentry/glob toolchain to a release compatible with patched
+  `brace-expansion@5.0.8`; forcing that major beneath the current minimatch version would be
+  an unsafe CommonJS/API change. Then run the full frontend checks and production Docker
+  build.
 - Maximum allowed severity: high.
 - Expiry: 2026-08-21.
 
@@ -175,20 +167,6 @@ runtime.
 - Remediation owner: frontend runtime and security maintainers.
 - Plan: upgrade Next.js, then verify fixed-host rewrite behavior and reject unsafe deployment
   configuration in production smoke/E2E checks.
-- Maximum allowed severity: high.
-- Expiry: 2026-08-21.
-
-<a id="frontend-ghsa-6g55-p6wh-862q"></a>
-
-### Frontend GHSA-6g55-p6wh-862q
-
-- Affected path: `next@14.2.35 -> postcss@8.4.31` (arbitrary file read through an
-  attacker-controlled CSS `sourceMappingURL`).
-- Reachability evidence: current CSS inputs are repository-controlled and no endpoint that
-  compiles user-provided CSS was found. The vulnerable package still processes build inputs.
-- Remediation owner: frontend build and security maintainers.
-- Plan: update the Next.js/PostCSS dependency graph to a patched PostCSS release, then rerun
-  clean install, frontend unit/build, secret scan, and production Docker build.
 - Maximum allowed severity: high.
 - Expiry: 2026-08-21.
 

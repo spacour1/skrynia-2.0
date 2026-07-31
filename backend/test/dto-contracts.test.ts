@@ -65,6 +65,8 @@ function assertOrderMutationDto(body: Record<string, unknown>): Record<string, u
   expect(order).toBeDefined();
   expect(typeof order.amountCents).toBe("string");
   expect(typeof order.feeCents).toBe("string");
+  expect(order).not.toHaveProperty("paymentProvider");
+  expect(order).not.toHaveProperty("paymentReference");
   expectIsoTimestamp(order.createdAt);
   expectIsoTimestamp(order.updatedAt);
   for (const field of ["autoReleaseAt", "paidAt", "deliveredAt", "completedAt"] as const) {
@@ -103,8 +105,6 @@ describe("public order mutation DTOs", () => {
       sellerId,
       productId,
       status: "pending",
-      paymentProvider: null,
-      paymentReference: null,
       deliveryNote: null,
       autoReleaseAt: null,
       paidAt: null,
@@ -186,11 +186,17 @@ describe("public order mutation DTOs", () => {
 });
 
 describe("order detail DTO", () => {
-  it("GET /orders/:id has no snake_case keys", async () => {
+  it("keeps payment identifiers admin-only", async () => {
     const buyer = await agentFor("user");
     const seller = await createUser("user");
     const product = await createProduct(seller);
     const orderId = await createOrder(buyer.userId, seller, product, { status: "paid" });
+    await pool.query(
+      `update orders
+       set payment_provider = 'mock', payment_reference = 'provider-secret-reference'
+       where id = $1`,
+      [orderId]
+    );
 
     const response = await buyer.get(`/orders/${orderId}`);
     expect(response.status).toBe(200);
@@ -199,6 +205,17 @@ describe("order detail DTO", () => {
     expect(response.body.order.sellerId).toBe(seller);
     expect(typeof response.body.order.amountCents).toBe("string");
     expect(typeof response.body.order.feeCents).toBe("string");
+    expect(response.body.order).not.toHaveProperty("paymentProvider");
+    expect(response.body.order).not.toHaveProperty("paymentReference");
+
+    const admin = await agentFor("admin");
+    const adminResponse = await admin.get(`/orders/${orderId}`);
+    expect(adminResponse.status).toBe(200);
+    assertNoSnakeCaseKeys(adminResponse.body);
+    expect(adminResponse.body.order).toMatchObject({
+      paymentProvider: "mock",
+      paymentReference: "provider-secret-reference"
+    });
   });
 });
 
@@ -225,6 +242,17 @@ describe("admin dispute DTOs", () => {
     const response = await admin.get("/disputes");
     expect(response.status).toBe(200);
     assertNoSnakeCaseKeys(response.body);
+    expect(response.body.disputes).toHaveLength(1);
+    expect(typeof response.body.disputes[0].amountCents).toBe("string");
+    expectIsoTimestamp(response.body.disputes[0].createdAt);
+    expect(response.body.disputes[0]).toMatchObject({
+      resolutionOperationId: null,
+      resolvingStartedAt: null,
+      resolutionAttempts: 0,
+      lastResolutionError: null,
+      adminId: null,
+      adminNote: null
+    });
   });
 
   it("GET /disputes/:id (admin detail) has no snake_case keys", async () => {
@@ -235,6 +263,10 @@ describe("admin dispute DTOs", () => {
     assertNoSnakeCaseKeys(response.body);
     expect(response.body.dispute.orderId).toBeDefined();
     expect(response.body.dispute.buyerId).toBeDefined();
+    expect(typeof response.body.dispute.amountCents).toBe("string");
+    expectIsoTimestamp(response.body.dispute.createdAt);
+    expect(response.body.dispute.resolvingStartedAt).toBeNull();
+    expect(response.body.dispute).not.toHaveProperty("conversationId");
   });
 
   it("POST /disputes/:id/resolve response has no snake_case keys", async () => {
@@ -247,6 +279,14 @@ describe("admin dispute DTOs", () => {
     assertNoSnakeCaseKeys(response.body);
     expect(response.body.dispute.resolutionDecision).toBe("refund");
     expect(response.body.dispute.orderId).toBeDefined();
+    expect(typeof response.body.dispute.amountCents).toBe("string");
+    expectIsoTimestamp(response.body.dispute.createdAt);
+    expectIsoTimestamp(response.body.dispute.resolvingStartedAt);
+    expectIsoTimestamp(response.body.dispute.resolvedAt);
+    expect(response.body.dispute.resolutionAttempts).toBe(1);
+    expect(response.body.dispute).not.toHaveProperty("conversationId");
+    expect(response.body.order).toHaveProperty("paymentProvider");
+    expect(response.body.order).toHaveProperty("paymentReference");
   });
 
   it("participant open-dispute response has no snake_case keys", async () => {
@@ -268,5 +308,24 @@ describe("admin dispute DTOs", () => {
     expect(response.status).toBe(201);
     assertNoSnakeCaseKeys(response.body);
     expect(response.body.dispute.orderId).toBe(orderId);
+    expect(response.body.dispute.resolutionDecision).toBeNull();
+    expectIsoTimestamp(response.body.dispute.createdAt);
+    expect(response.body.dispute.resolvedAt).toBeNull();
+    for (const field of [
+      "resolutionOperationId",
+      "resolvingStartedAt",
+      "resolutionAttempts",
+      "lastResolutionError",
+      "adminId",
+      "adminNote",
+      "buyerId",
+      "sellerId",
+      "amountCents",
+      "currency",
+      "orderStatus",
+      "productTitle"
+    ]) {
+      expect(response.body.dispute).not.toHaveProperty(field);
+    }
   });
 });

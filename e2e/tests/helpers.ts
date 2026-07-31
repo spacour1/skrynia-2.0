@@ -102,6 +102,75 @@ export async function registerVerifiedActor(
   return { context, email, password, user: me.user };
 }
 
+export async function registerVerifiedActorThroughUi(
+  browser: Browser,
+  label: string,
+  password = defaultPassword
+): Promise<Actor> {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const suffix = `${runId}-${label}-${randomUUID().slice(0, 8)}`;
+  const email = `${suffix}@example.test`;
+  const displayName = `${label} ${suffix.slice(-8)}`;
+
+  try {
+    await page.goto("/en/register");
+    await page.getByPlaceholder("Display name").fill(displayName);
+    await page.getByPlaceholder("Email").fill(email);
+    await page.getByPlaceholder("Password").fill(password);
+    const registrationResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/auth/register" &&
+        response.request().method() === "POST"
+    );
+    await page.getByRole("button", { name: "Register", exact: true }).click();
+    const registered = await registrationResponse;
+    expect(registered.status()).toBe(201);
+    const registration = (await registered.json()) as {
+      user: Actor["user"];
+      debugVerificationUrl?: string;
+    };
+    expect(
+      registration.debugVerificationUrl,
+      "the isolated test runtime must expose its one-time verification link"
+    ).toBeTruthy();
+
+    await page.goto(registration.debugVerificationUrl!);
+    await page.getByRole("button", { name: "Confirm email", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Email confirmed", exact: true })
+    ).toBeVisible();
+
+    const logout = await rawApi(context, "POST", "/auth/logout");
+    expect(logout.status()).toBe(204);
+    await page.goto("/en/login");
+    await page.getByPlaceholder("Email").fill(email);
+    await page.getByPlaceholder("Password").fill(password);
+    const loginResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/auth/login" &&
+        response.request().method() === "POST"
+    );
+    await page.getByRole("button", { name: "Login", exact: true }).click();
+    const loggedIn = await loginResponse;
+    expect(loggedIn.status()).toBe(200);
+    const login = (await loggedIn.json()) as { user: Actor["user"] };
+    const me = await api<{ user: Actor["user"] }>(context, "GET", "/auth/me");
+    expect(me.user).toMatchObject({
+      id: registration.user.id,
+      email,
+      emailVerified: true
+    });
+    expect(login.user.id).toBe(registration.user.id);
+    return { context, email, password, user: me.user };
+  } catch (error) {
+    await context.close();
+    throw error;
+  } finally {
+    await page.close().catch(() => undefined);
+  }
+}
+
 export async function loginActor(
   browser: Browser,
   email: string,
@@ -127,6 +196,7 @@ export function loginAdmin(browser: Browser) {
 
 type CatalogField = {
   key: string;
+  label: string;
   type: string;
   required: boolean;
   options?: string[];
@@ -136,11 +206,18 @@ type CatalogField = {
 
 type CatalogSection = {
   id: string;
+  name: string;
   allowedDeliveryTypes: string[];
 };
 
 type CatalogGroup = {
-  items: Array<{ sections: CatalogSection[] }>;
+  id: string;
+  name: string;
+  items: Array<{
+    id: string;
+    name: string;
+    sections: CatalogSection[];
+  }>;
 };
 
 function fieldValue(field: CatalogField): unknown {
@@ -213,6 +290,120 @@ export async function createProduct(
     }
   }
   throw new Error(`No active catalog section accepted an E2E product: ${String(lastError)}`);
+}
+
+export async function createProductThroughUi(
+  seller: Actor,
+  label: string
+): Promise<ProductFixture> {
+  const catalog = await api<{ groups: CatalogGroup[] }>(
+    seller.context,
+    "GET",
+    "/marketplace/catalog"
+  );
+  const group = catalog.groups.find((candidate) =>
+    candidate.items.some((item) =>
+      item.sections.some((candidateSection) =>
+        candidateSection.allowedDeliveryTypes.includes("manual")
+      )
+    )
+  );
+  const item = group?.items.find((candidate) =>
+    candidate.sections.some((candidateSection) =>
+      candidateSection.allowedDeliveryTypes.includes("manual")
+    )
+  );
+  const section = item?.sections.find((candidate) =>
+    candidate.allowedDeliveryTypes.includes("manual")
+  );
+  expect(group, "the migrated catalog must expose a manual-delivery group").toBeTruthy();
+  expect(item, "the migrated catalog must expose a manual-delivery item").toBeTruthy();
+  expect(section, "the migrated catalog must expose a manual-delivery section").toBeTruthy();
+
+  const schema = await api<{ schema: { fields: CatalogField[] } }>(
+    seller.context,
+    "GET",
+    `/marketplace/catalog/sections/${section!.id}/schema`
+  );
+  const page = await seller.context.newPage();
+  const title = `E2E ${runId} ${label} ${randomUUID().slice(0, 6)}`;
+
+  try {
+    await page.goto("/en/seller/create");
+    const categoryControl = page
+      .getByRole("heading", { name: "Категория", exact: true })
+      .locator("..");
+    await categoryControl.getByRole("button").first().click();
+    await categoryControl
+      .getByRole("button", { name: group!.name, exact: true })
+      .last()
+      .click();
+    await page
+      .getByRole("button", { name: item!.name, exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: section!.name, exact: true })
+      .click();
+
+    // The golden flow explicitly exercises seller start + deliver. A product with
+    // instant delivery jumps directly to `delivered` on payment and would bypass both
+    // transitions, so keep this browser-created fixture on manual delivery.
+    const autoDelivery = page
+      .getByText("Автовыдача после покупки", { exact: true })
+      .locator("..")
+      .locator('input[type="checkbox"]');
+    if (section!.allowedDeliveryTypes.includes("instant")) {
+      await autoDelivery.uncheck();
+    } else {
+      await expect(autoDelivery).not.toBeChecked();
+    }
+
+    for (const field of schema.schema.fields.filter((candidate) => candidate.required)) {
+      const labelText = `${field.label} *`;
+      const fieldLabel = page.getByText(labelText, { exact: true });
+      await expect(fieldLabel).toBeVisible();
+      const container = fieldLabel.locator("..");
+      const value = fieldValue(field);
+      if (field.type === "select") {
+        await container.locator("select").selectOption(String(value));
+      } else if (field.type === "multiselect") {
+        await container
+          .getByRole("button", { name: String((value as string[])[0]), exact: true })
+          .click();
+      } else if (field.type === "boolean" || field.type === "checkbox") {
+        await container.locator('input[type="checkbox"]').check();
+      } else if (field.type === "textarea") {
+        await container.locator("textarea").fill(String(value));
+      } else {
+        await container.locator("input").fill(String(value));
+      }
+    }
+
+    await page.locator('input[maxlength="80"]').fill(title);
+    await page
+      .locator('textarea[maxlength="500"]')
+      .fill(`Browser-created marketplace product for ${runId} and ${label}.`);
+    await page.locator('input[type="number"][step="0.01"]').fill("19.99");
+
+    const createResponsePromise = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/marketplace/products" &&
+        response.request().method() === "POST"
+    );
+    await page.locator('form button[type="submit"]').click();
+    const createResponse = await createResponsePromise;
+    expect(createResponse.status()).toBe(201);
+    const created = (await createResponse.json()) as { id: string };
+    await page.waitForURL((url) =>
+      url.pathname.endsWith(`/products/${created.id}`)
+    );
+    await expect(
+      page.getByRole("heading", { name: title, exact: true })
+    ).toBeVisible();
+    return { id: created.id, title, sectionId: section!.id };
+  } finally {
+    await page.close();
+  }
 }
 
 export async function createOrder(

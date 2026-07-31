@@ -10,7 +10,7 @@ import {
 } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
-import { cacheGet, cacheSet } from "../../common/redis.js";
+import { cacheDelPattern, cacheGet, cacheSet } from "../../common/redis.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { releaseEscrow } from "./ledger.service.js";
 import { recordOrderEvent } from "./order-events.service.js";
@@ -61,6 +61,18 @@ const reviewSchema = z.object({
 
 function canSeeOrder(order: { buyerId: string; sellerId: string }, user: AuthedRequest["user"]) {
   return user.role === "admin" || order.buyerId === user.id || order.sellerId === user.id;
+}
+
+async function invalidateOrderReadCaches(order: {
+  id: string;
+  buyer_id: string;
+  seller_id: string;
+}) {
+  await Promise.all([
+    cacheDelPattern(`order:${order.id}:*`),
+    cacheDelPattern(`orders:${order.buyer_id}:*`),
+    cacheDelPattern(`orders:${order.seller_id}:*`)
+  ]);
 }
 
 router.post(
@@ -330,6 +342,9 @@ router.post(
         metadata: { systemMessageIds: message ? [message.id] : [] }
       });
     });
+    // The transaction is committed when inTx resolves. Evict read caches before the
+    // successful response so an immediate detail/list refetch cannot observe `paid`.
+    await invalidateOrderReadCaches(order);
     res.json({ order: mapOrderMutationDto(order) });
   })
 );
@@ -372,6 +387,7 @@ router.post(
         metadata: { systemMessageIds: message ? [message.id] : [] }
       });
     });
+    await invalidateOrderReadCaches(order);
     res.json({ order: mapOrderMutationDto(order) });
   })
 );

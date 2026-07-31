@@ -123,7 +123,10 @@ export async function registerVerifiedActorThroughUi(
         new URL(response.url()).pathname === "/api/auth/register" &&
         response.request().method() === "POST"
     );
-    await page.getByRole("button", { name: "Register", exact: true }).click();
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: "Register", exact: true })
+      .click();
     const registered = await registrationResponse;
     expect(registered.status()).toBe(201);
     const registration = (await registered.json()) as {
@@ -330,28 +333,15 @@ export async function createProductThroughUi(
 
   try {
     await page.goto("/en/seller/create");
-    const categoryControl = page
-      .getByRole("heading", { name: "Категория", exact: true })
-      .locator("..");
-    await categoryControl.getByRole("button").first().click();
-    await categoryControl
-      .getByRole("button", { name: group!.name, exact: true })
-      .last()
-      .click();
-    await page
-      .getByRole("button", { name: item!.name, exact: true })
-      .click();
-    await page
-      .getByRole("button", { name: section!.name, exact: true })
-      .click();
+    await page.getByTestId("catalog-group-trigger").click();
+    await page.locator(`[data-catalog-group-id="${group!.id}"]`).click();
+    await page.locator(`[data-catalog-item-id="${item!.id}"]`).click();
+    await page.locator(`[data-catalog-section-id="${section!.id}"]`).click();
 
     // The golden flow explicitly exercises seller start + deliver. A product with
     // instant delivery jumps directly to `delivered` on payment and would bypass both
     // transitions, so keep this browser-created fixture on manual delivery.
-    const autoDelivery = page
-      .getByText("Автовыдача после покупки", { exact: true })
-      .locator("..")
-      .locator('input[type="checkbox"]');
+    const autoDelivery = page.getByTestId("auto-delivery-toggle");
     if (section!.allowedDeliveryTypes.includes("instant")) {
       await autoDelivery.uncheck();
     } else {

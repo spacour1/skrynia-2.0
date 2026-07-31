@@ -120,7 +120,11 @@ describe("public order mutation DTOs", () => {
   });
 
   it("POST /orders/:id/start returns a canonical order DTO", async () => {
-    const { seller, orderId } = await createEscrowedOrder();
+    const { buyer, seller, orderId } = await createEscrowedOrder();
+
+    expect((await seller.get(`/orders/${orderId}`)).body.order.status).toBe("paid");
+    expect((await buyer.get("/orders?role=buyer")).body.orders[0].status).toBe("paid");
+    expect((await seller.get("/orders?role=seller")).body.orders[0].status).toBe("paid");
 
     const response = await seller.post(`/orders/${orderId}/start`).send({});
     expect(response.status).toBe(200);
@@ -135,12 +139,20 @@ describe("public order mutation DTOs", () => {
       completedAt: null
     });
     expectIsoTimestamp(order.paidAt);
+
+    expect((await seller.get(`/orders/${orderId}`)).body.order.status).toBe("in_progress");
+    expect((await buyer.get("/orders?role=buyer")).body.orders[0].status).toBe("in_progress");
+    expect((await seller.get("/orders?role=seller")).body.orders[0].status).toBe("in_progress");
   });
 
   it("POST /orders/:id/deliver returns a canonical order DTO", async () => {
-    const { seller, orderId } = await createEscrowedOrder();
+    const { buyer, seller, orderId } = await createEscrowedOrder();
     const started = await seller.post(`/orders/${orderId}/start`).send({});
     expect(started.status).toBe(200);
+
+    expect((await seller.get(`/orders/${orderId}`)).body.order.status).toBe("in_progress");
+    expect((await buyer.get("/orders?role=buyer")).body.orders[0].status).toBe("in_progress");
+    expect((await seller.get("/orders?role=seller")).body.orders[0].status).toBe("in_progress");
 
     const response = await seller
       .post(`/orders/${orderId}/deliver`)
@@ -157,6 +169,10 @@ describe("public order mutation DTOs", () => {
     expectIsoTimestamp(order.autoReleaseAt);
     expectIsoTimestamp(order.paidAt);
     expectIsoTimestamp(order.deliveredAt);
+
+    expect((await seller.get(`/orders/${orderId}`)).body.order.status).toBe("delivered");
+    expect((await buyer.get("/orders?role=buyer")).body.orders[0].status).toBe("delivered");
+    expect((await seller.get("/orders?role=seller")).body.orders[0].status).toBe("delivered");
   });
 
   it("POST /orders/:id/confirm returns a canonical order DTO", async () => {

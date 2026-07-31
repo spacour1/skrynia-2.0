@@ -6,7 +6,8 @@ import {
   rawApi,
   registerVerifiedActorThroughUi,
   runId,
-  waitForPageSocketFrame
+  waitForConnectedWebSocket,
+  waitForSocketFrame
 } from "./helpers.js";
 
 test("golden marketplace order flow is idempotent and acknowledges the first chat message", async ({
@@ -26,12 +27,9 @@ test("golden marketplace order flow is idempotent and acknowledges the first cha
     // Capture the socket on the same product document that exercises favorite,
     // conversation, and checkout controls.
     const buyerPage = await buyer.context.newPage();
-    const socketConnected = waitForPageSocketFrame(
-      buyerPage,
-      (payload) => payload.includes('"type":"connected"')
-    );
+    const socketConnected = waitForConnectedWebSocket(buyerPage);
     await buyerPage.goto(`/en/products/${product.id}`);
-    await socketConnected;
+    const buyerSocket = await socketConnected;
 
     const favoriteResponsePromise = buyerPage.waitForResponse(
       (response) =>
@@ -57,8 +55,8 @@ test("golden marketplace order flow is idempotent and acknowledges the first cha
     await favoritesPage.close();
 
     const messageBody = `First websocket message ${runId}`;
-    const ack = waitForPageSocketFrame(
-      buyerPage,
+    const ack = waitForSocketFrame(
+      buyerSocket,
       (payload) =>
         payload.includes('"type":"message_ack"') &&
         payload.includes(messageBody)

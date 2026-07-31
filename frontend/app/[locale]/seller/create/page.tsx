@@ -258,6 +258,7 @@ function SellerCreateContent() {
               <Label>Категория</Label>
               <button
                 type="button"
+                data-testid="catalog-group-trigger"
                 className="mt-2 flex h-12 w-full items-center justify-between rounded-lg border border-line bg-card px-4 text-left font-bold text-ink shadow-soft transition hover:border-brand/60"
                 onClick={() => setCatalogOpen((value) => !value)}
               >
@@ -275,6 +276,7 @@ function SellerCreateContent() {
                       <button
                         key={group.id}
                         type="button"
+                        data-catalog-group-id={group.id}
                         className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left transition hover:bg-panel"
                         onClick={() => {
                           setGroupId(group.id);
@@ -319,7 +321,7 @@ function SellerCreateContent() {
                   </div>
                   <div className="max-h-[260px] overflow-y-auto p-2">
                     {visibleItems.map((item) => (
-                      <button key={item.id} type="button" className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left transition hover:bg-panel" onClick={() => chooseItem(item)}>
+                      <button key={item.id} type="button" data-catalog-item-id={item.id} className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left transition hover:bg-panel" onClick={() => chooseItem(item)}>
                         <span className="flex items-center gap-3">
                           <GameIcon name={item.name} slug={item.slug} className="h-8 w-8 rounded-md" />
                           <span className="font-bold text-ink">{item.name}</span>
@@ -346,6 +348,7 @@ function SellerCreateContent() {
                     <button
                       key={section.id}
                       type="button"
+                      data-catalog-section-id={section.id}
                       className={`flex h-12 items-center justify-center gap-2 rounded-lg border text-sm font-black transition hover:border-brand/70 ${sectionId === section.id ? "border-brand bg-brand/10 text-brand" : "border-line bg-panel/25 text-muted"}`}
                       onClick={() => setSectionId(section.id)}
                     >
@@ -404,6 +407,7 @@ function SellerCreateContent() {
                 </span>
               </span>
               <input
+                data-testid="auto-delivery-toggle"
                 className="h-5 w-5 accent-[rgb(var(--color-brand))]"
                 type="checkbox"
                 checked={autoDelivery}

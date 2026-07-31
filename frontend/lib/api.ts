@@ -230,6 +230,14 @@ const AUTH_SYNC_CHANNEL = "auth-session-sync";
 const REFRESH_LOCK_NAME = "auth-refresh-lock";
 const RECENT_REFRESH_KEY = "auth_last_refresh_at";
 const RECENT_REFRESH_WINDOW_MS = 3000;
+const SESSION_ROTATING_PATHS = new Set([
+  "/auth/register",
+  "/auth/login",
+  "/auth/2fa/verify",
+  "/auth/telegram",
+  "/auth/password/reset",
+  "/users/me/password"
+]);
 
 let authChannel: BroadcastChannel | null = null;
 function getAuthChannel(): BroadcastChannel | null {
@@ -307,11 +315,32 @@ async function performRefresh(): Promise<RefreshOutcome> {
   }
 }
 
-async function runExclusiveRefresh(): Promise<RefreshOutcome> {
-  if (typeof navigator !== "undefined" && "locks" in navigator) {
-    return await navigator.locks.request(REFRESH_LOCK_NAME, performRefresh);
+let localRefreshLockTail: Promise<void> = Promise.resolve();
+
+async function runWithRefreshLock<T>(operation: () => Promise<T>): Promise<T> {
+  if (typeof navigator === "undefined") return operation();
+
+  if (typeof navigator.locks?.request === "function") {
+    return await navigator.locks.request(REFRESH_LOCK_NAME, operation);
   }
-  return performRefresh();
+
+  // Web Locks is restricted to secure contexts, while the Docker E2E origin is plain
+  // HTTP. Keep same-page session rotations and refreshes serialized there as well.
+  const previous = localRefreshLockTail;
+  let release!: () => void;
+  localRefreshLockTail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
+async function runExclusiveRefresh(): Promise<RefreshOutcome> {
+  return runWithRefreshLock(performRefresh);
 }
 
 let refreshInFlight: Promise<RefreshOutcome> | null = null;
@@ -326,7 +355,20 @@ function refreshSession(): Promise<RefreshOutcome> {
 }
 
 export async function apiFetch<T>(path: string, options: RequestInit = {}, isRetry = false): Promise<T> {
-  const response = await rawFetch(path, options);
+  const coordinatesSessionRotation = SESSION_ROTATING_PATHS.has(path.split("?", 1)[0]);
+  const response = coordinatesSessionRotation
+    ? await runWithRefreshLock(async () => {
+        const rotatingResponse = await rawFetch(path, options);
+        // Publish the new cookie generation before releasing the same cross-tab lock
+        // used by refresh. A stale request that received 401 while this mutation was
+        // in flight will then retry with the new session instead of redeeming and
+        // clearing the just-rotated refresh cookie.
+        if (rotatingResponse.headers.get("X-Session-Rotated") === "true") {
+          markRefreshed();
+        }
+        return rotatingResponse;
+      })
+    : await rawFetch(path, options);
 
   if (!response.ok) {
     // Only a previously-established session (csrf cookie present) is worth refreshing;
@@ -364,7 +406,12 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, isRet
     );
   }
 
-  if (response.headers.get("X-Session-Rotated") === "true") markRefreshed();
+  if (
+    !coordinatesSessionRotation &&
+    response.headers.get("X-Session-Rotated") === "true"
+  ) {
+    markRefreshed();
+  }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }

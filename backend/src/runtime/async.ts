@@ -14,7 +14,7 @@ export async function settleWithin(
     return await Promise.race([
       promise.then(
         () => true,
-        () => true
+        () => false
       ),
       new Promise<boolean>((resolve) => {
         timeout = setTimeout(() => resolve(false), timeoutMs);

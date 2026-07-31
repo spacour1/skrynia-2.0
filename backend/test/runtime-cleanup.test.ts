@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { runCleanupSteps } from "../src/runtime/async.js";
+import { runCleanupSteps, settleWithin } from "../src/runtime/async.js";
+
+describe("bounded runtime settlement", () => {
+  it("does not report a rejected drain as successful", async () => {
+    await expect(
+      settleWithin(Promise.reject(new Error("drain failed")), 1_000)
+    ).resolves.toBe(false);
+  });
+});
 
 describe("ordered runtime cleanup", () => {
   it("runs in order and still closes the pool after an earlier failure", async () => {

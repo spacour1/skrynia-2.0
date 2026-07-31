@@ -254,7 +254,7 @@ export async function releaseEscrow(
       : (adminIdOrOptions ?? {});
   const source = options.source ?? (options.adminId ? "dispute" : "service");
 
-  return inSerializableTx(async (client) => {
+  const updated = await inSerializableTx(async (client) => {
     const order = await selectOrderForUpdate(client, orderId);
     if (!canTransitionOrder(order.status, "completed")) {
       throw badRequest("Only delivered or disputed orders can be released");
@@ -418,6 +418,20 @@ export async function releaseEscrow(
 
     return updated;
   });
+
+  // inSerializableTx has committed before it resolves. Evict every participant-facing
+  // order and wallet view now so an immediate refetch cannot observe pre-release state.
+  await Promise.all([
+    cacheDel(
+      `user:${updated.buyer_id}:wallet`,
+      `user:${updated.seller_id}:wallet`
+    ),
+    cacheDelPattern(`order:${updated.id}:*`),
+    cacheDelPattern(`orders:${updated.buyer_id}:*`),
+    cacheDelPattern(`orders:${updated.seller_id}:*`)
+  ]);
+
+  return updated;
 }
 
 export async function refundEscrow(orderId: string, adminId?: string) {

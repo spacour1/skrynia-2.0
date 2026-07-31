@@ -3,7 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
 import { pool } from "../src/db/pool.js";
-import { getRedis } from "../src/common/redis.js";
+import { cacheGet, getRedis } from "../src/common/redis.js";
 import { issueSession } from "../src/modules/auth/session.service.js";
 import { lockEscrow } from "../src/modules/orders/ledger.service.js";
 import {
@@ -184,6 +184,33 @@ describe("public order mutation DTOs", () => {
       .send({ deliveryNote: "Delivery credentials" });
     expect(delivered.status).toBe(200);
 
+    const buyerDetailKey = `order:${orderId}:${buyer.userId}:user`;
+    const sellerDetailKey = `order:${orderId}:${seller.userId}:user`;
+    const buyerListKey = `orders:${buyer.userId}:buyer:any:100:first`;
+    const sellerListKey = `orders:${seller.userId}:seller:any:100:first`;
+    const buyerWalletKey = `user:${buyer.userId}:wallet`;
+    const sellerWalletKey = `user:${seller.userId}:wallet`;
+
+    expect((await buyer.get(`/orders/${orderId}`)).body.order.status).toBe("delivered");
+    expect((await seller.get(`/orders/${orderId}`)).body.order.status).toBe("delivered");
+    expect((await buyer.get("/orders?role=buyer")).body.orders[0].status).toBe("delivered");
+    expect((await seller.get("/orders?role=seller")).body.orders[0].status).toBe("delivered");
+    const buyerWalletBefore = await buyer.get("/users/me/wallet");
+    const sellerWalletBefore = await seller.get("/users/me/wallet");
+    expect(buyerWalletBefore.status).toBe(200);
+    expect(sellerWalletBefore.status).toBe(200);
+
+    for (const cacheKey of [
+      buyerDetailKey,
+      sellerDetailKey,
+      buyerListKey,
+      sellerListKey,
+      buyerWalletKey,
+      sellerWalletKey
+    ]) {
+      expect(await cacheGet(cacheKey), `expected ${cacheKey} to be warm`).not.toBeNull();
+    }
+
     const response = await buyer.post(`/orders/${orderId}/confirm`).send({});
     expect(response.status).toBe(200);
     const order = assertOrderMutationDto(response.body);
@@ -198,6 +225,29 @@ describe("public order mutation DTOs", () => {
     expectIsoTimestamp(order.paidAt);
     expectIsoTimestamp(order.deliveredAt);
     expectIsoTimestamp(order.completedAt);
+
+    for (const cacheKey of [
+      buyerDetailKey,
+      sellerDetailKey,
+      buyerListKey,
+      sellerListKey,
+      buyerWalletKey,
+      sellerWalletKey
+    ]) {
+      expect(await cacheGet(cacheKey), `expected ${cacheKey} to be invalidated`).toBeNull();
+    }
+
+    expect((await buyer.get(`/orders/${orderId}`)).body.order.status).toBe("completed");
+    expect((await seller.get(`/orders/${orderId}`)).body.order.status).toBe("completed");
+    expect((await buyer.get("/orders?role=buyer")).body.orders[0].status).toBe("completed");
+    expect((await seller.get("/orders?role=seller")).body.orders[0].status).toBe("completed");
+
+    const sellerWalletAfter = await seller.get("/users/me/wallet");
+    expect(sellerWalletAfter.status).toBe(200);
+    expect(BigInt(sellerWalletAfter.body.wallet.availableCents)).toBeGreaterThan(
+      BigInt(sellerWalletBefore.body.wallet.availableCents)
+    );
+    expect(sellerWalletAfter.body.wallet.escrowCents).toBe("0");
   });
 });
 

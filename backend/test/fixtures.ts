@@ -1,12 +1,28 @@
 import { randomUUID } from "node:crypto";
 import { pool } from "../src/db/pool.js";
+import { drainPendingAuditWrites } from "../src/common/middleware/request-context.js";
 
 export async function resetDb() {
-  await pool.query("truncate table domain_outbox, users cascade");
-  await pool.query("update platform_wallets set revenue_cents = 0");
+  await drainPendingAuditWrites();
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    // Docker volume fsync can be slow, but a real competing runner must fail fast
+    // instead of consuming the entire Vitest hook budget while waiting for a lock.
+    await client.query("set local lock_timeout = '5s'");
+    await client.query("truncate table domain_outbox, users cascade");
+    await client.query("update platform_wallets set revenue_cents = 0");
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function closeDb() {
+  await drainPendingAuditWrites();
   await pool.end();
 }
 

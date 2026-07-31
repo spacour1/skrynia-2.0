@@ -7,7 +7,10 @@ import { createApp } from "../src/app.js";
 import { pool } from "../src/db/pool.js";
 import { getRedis } from "../src/common/redis.js";
 import { redactSensitive } from "../src/common/audit-redact.js";
-import { sanitizeSentryEvent } from "../src/common/middleware/request-context.js";
+import {
+  drainPendingAuditWrites,
+  sanitizeSentryEvent
+} from "../src/common/middleware/request-context.js";
 import { issueSession } from "../src/modules/auth/session.service.js";
 import { closeDb, createUser, resetDb } from "./fixtures.js";
 
@@ -61,6 +64,61 @@ async function waitForAuditTrace(traceId: string, attempts = 20) {
 }
 
 describe("audit logging does not capture secrets", () => {
+  it("drains response-finish audit writes before database reset", async () => {
+    const chunks: string[] = [];
+    const destination = new Writable({
+      write(chunk, _encoding, callback) {
+        chunks.push(chunk.toString());
+        callback();
+      }
+    });
+    const capturedLogger = pino({ base: null, timestamp: false }, destination);
+    const capturedApp = createApp({ requestLogger: capturedLogger });
+    const userId = await createUser();
+    const session = await issueSession(userId, "user");
+    const cookie = [`access_token=${session.accessToken}`, `csrf_token=${session.csrfToken}`];
+
+    await pool.query(`drop trigger if exists test_delay_request_audit on audit_logs`);
+    await pool.query(`drop function if exists test_delay_request_audit()`);
+    await pool.query(`
+      create or replace function test_delay_request_audit()
+      returns trigger language plpgsql as $$
+      begin
+        perform pg_sleep(0.2);
+        return new;
+      end;
+      $$
+    `);
+    await pool.query(`
+      create trigger test_delay_request_audit
+      before insert on audit_logs
+      for each row execute function test_delay_request_audit()
+    `);
+
+    try {
+      await request(capturedApp)
+        .post("/support/tickets")
+        .set("Cookie", cookie)
+        .set("X-CSRF-Token", session.csrfToken)
+        .send({ subject: "help", body: "test audit drain" });
+
+      await resetDb();
+      await drainPendingAuditWrites();
+
+      const entries = chunks
+        .join("")
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(entries.some((entry) => entry.msg === "audit_log_failed")).toBe(false);
+    } finally {
+      await drainPendingAuditWrites();
+      await pool.query(`drop trigger if exists test_delay_request_audit on audit_logs`);
+      await pool.query(`drop function if exists test_delay_request_audit()`);
+    }
+  });
+
   it("login request bodies (password) are not persisted", async () => {
     const secretPassword = `Sup3r-${randomUUID()}`;
     await request(app).post("/auth/login").send({ email: "someone@test.local", password: secretPassword });

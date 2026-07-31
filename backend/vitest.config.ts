@@ -6,6 +6,9 @@ export default defineConfig({
     globals: false,
     setupFiles: ["./test/setup.ts"],
     fileParallelism: false,
-    testTimeout: 15_000
+    testTimeout: 15_000,
+    // resetDb cascades through the integration schema. Keep enough budget for
+    // measured Docker-volume fsync while resetDb's lock_timeout catches contention.
+    hookTimeout: 30_000
   }
 });

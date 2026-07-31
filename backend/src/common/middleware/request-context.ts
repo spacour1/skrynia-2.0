@@ -11,6 +11,23 @@ import { runWithTraceId } from "../trace-context.js";
 
 const AUDITED_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const URL_FIELDS = new Set(["url", "uri", "path", "from", "to"]);
+const pendingAuditWrites = new Set<Promise<void>>();
+
+function trackAuditWrite(write: Promise<unknown>, requestLogger: RequestLogger, traceId: string) {
+  const tracked = write.then(
+    () => undefined,
+    (error) => requestLogger.warn({ traceId, error }, "audit_log_failed")
+  );
+  pendingAuditWrites.add(tracked);
+  void tracked.finally(() => pendingAuditWrites.delete(tracked));
+}
+
+/** Waits for response-finish audit writes before test cleanup or bounded shutdown. */
+export async function drainPendingAuditWrites() {
+  while (pendingAuditWrites.size > 0) {
+    await Promise.allSettled([...pendingAuditWrites]);
+  }
+}
 
 export function initErrorTracking() {
   if (!env.SENTRY_DSN) return;
@@ -82,7 +99,8 @@ export type RequestLogger = Pick<typeof logger, "info" | "warn">;
 
 export function createRequestContext(requestLogger: RequestLogger = logger): RequestHandler {
   return (req, res, next) => {
-    req.traceId = req.header("x-trace-id") || crypto.randomUUID();
+    const traceId = req.header("x-trace-id") || crypto.randomUUID();
+    req.traceId = traceId;
     req.startTime = process.hrtime.bigint();
     res.setHeader("x-trace-id", req.traceId);
 
@@ -113,8 +131,8 @@ export function createRequestContext(requestLogger: RequestLogger = logger): Req
       if (!AUDITED_METHODS.has(req.method)) return;
       // Request bodies are deliberately omitted. Params and query retain technical
       // context only after recursive key-based redaction.
-      pool
-        .query(
+      trackAuditWrite(
+        pool.query(
           `insert into audit_logs(trace_id, user_id, method, path, endpoint, status_code, ip_address, user_agent, action, request_body, metadata)
            values ($1, $2, $3, $4, $5, $6, nullif($7, '')::inet, $8, $9, null, $10)`,
           [
@@ -129,8 +147,10 @@ export function createRequestContext(requestLogger: RequestLogger = logger): Req
             `${req.method} ${endpoint}`,
             { params: redactSensitive(req.params), query }
           ]
-        )
-        .catch((error) => requestLogger.warn({ traceId: req.traceId, error }, "audit_log_failed"));
+        ),
+        requestLogger,
+        traceId
+      );
     });
 
     // Keep the trace available to lower-level async services (for example DB retry

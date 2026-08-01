@@ -43,6 +43,25 @@ export async function withTimeout<T>(
   }
 }
 
+/** Returns one stable promise and never starts the wrapped operation twice. */
+export function onceAsync<TArgs extends unknown[], TResult>(
+  run: (...args: TArgs) => Promise<TResult> | TResult
+) {
+  let started = false;
+  let promise: Promise<TResult>;
+  return (...args: TArgs) => {
+    if (!started) {
+      started = true;
+      try {
+        promise = Promise.resolve(run(...args));
+      } catch (error) {
+        promise = Promise.reject(error);
+      }
+    }
+    return promise;
+  };
+}
+
 export async function runCleanupSteps(
   steps: Array<{ name: string; run: () => Promise<unknown> | unknown }>
 ) {

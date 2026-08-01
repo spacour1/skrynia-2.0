@@ -12,21 +12,42 @@ import { runWithTraceId } from "../trace-context.js";
 const AUDITED_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const URL_FIELDS = new Set(["url", "uri", "path", "from", "to"]);
 const pendingAuditWrites = new Set<Promise<void>>();
+let auditFailureCount = 0;
+let drainedAuditFailureCount = 0;
 
 function trackAuditWrite(write: Promise<unknown>, requestLogger: RequestLogger, traceId: string) {
   const tracked = write.then(
     () => undefined,
-    (error) => requestLogger.warn({ traceId, error }, "audit_log_failed")
+    (error) => {
+      auditFailureCount += 1;
+      try {
+        const errorCode =
+          error && typeof error === "object" && "code" in error &&
+          typeof error.code === "string"
+            ? error.code
+            : undefined;
+        requestLogger.warn({ traceId, errorCode }, "audit_log_failed");
+      } catch {
+        // A broken logger must not turn a handled database rejection into an
+        // unhandled promise or prevent the remaining audit writes from draining.
+      }
+    }
   );
   pendingAuditWrites.add(tracked);
-  void tracked.finally(() => pendingAuditWrites.delete(tracked));
+  void tracked.then(
+    () => pendingAuditWrites.delete(tracked),
+    () => pendingAuditWrites.delete(tracked)
+  );
 }
 
 /** Waits for response-finish audit writes before test cleanup or bounded shutdown. */
 export async function drainPendingAuditWrites() {
+  const failureCountBeforeDrain = drainedAuditFailureCount;
   while (pendingAuditWrites.size > 0) {
     await Promise.allSettled([...pendingAuditWrites]);
   }
+  drainedAuditFailureCount = auditFailureCount;
+  return auditFailureCount === failureCountBeforeDrain;
 }
 
 export function initErrorTracking() {

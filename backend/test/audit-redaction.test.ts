@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import pino from "pino";
 import request from "supertest";
 import { createApp } from "../src/app.js";
@@ -96,14 +96,19 @@ describe("audit logging does not capture secrets", () => {
     `);
 
     try {
-      await request(capturedApp)
+      const response = await request(capturedApp)
         .post("/support/tickets")
         .set("Cookie", cookie)
         .set("X-CSRF-Token", session.csrfToken)
         .send({ subject: "help", body: "test audit drain" });
 
+      await expect(drainPendingAuditWrites()).resolves.toBe(true);
+      const auditRow = await pool.query(
+        `select 1 from audit_logs where trace_id = $1 limit 1`,
+        [response.headers["x-trace-id"]]
+      );
+      expect(auditRow.rowCount).toBe(1);
       await resetDb();
-      await drainPendingAuditWrites();
 
       const entries = chunks
         .join("")
@@ -116,6 +121,62 @@ describe("audit logging does not capture secrets", () => {
       await drainPendingAuditWrites();
       await pool.query(`drop trigger if exists test_delay_request_audit on audit_logs`);
       await pool.query(`drop function if exists test_delay_request_audit()`);
+    }
+  });
+
+  it("does not report a rejected audit insert as a successful drain", async () => {
+    const chunks: string[] = [];
+    const destination = new Writable({
+      write(chunk, _encoding, callback) {
+        chunks.push(chunk.toString());
+        callback();
+      }
+    });
+    const capturedLogger = pino({ base: null, timestamp: false }, destination);
+    const capturedApp = createApp({ requestLogger: capturedLogger });
+
+    await pool.query(`drop trigger if exists test_reject_request_audit on audit_logs`);
+    await pool.query(`drop function if exists test_reject_request_audit()`);
+    await pool.query(`
+      create or replace function test_reject_request_audit()
+      returns trigger language plpgsql as $$
+      begin
+        perform pg_sleep(0.2);
+        raise exception 'forced test audit rejection';
+      end;
+      $$
+    `);
+    await pool.query(`
+      create trigger test_reject_request_audit
+      before insert on audit_logs
+      for each row execute function test_reject_request_audit()
+    `);
+
+    try {
+      await request(capturedApp).post("/test").send({ safe: "value" });
+
+      await vi.waitFor(
+        () => expect(chunks.join("")).toContain('"msg":"audit_log_failed"'),
+        { timeout: 5_000, interval: 50 }
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await expect(drainPendingAuditWrites()).resolves.toBe(false);
+      await expect(drainPendingAuditWrites()).resolves.toBe(true);
+
+      const entries = chunks
+        .join("")
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      const failure = entries.find((entry) => entry.msg === "audit_log_failed");
+      expect(failure).toMatchObject({ errorCode: "P0001" });
+      expect(failure).not.toHaveProperty("error");
+      expect(JSON.stringify(entries)).not.toContain("forced test audit rejection");
+    } finally {
+      await drainPendingAuditWrites();
+      await pool.query(`drop trigger if exists test_reject_request_audit on audit_logs`);
+      await pool.query(`drop function if exists test_reject_request_audit()`);
     }
   });
 

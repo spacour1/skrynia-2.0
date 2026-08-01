@@ -1,9 +1,36 @@
+# Dependencies
 node_modules/
+**/node_modules/
+
+# Build output
 .next/
+**/.next/
 dist/
+**/dist/
 coverage/
+**/coverage/
+
+# Runtime and test artifacts
 uploads/
+tmp/
+temp/
+e2e/test-results/
+e2e/playwright-report/
+
+# Generated and large static assets
 frontend/public/assets/
+
+# Dependency lockfile noise
 **/package-lock.json
+
+# Local environments and logs
+.env
+.env.*
+!.env.example
+*.log
+
+# Existing graph cache
 graphify-out/cache/
+
+# Local installer backup
 AGENTS.before-graphify.md

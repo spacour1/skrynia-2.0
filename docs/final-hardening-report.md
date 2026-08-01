@@ -1,39 +1,44 @@
 # Final production-hardening report
 
-This report is an evidence ledger for the hardening branch, not a production-readiness
-certificate. It now reconciles committed changes from `36ea677` through the current
-`origin/main` at `dab02a8`. The final branch SHA and validation results must be updated
-after the closeout phases are committed and verified.
+This report is an evidence ledger, not a production-readiness certificate. It preserves
+historical hardening evidence while binding current claims to an explicit input tree. The
+snapshot was captured on 2026-08-01: the prompt-prior checkpoint was `7043159`, execution
+started at `a7553a2`, and the Stage 3 baseline input was a clean `main`/`origin/main` at
+`364547c`. The SHA `364547c` identifies the tree inspected before this documentation edit;
+it is not a self-reference to a later documentation commit.
 
 ## 1. Executive summary
 
-The branch implements the planned frontend test foundation and reliability work,
-production runtime separation, Docker and CI gates, an isolated Playwright stack, and
-multilingual typo-tolerant marketplace search (Stages 8-13). It also includes follow-up
-fixes for session epochs, exact money representation, payment/webhook recovery, durable
-storage cleanup, bounded pagination, WebSocket acknowledgement/race handling, and one
-central order-transition service.
+The history through `364547c` contains the planned frontend test and reliability work,
+runtime separation, Docker and CI gates, isolated Playwright coverage, multilingual search,
+session and money-boundary fixes, durable payment/storage follow-up, bounded pagination,
+WebSocket race handling, centralized order transitions, canonical marketplace contracts,
+and the local Graphify pilot with scoped agent instructions.
 
-The implementation is not yet certified for deployment. The API-contract consolidation
-is committed in `dab02a8` but has not yet completed its Phase B boundary review or the
-final validation matrix in section 5. Production-provider prerequisites and dependency
-exceptions also remain open. No real payment-provider implementation or validation was
-added.
+Two GitHub Actions runs provide current CI evidence: run `30697353208` at `23f5b28` and
+run `30697861790` at `364547c` both completed with all 9 jobs passing. This is strong CI
+evidence for the exact checks listed in section 5, but it is not staging or production
+evidence. Production-sized migration behavior, rollback/down paths, the final search
+benchmark, runtime failure drills, and real provider integrations remain unverified.
+
+The input tree is therefore **not certified production-ready**.
 
 Snapshot:
 
 | Item | Value |
 | --- | --- |
 | Historical hardening base | `36ea677` |
-| Closeout base | `origin/main` at `dab02a8` |
-| Closeout branch | `codex/final-hardening-closeout` |
-| Final HEAD | `dab02a8` at closeout start; replace after the final commit. |
-| Final working-tree state | Clean at closeout start; re-check before publication. |
+| Prompt-prior checkpoint | `7043159` (`chore(security): document secret scan placeholder exception`) |
+| Actual execution start | `a7553a2` (`chore(devx): install scoped Graphify pilot`) |
+| Stage 3 baseline input | `main` and `origin/main` at `364547c` |
+| Input working-tree state | Clean before the Stage 3 documentation edits |
+| Delivery model | Direct commits to `main`, as requested for this task |
+| Readiness | Not certified; staging and production-provider evidence remain open |
 
 ## 2. Commits
 
-The following is the complete chronological hardening history from `36ea677` through the
-closeout base at `dab02a8`:
+The following is the chronological hardening history retained from `36ea677` through the
+Stage 3 input SHA `364547c`:
 
 | Commit | Purpose |
 | --- | --- |
@@ -64,84 +69,148 @@ closeout base at `dab02a8`:
 | `070ad8c` | Correct money and session documentation contracts. |
 | `5d44960` | Route order lifecycle writes through the centralized transition service. |
 | `42f3ddc` | Add cursor bounds and indexes to the remaining authenticated lists. |
-| `dab02a8` | Finish shared marketplace contracts, DTO mappers, contract tests, and the associated closeout documentation. |
+| `dab02a8` | Add shared marketplace contracts, DTO mappers, synchronization tests, and the first closeout documentation. |
+| `09a827b` | Align the earlier closeout documents with the then-current main snapshot. |
+| `6f98673` | Complete canonical marketplace contract boundaries across backend routes, shared contracts, frontend consumers, and synchronization tests. |
+| `c38e7a5` | Resolve request-context, audit-redaction, fixture, and backend validation defects. |
+| `926d31a` | Resolve frontend auth-refresh, cached-auth, chat, and marketplace navigation reliability defects. |
+| `ae74285` | Resolve runtime cleanup, shutdown, Compose, and frontend image defects found during validation. |
+| `71db37b` | Checkpoint order DTO, API refresh-race, seller flow, and E2E hardening fixes. |
+| `36c318d` | Resolve critical marketplace E2E regressions in ledger and DTO behavior. |
+| `f96588c` | Provide the release-migration encryption key required by CI. |
+| `7043159` | Document the narrowly scoped secret-scan placeholder exception. |
+| `a7553a2` | Install the project-scoped Graphify pilot and repository ignore policy. |
+| `23f5b28` | Complete local semantic Graphify coverage for code, SQL, documents, and tracked images. |
+| `364547c` | Add scoped Graphify navigation rules and risk-based verification requirements. |
 
-Final branch range audit: **NOT RUN - regenerate `git log --reverse
-origin/main..HEAD` after the final commit and add closeout commits above.**
+`git log --reverse --oneline dab02a8..364547c` returned exactly the 12 commits from
+`09a827b` through `364547c` shown above. `git log --oneline --all` also confirmed that all
+referenced commit objects exist.
 
-## 3. Root causes
+## 3. Root causes and implemented corrections
 
-| Area | Root cause established by the branch | Implemented correction |
+| Area | Root cause established by the hardening history | Implemented correction |
 | --- | --- | --- |
 | Authentication | Transient `/auth/me` failures and stale JWT/socket state could be interpreted independently from the durable user session epoch. | Preserve degraded authenticated state; validate session version for HTTP, refresh, 2FA completion, and WebSocket use. |
 | Money | Number conversion and locale/UI remounts could lose integer-cent precision or in-progress state. | Keep cents as integer/string-safe values at boundaries and centralize frontend money/currency handling. |
 | Queries | Several screens had no explicit error/retry contract, while some authenticated lists remained offset-based or unbounded. | Add stable error/retry components and cursor pagination with maximum limits and supporting indexes. |
-| Payments | Provider capture/webhook completion could succeed before all durable follow-up intent was recorded; transient webhook failures lacked one consistent retry outcome. | Persist capture/outbox state transactionally and classify transient webhook failures for retry. |
+| Payments | Provider capture/webhook completion could succeed before all durable follow-up intent was recorded; transient webhook failures lacked one consistent retry outcome. | Persist capture/outbox state transactionally and classify transient webhook failures for retry. Further provider-boundary work remains in the follow-on plan. |
 | Storage | Provider writes/deletes and database quota state could diverge after a crash. | Add durable `uploading`/`deleting` intents and retry deletion through the outbox. |
 | Order lifecycle | Status checks and writes were distributed across routes, payment handlers, jobs, and dispute resolution. | Centralize row locking, transition authorization, timestamps, timeline, outbox, and system messages in `transitionOrder`. |
-| Runtime | One startup path coupled HTTP and background work, and migration behavior depended on application runtime configuration. | Add separate API/worker/outbox entrypoints and one advisory-locked release migration command. |
-| Realtime | The initial-message ACK and client-ID lifecycle had race/identity gaps; concurrency bounds were not directly proven. | Fix first ACK and ID retention and add shutdown/race/concurrency tests. |
-| Search | English FTS plus broad `ILIKE` did not cover catalog aliases, Cyrillic/Latin variants, or typo ranking with indexed candidates. | Maintain normalized search documents/terms with `pg_trgm`, `unaccent`, aliases, deterministic tiers, and load-plan evidence. |
+| Runtime | One startup path coupled HTTP and background work, and migration behavior depended on application runtime configuration. | Add separate API/worker/outbox entrypoints and one advisory-locked release migration command. Audit-write draining before pool shutdown remains open. |
+| Realtime | The initial-message ACK and client-ID lifecycle had race/identity gaps; concurrency bounds were not directly proven. | Fix first ACK and ID retention and add shutdown/race/concurrency tests. Cross-tab refresh fallback remains open. |
+| Search | English FTS plus broad `ILIKE` did not cover catalog aliases, Cyrillic/Latin variants, or typo ranking with indexed candidates. | Maintain normalized search documents/terms with `pg_trgm`, `unaccent`, aliases, deterministic tiers, and historical load-plan evidence. |
+| API contracts | Shared types and public DTO boundaries could drift between backend and frontend consumers. | Complete canonical shared contracts, explicit backend mappers, the frontend mirror, and synchronization tests in `6f98673`. |
+| Agent navigation | Repeated broad repository scans consumed time and could hide the confidence of inferred dependencies. | Add a local Graphify pilot and scoped `AGENTS.md` rules; graph output remains advisory and every material edge must be checked in source. |
 
 ## 4. Migrations
 
 | Migration | Purpose | Rollout and rollback facts |
 | --- | --- | --- |
 | `1784752500000_add-storage-operation-states.sql` | Add durable `uploading` and `deleting` states, validated constraints, and a cleanup-intent index. | Apply before the matching API/worker version. On rollback, stop writers and drain deletion events; remaining operation rows become `quarantined`. The replacement partial index is transactional and can require a maintenance window on a large table. |
-| `1784909494965_add-multilingual-product-search.sql` | Install `pg_trgm`/`unaccent`, add category aliases, search document/term tables, indexes, maintenance triggers, alias data, and a bounded 1,000-product backfill. | Verify provider extension permissions before release. The repository release runner still wraps the migration in one transaction. Roll back the API first; the down migration removes search objects and category aliases but intentionally retains extensions and backfilled game aliases. |
+| `1784909494965_add-multilingual-product-search.sql` | Install `pg_trgm`/`unaccent`, add category aliases, search document/term tables, indexes, maintenance triggers, alias data, and a bounded 1,000-product backfill. | Verify provider extension permissions before release. The release runner wraps the migration in one transaction. Roll back application code first; the down migration removes search objects and category aliases but intentionally retains extensions and backfilled game aliases. |
 | `1784909600000_add_bounded_list_indexes.sql` | Support keyset pagination for product/seller favorites, seller products, blocks, and user/message reports. | Standard reversible index-only change; six indexes are dropped by the down section. |
 
-Final migration validation (clean up, repeat/no-op, schema contracts, and rollback where
-applicable): **NOT RUN - replace with exact commands and results.**
+Clean-database migration deployment, a second no-op deployment, and the schema-contract test
+passed in CI at both `23f5b28` and `364547c`. Migration rollback/down rehearsal is
+**NOT RUN**. Production-role extension checks and the final search benchmark are also
+**NOT RUN**.
 
-## 5. Tests
+## 5. Evidence by scope
 
-The following table is intentionally a final-tree checklist. Intermediate results are
-not promoted to final evidence after later source changes.
+Evidence is intentionally separated by environment. `PASS` in one category must not be
+copied into another category.
 
-| Check | Final status |
-| --- | --- |
-| `cd backend && npm run lint` | **NOT RUN** |
-| `cd backend && npm run build` | **NOT RUN** |
-| `cd backend && npm test` | **NOT RUN** |
-| Clean-database migration up + schema-contract suite | **NOT RUN** |
-| Repeated release migration/no-op check | **NOT RUN** |
-| `cd frontend && npm run typecheck` | **NOT RUN** |
-| `cd frontend && npm run i18n:check` | **NOT RUN** |
-| `cd frontend && npm test` | **NOT RUN** |
-| `cd frontend && npm run build` | **NOT RUN** |
-| `docker compose config --quiet` for production | **NOT RUN** |
-| `docker compose -f docker-compose.dev.yml config --quiet` | **NOT RUN** |
-| `docker compose -f docker-compose.e2e.yml config --quiet` | **NOT RUN** |
-| Production backend/frontend image builds | **NOT RUN** |
-| `node e2e/scripts/run.mjs` | **NOT RUN** |
-| Audit-policy unit test and production-dependency audits | **NOT RUN** |
-| Gitleaks full-history scan | **NOT RUN** |
-| Search benchmark rerun on the final schema | **NOT RUN** |
+### 5.1 Historical evidence
 
-Record `PASS`, `FAIL`, `BLOCKED`, or `NOT RUN`, the exact command, and runner-reported
-test counts. A GitHub Actions configuration change is not evidence that CI passed.
+- Commits from `36ea677` through `7043159` retain implementation and test history, but a
+  result observed on an older SHA is not automatically a current-tree result.
+- Commit `958e9d0` records the earlier local 20k-row `EXPLAIN ANALYZE` search evidence.
+  That evidence is useful for design history; it is not the final search benchmark on
+  `364547c` or a production-sized clone.
+- The older `dab02a8`/`codex/final-hardening-closeout` snapshot is historical only. It no
+  longer describes the current branch, input SHA, or CI state.
+
+### 5.2 Current-tree evidence
+
+| Check | Bound SHA | Status and observed result |
+| --- | --- | --- |
+| `git status --short --branch` | `364547c` before Stage 3 edits | **PASS** — `main...origin/main`, with no working-tree entries. |
+| `git rev-parse HEAD`, `main`, and `origin/main` | `364547c` before Stage 3 edits | **PASS** — all resolved to `364547c8e798f4da4fdafa185b6546d280d39311`. |
+| `git log --reverse --oneline dab02a8..364547c` | `364547c` | **PASS** — 12 commits, listed in section 2. |
+| Initial Graphify semantic pilot captured in the repository report | `23f5b28` | **PASS as navigation-tool evidence** — 528 files detected, 49/49 document/image files covered, 3,098 initial final nodes, 8,424 initial final edges, and no final graph-health warnings. |
+| `graphify update .` | `23f5b28` | **PASS as incremental-tool evidence** — 15.43 seconds, topology unchanged. |
+| Current local Graphify incremental snapshot | `364547c` | **PASS as navigation-tool evidence** — 535 files, 3,176 nodes, 8,571 edges, 13 hyperedges, 179 named communities, and 0 graph-health warnings. Generated output remains ignored. |
+| Local backend/frontend/Docker/E2E gate rerun | `364547c` | **NOT RUN locally** — use the separate CI evidence below; do not describe CI as a local rerun. |
+
+The complete Graphify measurements and their raw-extraction caveats are recorded in
+[`graphify-pilot.md`](graphify-pilot.md). Graphify output is navigation evidence, not proof
+of correctness, authorization, transaction safety, or production readiness.
+
+### 5.3 CI evidence
+
+| Input SHA | GitHub Actions run | Result |
+| --- | --- | --- |
+| `23f5b28` | [CI run 30697353208](https://github.com/spacour1/skrynia-2.0/actions/runs/30697353208) | **PASS — 9/9 jobs succeeded** |
+| `364547c` | [CI run 30697861790](https://github.com/spacour1/skrynia-2.0/actions/runs/30697861790) | **PASS — 9/9 jobs succeeded** |
+
+The current-input run at `364547c` covered:
+
+| Job | Exact repository gate covered | Status |
+| --- | --- | --- |
+| `backend` | `npm ci`; production build; clean `migrate:deploy`; repeated `migrate:deploy`; lint/typecheck; schema-contract test; full backend tests | **PASS**, 3m 30s |
+| `frontend` | `npm ci`; typecheck; i18n contract; unit tests; production build | **PASS**, 1m 24s |
+| `audit-policy-tests` | Node test suite for the npm-audit policy | **PASS**, 9s |
+| `dependency-audit (backend)` | Production dependency audit evaluated through the repository policy | **PASS**, 15s |
+| `dependency-audit (frontend)` | Production dependency audit evaluated through the repository policy | **PASS**, 20s |
+| `dependency-audit (e2e)` | Production dependency audit evaluated through the repository policy | **PASS**, 12s |
+| `secret-scan` | Pinned Gitleaks 8.30.1 scan of complete repository history | **PASS**, 7s |
+| `docker` | `docker compose --profile '*' config --quiet` and production image build | **PASS**, 1m 52s |
+| `e2e` | Isolated E2E Compose validation and Chromium suite through `node e2e/scripts/run.mjs` | **PASS**, 3m 50s |
+
+The dependency jobs passing means the configured policy passed; it does not mean there are
+zero advisories. The E2E job also emitted a non-failing GitHub runner warning that the
+pinned `actions/upload-artifact` action targets deprecated Node.js 20 and was forced onto
+Node.js 24. The standalone development Compose file is not separately proven by these CI
+steps.
+
+### 5.4 Staging evidence
+
+**NOT RUN for `364547c`.** There is no current-SHA staging evidence for restart and ordered
+shutdown, audit draining, Redis loss, provider outage, rolling deployment, multi-replica
+behavior, production-sized migrations/search, connection-pool capacity, or extension
+permissions. Historical k6 workflow failures on older commits are not evidence for the
+current input tree and must not be converted to either `PASS` or current-tree `FAIL`.
+
+### 5.5 Production-provider evidence
+
+**NOT RUN and outside automated test scope.** Real payment, email, SMS, Telegram, and
+S3-compatible storage providers were not called. No real credentials were used. Mock or
+test-provider success must not be reported as real-provider success.
 
 ## 6. Security
 
 Implemented controls include durable session-version revocation, one-time WebSocket
 tickets/session checks, bounded WebSocket work, strict test-payment gating
 (`NODE_ENV=test` and `ENABLE_TEST_PAYMENTS=true`), non-root production images, narrowly
-scoped Gitleaks fingerprints, and an audit policy that rejects unexpected or expired
-high/critical findings.
+scoped Gitleaks fingerprints, and an audit policy that rejects unexpected, escalated, or
+expired high/critical findings.
 
-The dependency gate intentionally carries time-limited advisory exceptions documented in
-`docs/security/npm-audit-debt.md`. At the snapshot, those exceptions expire at the end
-of 2026-08-21 UTC and include direct/runtime exposure in Next.js and Sharp plus transitive
-Sentry/build dependencies. They are tracked debt, not a clean security audit. Uploaded
-objects are magic-byte validated, but malware scanning remains unimplemented.
+CI Gitleaks evidence is green at `364547c`, with the three exact documentation-placeholder
+fingerprints described in
+[`security/secret-scan-allowlist.md`](security/secret-scan-allowlist.md). The dependency
+policy is also green, but it intentionally carries 12 exact high-advisory exceptions: one
+backend Sharp exception and 11 frontend exceptions covering Next.js and transitive
+Sentry/build dependencies. All expire on 2026-08-21. The details and remediation rules are
+in [`security/npm-audit-debt.md`](security/npm-audit-debt.md). These exceptions are tracked
+debt, not a clean security audit.
 
-No real payment credentials or provider calls belong in automated tests. Real payment,
-email, SMS, Telegram, and S3 integrations remain outside automated validation.
+Uploaded objects are magic-byte validated, but malware scanning remains unimplemented.
+Real provider credentials and calls remain excluded from automated validation.
 
 ## 7. Reliability
 
-The branch adds durable outbox-backed payment/storage follow-up, bounded transaction and
+The history adds durable outbox-backed payment/storage follow-up, bounded transaction and
 webhook retries, cursor pagination, explicit frontend degraded/error/retry states,
 currency-draft preservation, locale-aware formatting, ordered process shutdown, bounded
 health probes, worker/outbox readiness heartbeats, first-message ACK coverage, and one
@@ -149,62 +218,71 @@ central order transition boundary.
 
 The isolated E2E topology uses clean PostgreSQL/Redis volumes, separate API/worker/outbox
 processes, a production Next.js image, one Chromium worker, unique run data, and failure
-artifacts. This topology still needs the final run recorded in section 5. Production
-restart, rolling deploy, Redis outage, provider outage, and multi-replica behavior require
-staging observation; unit/integration coverage does not prove those operational properties.
+artifacts. It passed in both cited CI runs. CI does not prove runtime behavior under real
+shutdown timing, rolling deploys, Redis/provider outages, or multiple replicas; those need
+staging observation.
 
 ## 8. API contracts
 
-Committed changes improve order response mapping, exact money serialization, public seller
-DTOs, pagination envelopes, locale consumption, and consistent order status handling.
-They also remove several direct database-row response paths.
+Commit `dab02a8` introduced shared Product, Order, Message, DisputeMessage, and Seller
+contracts, explicit backend DTO mappers, a synchronized frontend mirror, and contract
+tests. Commit `6f98673` then completed the canonical marketplace contract boundaries across
+routes and consumers and expanded mapper/synchronization coverage.
 
-At `42f3ddc`, the Stage 6 goal was still partial. Commit `dab02a8` adds the shared
-Product, Order, Message, DisputeMessage, and Seller contracts, explicit backend DTO
-mappers, a synchronized frontend mirror, and contract tests. The implementation is now
-credited as committed, but not yet as verified: Phase B must still prove that public
-routes use those boundaries and do not expose raw database fields.
-
-Final contract scan and mapper/synchronization tests: **NOT RUN - update after the
-Phase B commands complete.**
+The backend and frontend jobs, including their full test suites, passed on the exact
+`364547c` input tree. This supports a current CI claim for the committed contract suite; it
+does not prove provider behavior, staging compatibility, or the absence of every future
+internal-field regression.
 
 ## 9. Deployment plan
 
-1. Produce a clean final commit and replace every `NOT RUN` entry in section 5 with
-   factual evidence.
-2. Remove or explicitly accept any failing security advisory; do not bypass the policy.
+1. Complete the open hardening stages and select a release-candidate SHA; do not reuse
+   `364547c` evidence for later code without checking the diff and rerunning the applicable
+   gates.
+2. Remove or explicitly re-accept each dependency advisory before its expiry; never bypass
+   the audit policy.
 3. Verify `pg_trgm` and `unaccent` availability with the production database role.
 4. Back up the database and record row counts, database size, and migration timeouts.
-5. Run exactly one `npm run migrate:deploy` release job. Do not run migrations from API,
-   worker, or outbox startup.
-6. Deploy the separate worker and outbox commands with unique `RUNTIME_INSTANCE_ID`
-   values, then roll out API replicas and the frontend.
-7. Keep `ENABLE_TEST_PAYMENTS` false/unset and do not place real provider credentials in
-   the E2E environment.
+5. Rehearse rollback/down behavior on a production-like copy, then run exactly one
+   `npm run migrate:deploy` release job. Do not run migrations from API, worker, or outbox
+   startup.
+6. Deploy worker and outbox commands with unique `RUNTIME_INSTANCE_ID` values, then roll
+   out API replicas and the frontend.
+7. Keep `ENABLE_TEST_PAYMENTS` false/unset and keep real provider credentials out of E2E.
 8. Gate traffic on `/health/ready`; use `/health/live` only for liveness.
-9. Smoke authentication/refresh, listing/search, chat ACK, an escrow-independent order
-   flow, dispute access, and admin financial authorization.
-10. Monitor PostgreSQL transaction/lock age, search latency/table size, Redis readiness,
+9. Smoke authentication/refresh/logout, listing/search, chat ACK, an escrow-independent
+   order flow, dispute access, and admin financial authorization.
+10. Observe audit draining, restart/shutdown, Redis loss, provider failure, rolling deploy,
+    and multi-replica behavior before approving production rollout.
+11. Monitor PostgreSQL transaction/lock age, search latency/table size, Redis readiness,
     outbox failures, queue lag, WebSocket disconnects, storage cleanup intents, and error
     rates. Roll back application code before a database down migration.
 
-## 10. Remaining risks
+## 10. Remaining risks and readiness decision
 
-- Final lint, build, migration, unit/integration, Docker, security, and Playwright
-  verification is not yet recorded for the final tree.
-- API contracts are committed in `dab02a8`; the closeout still requires review for
-  accidental internal-field leakage and frontend/backend drift.
-- Production PostgreSQL may not permit `CREATE EXTENSION`; search rollout must stop if
-  `pg_trgm` or `unaccent` is unavailable.
-- The search migration is batched but remains one release transaction; production-sized
-  lock duration, data distribution, and query latency are not proven by the local 20k
-  benchmark.
-- Audit exceptions expire on 2026-08-21 and include deployed Next.js and Sharp code.
+- The follow-on hardening plan has no closure evidence yet for bounded production audit
+  draining before PostgreSQL pool shutdown.
+- Redis/cache invalidation still requires a verified post-commit boundary for financial
+  order transitions; provider/network work must remain outside database transactions.
+- Cross-tab refresh without Web Locks and offline-logout retry semantics remain open.
+- Manual-payment GET side effects, provider verification/settlement boundaries, amount and
+  currency checks, and durable confirmation uniqueness still require dedicated closure.
+- The TOTP/2FA lifecycle and KeepGame product-facing naming audit remain open stages.
+- Sharp, Next.js, and Sentry/build-chain high advisories remain accepted only through
+  2026-08-21; CI policy success is not equivalent to remediation.
+- Migration rollback/down paths, provider extension permissions, and the final search
+  benchmark are **NOT RUN** for the input tree.
+- Staging restart, shutdown, Redis outage, provider outage, rolling-deploy, multi-replica,
+  and production-capacity evidence is **NOT RUN**.
 - Malware scanning for uploaded content is not implemented.
 - Real payment, email, SMS, Telegram, and S3 provider behavior is not covered by CI/E2E.
 - A single-host local upload volume cannot be shared by scaled API replicas; multi-replica
-  production requires S3-compatible storage.
-- Read replicas are not implemented; capacity targets still require production load and
-  connection-pool validation.
-- Direct production readiness, CI status, and deployment success must not be claimed until
-  all placeholders above are replaced with observed results.
+  production requires shared object storage.
+- Read replicas are not implemented; capacity targets still require production-like load
+  and connection-pool validation.
+- Graphify improves navigation but does not replace source review, tests, authorization
+  review, financial invariants, runtime traces, or deployment evidence.
+
+**Readiness decision: NOT CERTIFIED FOR PRODUCTION.** CI is green for `364547c`, but the
+staging, provider, rollback, security-debt, and follow-on implementation evidence above is
+still incomplete.

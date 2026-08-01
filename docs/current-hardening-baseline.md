@@ -1,59 +1,53 @@
 # Current hardening baseline
 
-This file distinguishes implementation evidence from final validation evidence. It
-supersedes the stale statement that Stages 8-13 were missing.
+This document captures the evidence available on 2026-08-01. It separates old
+test records, current-tree local checks, CI, staging, and real-provider evidence
+so that a result from one category is not presented as proof for another.
 
 ## Snapshot
 
 | Item | Value |
 | --- | --- |
-| Date | 2026-07-31 |
-| Branch | `codex/final-hardening-closeout`, created from the current `main` |
-| Base | `origin/main` at `dab02a8` |
-| Committed snapshot | `dab02a8` (`finish production hardening and shared contracts`) |
-| Final HEAD | `dab02a8` at closeout start; replace with the final branch SHA after validation commits. |
-| Working tree | Clean at closeout start (`git status --short`, exit code 0). |
-| Production readiness | Not certified. |
+| Evidence capture date | 2026-08-01 |
+| Branch | `main` |
+| Prompt-recorded prior SHA | `7043159` (`chore(security): document secret scan placeholder exception`) |
+| Verified execution-start HEAD | `a7553a2` |
+| Stage 3 baseline input / current pre-Stage-3 `main` | `364547c` |
+| Local/remote parity | `main == origin/main == 364547c` |
+| Working tree | Clean at evidence capture (`git status --short` returned no entries) |
+| Production readiness | **Not certified** |
 
-## Closeout reconciliation
+The prompt's prior reference, `7043159`, is retained as provenance. The HEAD
+that was actually checked before this execution began was `a7553a2`; these are
+different facts and must not be collapsed into one start SHA.
 
-| Item | Current fact | Documented fact before reconciliation | Drift | Required update |
-| --- | --- | --- | --- | --- |
-| Commit | `main` and `origin/main` point to `dab02a8`. | The latest recorded snapshot was `42f3ddc`; final HEAD was not recorded. | Yes | Use `dab02a8` as the closeout baseline and record the final branch SHA after validation. |
-| Branch | Closeout work starts on `codex/final-hardening-closeout`. | The snapshot named `codex/finish-big-plan`. | Yes | Refer to the current closeout branch while retaining historical commit evidence. |
-| Working tree | Clean before the closeout branch was created. | The tree was described as dirty with uncommitted contract work. | Yes | Treat the committed `dab02a8` tree as the implementation under validation. |
-| API-contract closeout | Shared contracts, backend DTO mappers, frontend mirror, and synchronization tests are committed in `dab02a8`. | The closeout was described as partial and uncommitted. | Yes | Review the boundaries and run the targeted/full suites before marking the closeout verified. |
-| Final validation | No final-tree gate has been rerun during this closeout yet. | All final-tree gates were `NOT RUN`. | No | Preserve `NOT RUN` until each exact command exits successfully. |
+## Commits after the old closeout snapshot
 
-## Implemented scope
+The prior closeout snapshot ended at `dab02a8`. All 12 later commits present in
+the Stage 3 input tree are recorded here in chronological order:
 
-Stages 0-7 remain represented by the base at `36ea677`: domain/schema
-reconciliation, atomic registration, versioned session revocation, transaction retries,
-resource-abuse controls, partial contract centralization, and order-state-machine
-hardening.
+| Commit | Change |
+| --- | --- |
+| `09a827b` | `docs(hardening): align closeout baseline with current main` |
+| `6f98673` | `fix(api): complete canonical marketplace contract boundaries` |
+| `c38e7a5` | `fix(backend): resolve final hardening validation defects` |
+| `926d31a` | `fix(frontend): resolve final reliability validation defects` |
+| `ae74285` | `fix(ops): resolve final runtime and shutdown defects` |
+| `71db37b` | `chore: checkpoint marketplace hardening work` |
+| `36c318d` | `fix(e2e): resolve critical marketplace flow regressions` |
+| `f96588c` | `fix(ci): provide release migration encryption key` |
+| `7043159` | `chore(security): document secret scan placeholder exception` |
+| `a7553a2` | `chore(devx): install scoped Graphify pilot` |
+| `23f5b28` | `docs(devx): complete local Graphify pilot` |
+| `364547c` | `docs(agents): add scoped Graphify and risk-based verification rules` |
 
-The history from `36ea677` through the current `main` adds:
+The prompt-recorded prior SHA is `7043159`; the verified execution-start HEAD is
+`a7553a2`. The commits after `a7553a2` change documentation and agent instructions
+only, so they do not provide a new local full-suite run on `364547c`.
 
-| Stage | Status at committed snapshot | Evidence |
-| --- | --- | --- |
-| 8 - frontend test foundation | Implemented | `3697ea2` |
-| 9 - frontend reliability | Implemented | `925af5d`, `567c052`, `da934c2`, `49db14e`, `0d9dd52`, `b398e60` |
-| 10 - production runtime and operations | Implemented | `2746d42`, `26b619b`, `81972bb` |
-| 11 - CI gates | Implemented in workflow | `0f1c225` |
-| 12 - isolated Playwright E2E | Implemented | `d3db9a5`, plus `df87afb`, `c68aa21`, `419e095` |
-| 13 - multilingual typo-tolerant search | Implemented | `958e9d0`, `7fb46eb` |
+## Historical evidence
 
-Cross-stage hardening on this branch also covers session epoch enforcement, order DTO
-mapping, payment capture/webhook recovery, durable storage operation states, exact money
-cents, bounded list pagination, trace propagation, and centralized lifecycle writes.
-Commit `dab02a8` additionally commits the shared Product, Order, Message, Dispute, and
-Seller contracts, backend DTO mappers, the synchronized frontend mirror, and their
-contract tests. Those changes are implementation evidence; Phase B validation remains
-required before they are recorded as verified.
-
-## Historical verification baseline
-
-Before the later Stage 8-13 implementation, the recorded baseline at `36ea677` had:
+Before the later hardening work, the recorded baseline at `36ea677` was:
 
 | Command | Recorded result |
 | --- | --- |
@@ -69,39 +63,95 @@ Before the later Stage 8-13 implementation, the recorded baseline at `36ea677` h
 | Production and development Compose config | PASS |
 | `docker compose build` | PASS |
 
-These results establish the old base only. They must not be quoted as validation of
-`42f3ddc` or the final tree.
+These results are historical evidence for `36ea677` only. They are not current-
+tree, staging, or production-provider evidence.
 
-## Final-tree verification
+## Current-tree evidence
+
+The following commands completed against `a7553a2` on Windows PowerShell with
+Node.js 20.20.2 and isolated Docker PostgreSQL 16/Redis 7 services. Every PASS
+below had exit code 0; durations are wall-clock measurements captured by the
+local wrapper.
+
+| Area | Exact command | Result |
+| --- | --- | --- |
+| Backend | `cd backend; npm run lint` | PASS - exit 0, 23.31s, test count not applicable |
+| Backend | `cd backend; npm run build` | PASS - exit 0, 5.93s, test count not applicable |
+| Backend | `cd backend; npm test` | PASS - exit 0, 55 files / 488 tests, 467.25s |
+| Database | `cd backend; npm run migrate:deploy` against a fresh isolated `marketplace_test` database | PASS - exit 0, 40 SQL migrations, 2.77s |
+| Database | second consecutive `cd backend; npm run migrate:deploy` | PASS - exit 0, 0 SQL migrations pending, 0.71s |
+| Database | `cd backend; npx vitest run test/schema-contract.test.ts` | PASS - exit 0, 7 tests, 12.28s wrapper duration |
+| Frontend | `cd frontend; npm run typecheck` | PASS - exit 0, 24.30s, test count not applicable |
+| Frontend | `cd frontend; npm run i18n:check` | PASS - exit 0, 0 errors / 25 baseline warnings, 1.45s |
+| Frontend | `cd frontend; npm test` | PASS - exit 0, 14 files / 62 tests, 54.45s wrapper duration |
+| Frontend | `cd frontend; npm run build` | PASS - exit 0 on the completed rerun, 55.17s; the earlier wrapper attempt timed out and was not counted as PASS |
+
+Because `23f5b28` and `364547c` are documentation/instruction-only changes, this
+is relevant implementation evidence for the application code that remains in
+the current tree. It is not an exact local full-suite rerun at `364547c`; that
+rerun remains unrecorded.
+
+The current local Graphify snapshot covers 535 files and contains 3,176 nodes,
+8,571 edges, 13 hyperedges, and 179 named communities. Graph health reports 0
+warnings. Generated Graphify outputs are ignored by Git and remain local
+navigation evidence, not application-correctness or production-readiness proof.
+
+## CI evidence
+
+| Commit | GitHub Actions run | Required jobs | Result |
+| --- | --- | --- | --- |
+| `23f5b28` | [30697353208](https://github.com/spacour1/skrynia-2.0/actions/runs/30697353208) | 9/9 | PASS |
+| `364547c` | [30697861790](https://github.com/spacour1/skrynia-2.0/actions/runs/30697861790) | 9/9 | PASS |
+
+These green runs are CI evidence for their exact SHAs. They do not replace
+staging, rollback, production-sized search, or real-provider validation.
+
+## Staging evidence
 
 | Check | Status |
 | --- | --- |
-| Backend lint/build/full tests | **NOT RUN - final tree** |
-| Clean/repeat migrations and schema contracts | **NOT RUN - final tree** |
-| Frontend typecheck/i18n/tests/build | **NOT RUN - final tree** |
-| Production/dev/E2E Compose config | **NOT RUN - final tree** |
-| Production Docker builds | **NOT RUN - final tree** |
-| Isolated Playwright suite | **NOT RUN - final tree** |
-| Audit-policy checks and npm audits | **NOT RUN - final tree** |
-| Full-history secret scan | **NOT RUN - final tree** |
+| Production-like staging rollout, restart, and failure-path exercise | **NOT RUN** |
+| Rollback and recovery rehearsal | **NOT RUN** |
+| Production-target `pg_trgm`/`unaccent` permission verification | **NOT RUN** |
+| Final multilingual search benchmark on a production-sized data clone | **NOT RUN** |
 
-Populate exact commands, statuses, durations, and test counts in
-[`final-hardening-report.md`](final-hardening-report.md).
+No staging result is promoted to PASS in this capture.
 
-## Current blockers and limits
+## Production-provider evidence
 
-- The API-contract closeout is committed in `dab02a8`, but its DTO boundaries and
-  synchronization tests still require the Phase B review and final-tree rerun before it
-  can be marked verified.
-- CI jobs exist but no green final workflow run is recorded here.
-- Production `pg_trgm`/`unaccent` permissions and production-sized search rollout
-  behavior are unverified.
-- Time-limited high-advisory exceptions remain in
-  `docs/security/npm-audit-debt.md`; they expire on 2026-08-21.
-- Real payment, email, SMS, Telegram, and S3 integrations are not validated by the
-  automated suite.
-- Upload malware scanning, read replicas, and production capacity validation remain
-  outside this hardening branch.
+| Provider boundary | Status |
+| --- | --- |
+| Real payment provider | **NOT RUN** |
+| Real email provider | **NOT RUN** |
+| Real SMS provider | **NOT RUN** |
+| Real Telegram integration | **NOT RUN** |
+| Real S3/object-storage provider | **NOT RUN** |
 
-Do not describe the application as production-ready until the final report has no
-unexplained `NOT RUN`, `FAIL`, or `BLOCKED` release gate.
+Mocks, local services, and green CI jobs do not constitute real-provider
+evidence.
+
+## Current blockers and remaining work
+
+Production readiness remains blocked by the uncompleted or unverified parts of
+the closeout plan, notably:
+
+- no exact local full-suite rerun is recorded for the `364547c` baseline input;
+- staging deployment, failure recovery, rollback, and final search benchmarking
+  remain `NOT RUN`;
+- real payment, email, SMS, Telegram, and object-storage paths remain `NOT RUN`;
+- audit-log draining and shutdown guarantees still require closeout work and
+  verification;
+- transaction boundaries, Redis/external calls, and cache-consistency paths
+  still require hardening and validation;
+- cross-tab refresh fallback and offline logout behavior remain to be closed;
+- side-effecting GET flows still require durable command/intent semantics;
+- provider verification/persistence separation and immutable payment reference,
+  amount, and currency checks remain to be completed;
+- TOTP and secret-handling hardening remains open;
+- time-limited npm audit exceptions in `docs/security/npm-audit-debt.md` expire
+  on 2026-08-21;
+- production capacity and operational failure testing remain outstanding.
+
+The repository must not be described as production-ready until the remaining
+release gates have evidence and no unexplained `NOT RUN`, `FAIL`, or `BLOCKED`
+result remains.

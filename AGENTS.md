@@ -1,96 +1,104 @@
 # SKRYNIA 2.0 — Agent Rules
 
-## What this repo is
+## Scope
 
-P2P digital marketplace with escrow. Buyers pay, funds are held in escrow, sellers fulfill, funds release on buyer confirmation or after a 72-hour timeout. Disputes go to admin/moderator review. Stack: Node.js/Express + TypeScript (ESM) backend, Next.js 14 App Router frontend, PostgreSQL, Redis/BullMQ.
+These rules apply repository-wide. A nested `AGENTS.md` adds or narrows rules for
+its directory tree; follow both, with the nearest file taking precedence.
 
-## Fast context rules
+KeepGame is a P2P digital marketplace with escrow. The stack is Node.js/Express
+with TypeScript (ESM), Next.js 14 App Router, PostgreSQL, Redis, and BullMQ.
 
-- Start with `docs/agent-map.md` for the repository map and domain entrypoints.
-- Do not scan generated/dependency folders unless explicitly needed: `node_modules`, `.next`, `dist`, `uploads`, coverage output.
-- Do not read `package-lock.json` files unless dependency resolution is the task.
-- Read migrations only when touching DB schema, data shape, or ledger/order invariants.
-- Prefer targeted `rg` searches and the domain key files below over broad file-by-file reading.
+Start with `docs/agent-map.md`. Do not scan generated or dependency directories
+(`node_modules`, `.next`, `dist`, `uploads`, coverage) unless the task requires it.
+Do not read lockfiles unless dependency resolution is in scope.
 
-## Hard constraints — never violate
+## Global invariants
 
-- **No floating-point money.** Persisted amounts are integer cents, and API money fields
-  such as `amountCents` are decimal strings so values above JavaScript's safe-integer
-  range remain exact. Convert to `bigint` for arithmetic; never use floats.
-- **Ledger is append-only.** The DB has a trigger that blocks UPDATE/DELETE on `ledger_entries` and `ledger_lines`. Corrections go through a new entry, never by rewriting history.
-- **Every money mutation books a ledger entry** inside the same DB transaction. See `accounting.service.ts`.
-- **Payment callbacks must stay idempotent.** They rely on `on conflict (idempotency_key) do nothing`. Do not remove this pattern.
-- **Do not change the order status machine** (`pending → paid → in_progress → delivered → completed`, plus `disputed/refunded/canceled`; see `docs/domain-invariants.md`) without adding tests that cover the transition.
-- **Never expose secrets** in logs, responses, or error messages: JWT_SECRET, payment provider keys, webhook secrets, DATABASE_URL, admin credentials.
-- **Never connect to the production database** from a development or AI tool context.
-- **All schema changes require a migration file** (numeric timestamp prefix, SQL, with rollback note).
-- **Changes go through PR**, not direct push to `main`.
+- Persist money as integer cents. Public money fields that may exceed JavaScript's
+  safe range are decimal strings; use `bigint`, never floating-point arithmetic.
+- The ledger is append-only and balanced per entry. Every wallet or escrow mutation
+  and its ledger entry belong to the same database transaction.
+- Change order status only through the canonical transition boundary. Any state
+  machine change requires enum, matrix, schema, integration, and documentation checks.
+- Payment callbacks remain idempotent. Preserve conflict-safe idempotency behavior.
+- Keep provider/network calls out of financial database transactions. Cache,
+  realtime, notification, and queue side effects happen only after commit.
+- Every schema change requires a timestamped migration with a rollback note.
 
-## Required checks
+## Safety boundaries
 
-```bash
-# Backend — must pass before committing
-cd backend && npm run lint    # tsc --noEmit
-cd backend && npm test        # vitest run (when tests exist for changed code)
+- Never connect tools or tests to production databases, run production migrations,
+  use production data, or execute destructive SQL against an unknown database.
+- Never call real payment providers or use real provider credentials, charges, or
+  refunds. Automated tests use only the explicitly gated test-payment flow; mocks
+  are not evidence that a real provider works.
+- Never expose secrets in output, diffs, commits, logs, Sentry, snapshots,
+  documentation, or Graphify output. This includes database URLs, JWT/encryption
+  keys, provider/webhook/Telegram/S3 credentials, tokens, cookies, passwords,
+  backup codes, and TOTP secrets.
 
-# Frontend — must pass before committing
-cd frontend && npm run typecheck   # tsc --noEmit
-cd frontend && npm run build       # catches boundary/static-gen errors
-```
+## Graph-assisted repository navigation
 
-CI runs the same checks on every PR (`.github/workflows/ci.yml`).
+Graphify is a navigation aid, not a correctness oracle. Before broad searches:
 
-## Smoke flow to verify end-to-end
+1. Read `docs/agent-map.md`.
+2. Read every `AGENTS.md` applicable to the target directory.
+3. For cross-domain work, run a scoped Graphify query.
+4. Reduce the result to no more than 10–15 candidate source files.
+5. Verify every material dependency directly in those source files.
 
-1. Buyer creates order → chat conversation created, "order_created" system message appears
-2. Payment hold confirmed by provider webhook → "payment_received" system message
-3. Seller marks started → "seller_started" system message
-4. Seller marks delivered → "delivery_sent" system message
-5. Buyer confirms receipt → escrow releases, platform fee deducted, "escrow_released" system message
-6. Wallet balance of seller increases by `amount - platform_fee`
+Use Graphify for callers/callees, dependency paths, blast radius,
+route-to-service-to-database traces, DTO/contract paths, order/payment/auth flows,
+and PR overlap. Do not require it for copy edits, known leaf components, simple
+documentation fixes, or one known helper with no cross-domain effect.
 
-Verify ledger is balanced: `sum(debit_cents) = sum(credit_cents)` across all `ledger_lines` for any single `ledger_entry`.
+- `EXTRACTED` is navigation evidence and still requires source verification.
+- Inspect every participating file for `INFERRED`; use `AMBIGUOUS` only as a lead.
+- Never load `graphify-out/graph.json` wholesale or treat an edge as proof.
+- Graphify never replaces tests, authorization, ledger, migration, CI, or runtime review.
+- After architectural changes, run `graphify update .`, rerun the relevant query,
+  and report whether the dependency path changed.
 
-## Key files to read before touching each domain
+## Task-specific direct-main workflow
 
-| Domain | Key files |
-|--------|-----------|
-| Orders & escrow | `backend/src/modules/orders/orders.routes.ts`, `accounting.service.ts` |
-| Payments | `backend/src/modules/payments/payments.routes.ts` |
-| Disputes | `backend/src/modules/disputes/disputes.routes.ts` |
-| Wallet | `backend/src/modules/users/wallet.service.ts` |
-| Auth / 2FA | `backend/src/modules/auth/` |
-| Chat | `backend/src/modules/chat/chat.service.ts`, `ws.service.ts` |
-| Admin / Reconciliation | `backend/src/modules/admin/admin.routes.ts` |
-| Jobs | `backend/src/modules/jobs/queue.ts` |
-| Notifications | `backend/src/modules/notifications/`, `backend/src/common/telegram-bot.ts` |
-| DB schema | `backend/migrations/` (all `.sql` files, chronological) |
+For this hardening task, the user's direct-to-`main` workflow explicitly replaces
+the repository's normal PR-only rule:
 
-## Coding conventions
+1. Work on an up-to-date local `main` with a clean, understood worktree.
+2. Run the risk gate below and review the staged diff; commit one logical topic.
+3. Fetch `origin` and compare `origin/main...main` before pushing.
+4. If remote advanced, rebase onto `origin/main` and rerun the complete risk gate.
+5. Only after PASS, run `git push origin main`, verify local/remote SHA equality,
+   and check GitHub Actions for that SHA.
 
-- ESM `.js` extensions required on all backend imports (TypeScript compiles to ESM).
-- Use `inTx(async (client) => { ... })` from `db/pool.ts` for multi-query transactions. Never `pool.query("begin")`.
-- Error helpers: `badRequest()`, `forbidden()`, `notFound()` from `common/errors.ts`. Never `res.status(400).json(...)` directly.
-- Route handlers use `asyncHandler()` wrapper — no manual try/catch needed.
-- Zod for all request body validation at the top of each route file.
-- CSRF exempt paths are in `common/middleware/csrf.ts` — add pre-session endpoints there, not elsewhere.
-- Role checks: `requireRole("admin")` or `requireRole("admin", "moderator")` from `common/middleware/rbac.ts`.
+Never force-push, rewrite published `main`, discard unknown work with
+`git reset --hard`, push an unverified commit, or continue past red CI without a
+documented external blocker.
 
-## Environment
+## Risk-based validation matrix
 
-Local dev runs via Docker Compose (`docker-compose.dev.yml`). Backend on port 4000, frontend on port 3000. See `docs/architecture.md` for full env var reference.
+Choose the smallest sufficient gate; nested rules may require a stronger one.
 
-## Graph-assisted navigation
+| Level | Change | Required validation |
+| --- | --- | --- |
+| D0 | Documentation only | `git diff --check`; verify links, commands, paths, SHAs, and absence of secrets |
+| D1 | Frontend leaf | `cd frontend`; `npm run typecheck`; affected Vitest tests; add `npm run i18n:check` for visible strings/translations |
+| D2 | Frontend route/auth/config/provider | Frontend typecheck, i18n check, full tests, and build; auth/session/navigation also requires safe targeted or full E2E |
+| D3 | Backend low-risk | `cd backend`; lint, affected Vitest tests, and build |
+| D4 | Backend high-risk | Backend lint, build, and full tests |
+| D5 | Release | Clean installs and all backend/frontend checks, Compose validation/build, E2E, dependency-audit policy, and full history secret scan |
 
-- Start with `docs/agent-map.md`.
-- Use Graphify only for cross-domain dependencies, call paths, architecture questions,
-  and blast-radius analysis.
-- Do not use Graphify for isolated leaf changes when direct source navigation is sufficient.
-- Prefer a scoped `graphify query`, `path`, or `explain` operation over reading full graph reports.
-- Never load `graphify-out/graph.json` wholesale.
-- `EXTRACTED` edges are navigation evidence, not proof of runtime behavior.
-- `INFERRED` and `AMBIGUOUS` edges must be verified in source.
-- Open and verify every source file before editing it.
-- Run `graphify update .` only when relevant source structure changed.
-- Graphify does not replace tests, migrations, CI, runtime tracing, authorization review,
-  or financial invariant checks.
+D4 includes auth, sessions, 2FA, payments, orders, escrow, wallet, ledger,
+disputes, storage ownership, outbox, WebSocket, shutdown, migrations, shared
+contracts, and money. Migration changes additionally require two consecutive
+`npm run migrate:deploy` runs against an isolated non-production database and
+`npx vitest run test/schema-contract.test.ts`.
+
+## Truthful evidence
+
+- Write `PASS` only for a command that actually completed with exit code `0`.
+- Use only `PASS`, `FAIL`, `BLOCKED`, or `NOT RUN` and record command, exit code,
+  test count, duration when available, SHA, and environment.
+- A workflow file is not green CI; a local build is not GitHub Actions; a unit
+  test is not production behavior; a mock is not real-provider evidence; and a
+  Graphify edge is not correctness proof.

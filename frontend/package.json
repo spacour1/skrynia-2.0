@@ -42,7 +42,7 @@
   },
   "overrides": {
     "@sentry/nextjs": {
-      "brace-expansion": "2.1.2"
+      "brace-expansion": "2.1.4"
     },
     "postcss": "8.5.22"
   }

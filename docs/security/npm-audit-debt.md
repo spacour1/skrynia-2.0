@@ -27,6 +27,27 @@ The npm totals count vulnerable package nodes, not unique advisories. In particu
 listed below. The policy resolves npm's string-valued `via` chains and permits only concrete
 GHSA records.
 
+## Resolved registry drift on 2026-08-10
+
+The unchanged lockfiles at `d47985a` began failing the audit gate in GitHub Actions run
+[`31338684075`](https://github.com/spacour1/skrynia-2.0/actions/runs/31338684075) when the
+registry published additional high advisories. They were fixed with compatible patch releases
+instead of adding exceptions:
+
+- backend `brace-expansion` was updated from 5.0.8 to 5.0.9, resolving
+  `GHSA-rgw5-rvv9-x895`;
+- frontend `brace-expansion` was updated from 2.1.2 to 2.1.4, resolving both
+  `GHSA-mh99-v99m-4gvg` and `GHSA-rgw5-rvv9-x895`;
+- frontend `fast-uri` was updated from 3.1.3 to 3.1.5, resolving both
+  `GHSA-v2hh-gcrm-f6hx` and `GHSA-7p8r-x3mc-p8w7`;
+- frontend `nanoid` was updated from 3.3.16 to 3.3.18, resolving
+  `GHSA-2v37-7h3g-55p8`.
+
+The obsolete `brace-expansion` and `fast-uri` frontend exceptions were removed in the same
+change. The exact policy now passes with backend counts `1 low / 19 moderate / 1 high` and
+frontend counts `0 low / 23 moderate / 3 high`; the remaining entries below are still active
+debt and retain their original expiry.
+
 ## Backend exceptions
 
 <a id="backend-ghsa-f88m-g3jw-g9cj"></a>
@@ -43,37 +64,10 @@ GHSA records.
 
 ## Frontend exceptions
 
-The Sentry-related exceptions below require a coordinated Sentry/toolchain update. The Next
-exceptions require a supported Next.js upgrade and complete typecheck, unit, production-build,
-and E2E verification; they must not be silently renewed because they affect the public web
-runtime.
-
-<a id="frontend-ghsa-mh99-v99m-4gvg"></a>
-
-### Frontend GHSA-mh99-v99m-4gvg
-
-- Affected path: `@sentry/nextjs@8.55.2 -> @sentry/webpack-plugin -> glob -> minimatch -> brace-expansion@2.1.2`.
-- Risk: an attacker-controlled brace pattern could exhaust the build process heap. The
-  application does not expose glob compilation to web requests, but the vulnerable package
-  remains in the production dependency graph used by the Sentry build plugin.
-- Remediation owner: frontend/observability maintainers.
-- Plan: update the Sentry/glob toolchain to a release compatible with patched
-  `brace-expansion@5.0.8`; forcing that major beneath the current minimatch version would be
-  an unsafe CommonJS/API change. Then run the full frontend checks and production Docker
-  build.
-- Maximum allowed severity: high.
-- Expiry: 2026-08-21.
-
-<a id="frontend-ghsa-v2hh-gcrm-f6hx"></a>
-
-### Frontend GHSA-v2hh-gcrm-f6hx
-
-- Affected path: `@sentry/nextjs@8.55.2 -> webpack -> schema-utils -> ajv -> fast-uri@3.1.3`.
-- Remediation owner: frontend/observability maintainers.
-- Plan: move the Sentry/Webpack dependency graph to a patched `fast-uri` and rerun the
-  frontend build plus Docker build.
-- Maximum allowed severity: high.
-- Expiry: 2026-08-21.
+The remaining Sentry-related exception below requires a coordinated Sentry/toolchain update.
+The Next exceptions require a supported Next.js upgrade and complete typecheck, unit,
+production-build, and E2E verification; they must not be silently renewed because they affect
+the public web runtime.
 
 <a id="frontend-ghsa-h25m-26qc-wcjf"></a>
 

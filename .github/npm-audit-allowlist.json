@@ -12,20 +12,6 @@
     ],
     "frontend": [
       {
-        "advisory": "GHSA-mh99-v99m-4gvg",
-        "package": "brace-expansion",
-        "maxSeverity": "high",
-        "expires": "2026-08-21",
-        "reference": "docs/security/npm-audit-debt.md#frontend-ghsa-mh99-v99m-4gvg"
-      },
-      {
-        "advisory": "GHSA-v2hh-gcrm-f6hx",
-        "package": "fast-uri",
-        "maxSeverity": "high",
-        "expires": "2026-08-21",
-        "reference": "docs/security/npm-audit-debt.md#frontend-ghsa-v2hh-gcrm-f6hx"
-      },
-      {
         "advisory": "GHSA-h25m-26qc-wcjf",
         "package": "next",
         "maxSeverity": "high",

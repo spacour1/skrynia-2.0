@@ -5,6 +5,7 @@ import {
   selectOrderForUpdate,
   transitionOrder
 } from "../orders/order-transition.service.js";
+import { invalidateOrderParticipantReadCaches } from "../orders/order-cache.service.js";
 
 async function loadOwnOrder(orderId: string, buyerId: string) {
   const result = await pool.query(`select * from orders where id = $1`, [orderId]);
@@ -39,6 +40,11 @@ export async function simulateTestPaymentFailure(orderId: string, buyerId: strin
       reason: "test_payment_failed",
       expectedFrom: ["pending"]
     });
+  });
+  await invalidateOrderParticipantReadCaches({
+    orderId: updated.id,
+    buyerId: updated.buyer_id,
+    sellerId: updated.seller_id
   });
   return updated;
 }

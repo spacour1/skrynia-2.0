@@ -4,6 +4,7 @@ import { inTx, pool } from "../../db/pool.js";
 import { conflict, notFound } from "../../common/errors.js";
 import { logger } from "../../common/logger.js";
 import { refundEscrow, releaseEscrow } from "../orders/ledger.service.js";
+import { invalidateOrderParticipantReadCaches } from "../orders/order-cache.service.js";
 import { recordOrderEvent } from "../orders/order-events.service.js";
 import { createOrderSystemMessage } from "../chat/system-messages.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
@@ -216,7 +217,7 @@ async function finalizeIfApplied(
   decision: DisputeResolutionDecision,
   operationId: string
 ): Promise<{ row: ResolutionRow; newlyResolved: boolean } | null> {
-  return inTx(async (client) => {
+  const finalized = await inTx(async (client) => {
     const row = await selectResolutionForUpdate(client, disputeId);
     assertDecisionMatches(row.resolution_decision, decision);
     assertOperationMatches(row.resolution_operation_id, operationId);
@@ -290,6 +291,18 @@ async function finalizeIfApplied(
     });
     return { row: resolved, newlyResolved: true };
   });
+
+  // The escrow operation commits before this final transaction adds resolution
+  // timeline/messages. Evict order reads again after finalization so neither commit can
+  // leave a participant-facing detail cache with an incomplete terminal timeline.
+  if (finalized?.newlyResolved) {
+    await invalidateOrderParticipantReadCaches({
+      orderId: finalized.row.order_id,
+      buyerId: finalized.row.buyer_id,
+      sellerId: finalized.row.seller_id
+    });
+  }
+  return finalized;
 }
 
 async function markResolutionFailed(

@@ -2,7 +2,6 @@ import { env } from "../../config/env.js";
 import type { DbClient } from "../../db/pool.js";
 import { inSerializableTx } from "../../db/pool.js";
 import { badRequest, forbidden } from "../../common/errors.js";
-import { cacheDel, cacheDelPattern } from "../../common/redis.js";
 import { getPaymentProvider, type PaymentProviderName } from "../payments/payment.providers.js";
 import {
   recordEscrowReleaseLedger,
@@ -30,6 +29,7 @@ import {
   type OrderRow,
   type OrderTransitionActor
 } from "./order-transition.service.js";
+import { invalidateOrderParticipantReadCaches } from "./order-cache.service.js";
 
 type ProductEscrowRow = ProductCacheContext & {
   stock: number;
@@ -231,15 +231,15 @@ export async function lockEscrow(
       }
     });
 
-    await cacheDel(
-      `user:${order.buyer_id}:wallet`,
-      `user:${order.seller_id}:wallet`
-    );
-    await cacheDelPattern(`order:${order.id}:*`);
-    await cacheDelPattern(`orders:${order.buyer_id}:*`);
-    await cacheDelPattern(`orders:${order.seller_id}:*`);
     return { order: updated, productContext: product as ProductCacheContext };
   }, { maxAttempts: 1 });
+  await invalidateOrderParticipantReadCaches({
+    orderId: result.order.id,
+    buyerId: result.order.buyer_id,
+    sellerId: result.order.seller_id,
+    invalidateBuyerWallet: true,
+    invalidateSellerWallet: true
+  });
   await invalidateProductCaches(result.productContext);
   return result.order;
 }
@@ -419,23 +419,20 @@ export async function releaseEscrow(
     return updated;
   });
 
-  // inSerializableTx has committed before it resolves. Evict every participant-facing
-  // order and wallet view now so an immediate refetch cannot observe pre-release state.
-  await Promise.all([
-    cacheDel(
-      `user:${updated.buyer_id}:wallet`,
-      `user:${updated.seller_id}:wallet`
-    ),
-    cacheDelPattern(`order:${updated.id}:*`),
-    cacheDelPattern(`orders:${updated.buyer_id}:*`),
-    cacheDelPattern(`orders:${updated.seller_id}:*`)
-  ]);
+  // Only the seller's wallet DTO changes on release. The buyer's wallet balance and
+  // transaction history stay unchanged and should remain cacheable.
+  await invalidateOrderParticipantReadCaches({
+    orderId: updated.id,
+    buyerId: updated.buyer_id,
+    sellerId: updated.seller_id,
+    invalidateSellerWallet: true
+  });
 
   return updated;
 }
 
 export async function refundEscrow(orderId: string, adminId?: string) {
-  return inSerializableTx(async (client) => {
+  const updated = await inSerializableTx(async (client) => {
     const order = await selectOrderForUpdate(client, orderId);
     if (!canTransitionOrder(order.status, "refunded")) {
       throw badRequest("Only escrowed orders can be refunded");
@@ -513,13 +510,14 @@ export async function refundEscrow(orderId: string, adminId?: string) {
       adminId: adminId ?? null
     });
 
-    await cacheDel(
-      `user:${order.buyer_id}:wallet`,
-      `user:${order.seller_id}:wallet`
-    );
-    await cacheDelPattern(`order:${order.id}:*`);
-    await cacheDelPattern(`orders:${order.buyer_id}:*`);
-    await cacheDelPattern(`orders:${order.seller_id}:*`);
     return updated;
   });
+  await invalidateOrderParticipantReadCaches({
+    orderId: updated.id,
+    buyerId: updated.buyer_id,
+    sellerId: updated.seller_id,
+    invalidateBuyerWallet: true,
+    invalidateSellerWallet: true
+  });
+  return updated;
 }

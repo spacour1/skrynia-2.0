@@ -1,8 +1,4 @@
 import { z } from "zod";
-import {
-  cacheDelPatternStrict,
-  cacheDelStrict
-} from "../../common/redis.js";
 import { pool } from "../../db/pool.js";
 import { publishSessionSecurityEvent } from "../auth/session-events.service.js";
 import { revokeAllUserSessions } from "../auth/session.service.js";
@@ -21,6 +17,10 @@ import {
   createNotification,
   type NotificationInput
 } from "../notifications/notifications.service.js";
+import {
+  invalidateOrderParticipantReadCaches,
+  type OrderParticipantReadCacheInvalidation
+} from "../orders/order-cache.service.js";
 import { deleteStorageObject } from "../storage/storage.service.js";
 import type { DomainOutboxEvent } from "./outbox.service.js";
 
@@ -129,23 +129,10 @@ async function createAdminNotifications(
   );
 }
 
-async function invalidateOrderCaches(input: {
-  orderId: string;
-  buyerId: string;
-  sellerId: string;
-  wallet?: boolean;
-}) {
-  if (input.wallet) {
-    await cacheDelStrict(
-      `user:${input.buyerId}:wallet`,
-      `user:${input.sellerId}:wallet`
-    );
-  }
-  await Promise.all([
-    cacheDelPatternStrict(`order:${input.orderId}:*`),
-    cacheDelPatternStrict(`orders:${input.buyerId}:*`),
-    cacheDelPatternStrict(`orders:${input.sellerId}:*`)
-  ]);
+async function invalidateOrderCaches(
+  input: OrderParticipantReadCacheInvalidation
+) {
+  await invalidateOrderParticipantReadCaches(input, { mode: "strict" });
 }
 
 async function loadMessage(messageId: string) {
@@ -213,7 +200,11 @@ async function handleOrderPaid(event: DomainOutboxEvent) {
       productId: payload.productId
     })
   ]);
-  await invalidateOrderCaches({ ...payload, wallet: true });
+  await invalidateOrderCaches({
+    ...payload,
+    invalidateBuyerWallet: true,
+    invalidateSellerWallet: true
+  });
   const product = await pool.query<ProductCacheContext>(
     `select id as "productId", seller_id as "sellerId", category_id as "categoryId",
             game_id as "gameId", section_id as "sectionId"
@@ -339,7 +330,10 @@ async function handleOrderCompleted(event: DomainOutboxEvent) {
     );
   }
 
-  await invalidateOrderCaches({ ...payload, wallet: true });
+  await invalidateOrderCaches({
+    ...payload,
+    invalidateSellerWallet: true
+  });
   const product = await pool.query<ProductCacheContext>(
     `select id as "productId", seller_id as "sellerId", category_id as "categoryId",
             game_id as "gameId", section_id as "sectionId"
@@ -356,7 +350,11 @@ async function handleOrderRefunded(event: DomainOutboxEvent) {
   const payload = orderTransitionPayload.parse(event.payload);
   // Dispute resolution owns participant notifications. This transition intent owns
   // the status/wallet cache boundary and remains useful for non-dispute refunds too.
-  await invalidateOrderCaches({ ...payload, wallet: true });
+  await invalidateOrderCaches({
+    ...payload,
+    invalidateBuyerWallet: true,
+    invalidateSellerWallet: true
+  });
   await broadcastStoredMessages(payload.systemMessageIds);
 }
 
@@ -426,7 +424,11 @@ async function handleDisputeResolved(event: DomainOutboxEvent) {
       })
     )
   );
-  await invalidateOrderCaches({ ...payload, wallet: true });
+  await invalidateOrderCaches({
+    ...payload,
+    invalidateBuyerWallet: payload.decision === "refund",
+    invalidateSellerWallet: true
+  });
   await Promise.all([
     notifyOrderEvent(
       payload.buyerId,

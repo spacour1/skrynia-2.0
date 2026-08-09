@@ -33,7 +33,7 @@ import {
   type DisputeStaffSummaryRow
 } from "./dispute.dto.js";
 import { mapAdminOrderMutationDto } from "../orders/orders.dto.js";
-import { cacheDelPattern } from "../../common/redis.js";
+import { invalidateOrderParticipantReadCaches } from "../orders/order-cache.service.js";
 
 const router = Router();
 
@@ -212,11 +212,11 @@ router.post(
     // The order detail includes both status and its event timeline. Opening a dispute
     // changes both inside the transaction above, so every participant/admin detail and
     // list variant must miss its previous 15-second cache immediately.
-    await Promise.all([
-      cacheDelPattern(`order:${orderId}:*`),
-      cacheDelPattern(`orders:${buyerId}:*`),
-      cacheDelPattern(`orders:${sellerId}:*`)
-    ]);
+    await invalidateOrderParticipantReadCaches({
+      orderId,
+      buyerId,
+      sellerId
+    });
 
     res.status(201).json({ dispute: mapDisputeParticipantDto(dispute) });
   })

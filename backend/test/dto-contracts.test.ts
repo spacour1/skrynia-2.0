@@ -210,6 +210,8 @@ describe("public order mutation DTOs", () => {
     ]) {
       expect(await cacheGet(cacheKey), `expected ${cacheKey} to be warm`).not.toBeNull();
     }
+    const buyerWalletCacheBefore = await cacheGet(buyerWalletKey);
+    expect(buyerWalletCacheBefore).not.toBeNull();
 
     const response = await buyer.post(`/orders/${orderId}/confirm`).send({});
     expect(response.status).toBe(200);
@@ -231,16 +233,23 @@ describe("public order mutation DTOs", () => {
       sellerDetailKey,
       buyerListKey,
       sellerListKey,
-      buyerWalletKey,
       sellerWalletKey
     ]) {
       expect(await cacheGet(cacheKey), `expected ${cacheKey} to be invalidated`).toBeNull();
     }
+    expect(await cacheGet(buyerWalletKey), "buyer wallet cache should be preserved").toEqual(
+      buyerWalletCacheBefore
+    );
 
     expect((await buyer.get(`/orders/${orderId}`)).body.order.status).toBe("completed");
     expect((await seller.get(`/orders/${orderId}`)).body.order.status).toBe("completed");
     expect((await buyer.get("/orders?role=buyer")).body.orders[0].status).toBe("completed");
     expect((await seller.get("/orders?role=seller")).body.orders[0].status).toBe("completed");
+
+    const buyerWalletAfter = await buyer.get("/users/me/wallet");
+    expect(buyerWalletAfter.status).toBe(200);
+    expect(buyerWalletAfter.body).toEqual(buyerWalletBefore.body);
+    expect(await cacheGet(buyerWalletKey)).toEqual(buyerWalletCacheBefore);
 
     const sellerWalletAfter = await seller.get("/users/me/wallet");
     expect(sellerWalletAfter.status).toBe(200);

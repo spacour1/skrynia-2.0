@@ -10,9 +10,10 @@ import {
 } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
-import { cacheDelPattern, cacheGet, cacheSet } from "../../common/redis.js";
+import { cacheGet, cacheSet } from "../../common/redis.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { releaseEscrow } from "./ledger.service.js";
+import { invalidateOrderParticipantReadCaches } from "./order-cache.service.js";
 import { recordOrderEvent } from "./order-events.service.js";
 import { canTransitionOrder } from "./order-transitions.js";
 import {
@@ -61,18 +62,6 @@ const reviewSchema = z.object({
 
 function canSeeOrder(order: { buyerId: string; sellerId: string }, user: AuthedRequest["user"]) {
   return user.role === "admin" || order.buyerId === user.id || order.sellerId === user.id;
-}
-
-async function invalidateOrderReadCaches(order: {
-  id: string;
-  buyer_id: string;
-  seller_id: string;
-}) {
-  await Promise.all([
-    cacheDelPattern(`order:${order.id}:*`),
-    cacheDelPattern(`orders:${order.buyer_id}:*`),
-    cacheDelPattern(`orders:${order.seller_id}:*`)
-  ]);
 }
 
 router.post(
@@ -192,6 +181,13 @@ router.post(
       }
     });
 
+    if (!result.replayed) {
+      await invalidateOrderParticipantReadCaches({
+        orderId: result.body.order.id,
+        buyerId: result.body.order.buyerId,
+        sellerId: result.body.order.sellerId
+      });
+    }
     if (result.replayed) res.setHeader("Idempotency-Replayed", "true");
     res.status(result.statusCode).json(result.body);
   })
@@ -344,7 +340,11 @@ router.post(
     });
     // The transaction is committed when inTx resolves. Evict read caches before the
     // successful response so an immediate detail/list refetch cannot observe `paid`.
-    await invalidateOrderReadCaches(order);
+    await invalidateOrderParticipantReadCaches({
+      orderId: order.id,
+      buyerId: order.buyer_id,
+      sellerId: order.seller_id
+    });
     res.json({ order: mapOrderMutationDto(order) });
   })
 );
@@ -387,7 +387,11 @@ router.post(
         metadata: { systemMessageIds: message ? [message.id] : [] }
       });
     });
-    await invalidateOrderReadCaches(order);
+    await invalidateOrderParticipantReadCaches({
+      orderId: order.id,
+      buyerId: order.buyer_id,
+      sellerId: order.seller_id
+    });
     res.json({ order: mapOrderMutationDto(order) });
   })
 );

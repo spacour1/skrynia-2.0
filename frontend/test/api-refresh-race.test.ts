@@ -78,8 +78,13 @@ function setCsrfCookie() {
   document.cookie = "csrf_token=test-csrf; path=/";
 }
 
+function coordinationEpochNow() {
+  const timestamp = performance.timeOrigin + performance.now();
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now();
+}
+
 function activeForeignLease(overrides: Partial<RefreshLease> = {}): RefreshLease {
-  const now = Date.now();
+  const now = coordinationEpochNow();
   return {
     ownerId: "foreign-tab",
     acquiredAt: now,
@@ -344,7 +349,7 @@ describe("cross-tab refresh coordination", () => {
 
   it("ignores a stale foreign claim and releases only its own generation", async () => {
     disableWebLocks();
-    const now = Date.now();
+    const now = coordinationEpochNow();
     const staleLease = activeForeignLease({
       acquiredAt: now - 20_000,
       expiresAt: now - 1_000,
@@ -377,7 +382,7 @@ describe("cross-tab refresh coordination", () => {
     });
     expect(heldLease?.ownerId).not.toBe("foreign-tab");
     expect(heldLease?.generation).not.toBe("stale-generation");
-    expect(heldLease?.expiresAt).toBeGreaterThan(Date.now());
+    expect(heldLease?.expiresAt).toBeGreaterThan(coordinationEpochNow());
 
     responseGate.resolve(jsonResponse({ ok: true }, { headers: { "X-Session-Rotated": "true" } }));
     await expect(request).resolves.toEqual({ ok: true });
@@ -652,7 +657,9 @@ describe("cross-tab refresh coordination", () => {
       toFake: ["Date", "performance", "setTimeout", "clearTimeout"]
     });
     vi.setSystemTime(new Date("2026-08-10T00:00:00.000Z"));
-    const foreignLease = activeForeignLease({ expiresAt: Date.now() + 60_000 });
+    const foreignLease = activeForeignLease({
+      expiresAt: coordinationEpochNow() + 60_000
+    });
     writeForeignLease(foreignLease);
     const fetchMock = vi.fn(async () => jsonResponse({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
@@ -694,7 +701,7 @@ describe("cross-tab refresh coordination", () => {
   it("skips redemption only when another tab refreshes after the original request starts", async () => {
     disableWebLocks();
     setCsrfCookie();
-    window.localStorage.setItem(RECENT_REFRESH_KEY, String(Date.now()));
+    window.localStorage.setItem(RECENT_REFRESH_KEY, String(coordinationEpochNow()));
     window.localStorage.setItem(RECENT_REFRESH_GENERATION_KEY, "baseline-generation");
     const initialResponse = deferred<Response>();
     let resourceCalls = 0;
@@ -719,7 +726,7 @@ describe("cross-tab refresh coordination", () => {
     await vi.waitFor(() => expect(resourceCalls).toBe(1));
     expect(window.localStorage.getItem(RECENT_REFRESH_GENERATION_KEY))
       .toBe("baseline-generation");
-    window.localStorage.setItem(RECENT_REFRESH_KEY, String(Date.now()));
+    window.localStorage.setItem(RECENT_REFRESH_KEY, String(coordinationEpochNow()));
     window.localStorage.setItem(RECENT_REFRESH_GENERATION_KEY, "other-tab-generation");
     initialResponse.resolve(jsonResponse(
       { error: { message: "Expired" } },

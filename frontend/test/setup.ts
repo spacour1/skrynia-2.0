@@ -19,8 +19,22 @@ vi.mock("next/navigation", () => ({
   notFound: vi.fn()
 }));
 
-class TestBroadcastChannel extends EventTarget {
+export class TestBroadcastChannel extends EventTarget {
   static channels = new Map<string, Set<TestBroadcastChannel>>();
+
+  static peerCount(name: string) {
+    return TestBroadcastChannel.channels.get(name)?.size ?? 0;
+  }
+
+  static broadcast(name: string, data: unknown) {
+    for (const peer of TestBroadcastChannel.channels.get(name) ?? []) {
+      peer.dispatchEvent(new MessageEvent("message", { data }));
+    }
+  }
+
+  static reset() {
+    TestBroadcastChannel.channels.clear();
+  }
 
   constructor(readonly name: string) {
     super();
@@ -40,16 +54,18 @@ class TestBroadcastChannel extends EventTarget {
   }
 }
 
-if (!("BroadcastChannel" in globalThis)) {
-  Object.defineProperty(globalThis, "BroadcastChannel", {
-    configurable: true,
-    writable: true,
-    value: TestBroadcastChannel
-  });
-}
+// Always use the deterministic in-memory implementation. Node exposes a native
+// BroadcastChannel in newer releases, but it is asynchronous and can leave handles and
+// listeners alive across module-isolation tests that model multiple browser tabs.
+Object.defineProperty(globalThis, "BroadcastChannel", {
+  configurable: true,
+  writable: true,
+  value: TestBroadcastChannel
+});
 
 afterEach(() => {
   cleanup();
+  TestBroadcastChannel.reset();
   window.localStorage.clear();
   window.sessionStorage.clear();
   navigationMock.push.mockReset();

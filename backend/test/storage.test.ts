@@ -117,6 +117,59 @@ describe("owned processed storage", () => {
     expect(objects.rows[0].count).toBe("0");
   });
 
+  it("rejects invalid bytes, truncated images, and independent dimension limits", async () => {
+    const owner = await authedClient();
+    const invalid = await owner.upload(
+      "avatar",
+      Buffer.from("this is not an image"),
+      "image/png"
+    );
+    expect(invalid.status).toBe(400);
+
+    const valid = await png();
+    const truncated = await owner.upload(
+      "avatar",
+      valid.subarray(0, 24),
+      "image/png"
+    );
+    expect(truncated.status).toBe(400);
+
+    const tooWide = await owner.upload(
+      "avatar",
+      await png(env.STORAGE_MAX_IMAGE_WIDTH + 1, 1)
+    );
+    expect(tooWide.status).toBe(400);
+
+    const tooTall = await owner.upload(
+      "avatar",
+      await png(1, env.STORAGE_MAX_IMAGE_HEIGHT + 1)
+    );
+    expect(tooTall.status).toBe(400);
+
+    const objects = await pool.query<{ count: string }>(
+      `select count(*)::text as count from storage_objects where owner_id = $1`,
+      [owner.userId]
+    );
+    expect(objects.rows[0].count).toBe("0");
+  });
+
+  it("rejects files over 8 MiB before creating a storage reservation", async () => {
+    const owner = await authedClient();
+    const response = await owner.upload(
+      "avatar",
+      Buffer.alloc(8 * 1024 * 1024 + 1),
+      "image/png"
+    );
+
+    expect(response.status).toBe(413);
+    expect(response.body.error.code).toBe("payload_too_large");
+    const objects = await pool.query<{ count: string }>(
+      `select count(*)::text as count from storage_objects where owner_id = $1`,
+      [owner.userId]
+    );
+    expect(objects.rows[0].count).toBe("0");
+  });
+
   it("auto-rotates, re-encodes, and strips EXIF metadata", async () => {
     const owner = await authedClient();
     const jpeg = await sharp({
@@ -149,6 +202,125 @@ describe("owned processed storage", () => {
     expect(metadata.format).toBe("webp");
     expect(metadata.orientation).toBeUndefined();
     expect(metadata.exif).toBeUndefined();
+  });
+
+  it("accepts WebP input and preserves transparency while re-encoding", async () => {
+    const owner = await authedClient();
+    const source = await sharp({
+      create: {
+        width: 5,
+        height: 4,
+        channels: 4,
+        background: { r: 40, g: 90, b: 160, alpha: 0.25 }
+      }
+    })
+      .webp({ lossless: true })
+      .toBuffer();
+
+    const response = await owner.upload("avatar", source, "image/webp");
+    expect(response.status).toBe(201);
+    expect(response.body.upload).toMatchObject({
+      mimeType: "image/webp",
+      width: 5,
+      height: 4
+    });
+
+    const stored = await pool.query<{ objectKey: string }>(
+      `select object_key as "objectKey" from storage_objects where id = $1`,
+      [response.body.upload.id]
+    );
+    const decoded = await sharp(
+      path.resolve(env.LOCAL_UPLOAD_DIR, ...stored.rows[0].objectKey.split("/"))
+    )
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    expect(decoded.info.channels).toBe(4);
+    expect(
+      Array.from(decoded.data).some(
+        (value, index) => index % decoded.info.channels === 3 && value < 255
+      )
+    ).toBe(true);
+  });
+
+  it("records a durable deletion intent when the physical provider write fails", async () => {
+    const owner = await authedClient();
+    const originalUploadDir = env.LOCAL_UPLOAD_DIR;
+    const blockedUploadDir = path.resolve(
+      originalUploadDir,
+      `provider-write-blocker-${owner.userId}`
+    );
+    await fs.mkdir(path.dirname(blockedUploadDir), { recursive: true });
+    await fs.writeFile(blockedUploadDir, "not a directory");
+    env.LOCAL_UPLOAD_DIR = blockedUploadDir;
+
+    try {
+      const response = await owner.upload("avatar", await png());
+      expect(response.status).toBe(500);
+
+      const stored = await pool.query<{
+        id: string;
+        status: string;
+        eventStatus: string;
+      }>(
+        `select object.id, object.status, event.status as "eventStatus"
+         from storage_objects object
+         join domain_outbox event
+           on event.aggregate_type = 'storage_object'
+          and event.aggregate_id = object.id::text
+          and event.event_type = 'storage.delete'
+         where object.owner_id = $1`,
+        [owner.userId]
+      );
+      expect(stored.rows).toEqual([
+        {
+          id: expect.any(String),
+          status: "deleting",
+          eventStatus: "pending"
+        }
+      ]);
+    } finally {
+      env.LOCAL_UPLOAD_DIR = originalUploadDir;
+      await fs.unlink(blockedUploadDir);
+    }
+  });
+
+  it("does not write a provider object when the initial DB reservation fails", async () => {
+    const owner = await authedClient();
+    const ownerDirectory = path.resolve(
+      env.LOCAL_UPLOAD_DIR,
+      "avatar",
+      owner.userId
+    );
+    await pool.query(`
+      create or replace function test_fail_storage_reservation()
+      returns trigger as $$
+      begin
+        raise exception 'storage reservation failure';
+      end
+      $$ language plpgsql
+    `);
+    await pool.query(`
+      create trigger test_fail_storage_reservation
+      before insert on storage_objects
+      for each row execute function test_fail_storage_reservation()
+    `);
+
+    try {
+      const response = await owner.upload("avatar", await png());
+      expect(response.status).toBe(500);
+      const objects = await pool.query<{ count: string }>(
+        `select count(*)::text as count from storage_objects where owner_id = $1`,
+        [owner.userId]
+      );
+      expect(objects.rows[0].count).toBe("0");
+      await expect(fs.stat(ownerDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await pool.query(
+        `drop trigger if exists test_fail_storage_reservation on storage_objects`
+      );
+      await pool.query(`drop function if exists test_fail_storage_reservation()`);
+    }
   });
 
   it("builds public S3/CDN URLs without using S3_ENDPOINT", () => {

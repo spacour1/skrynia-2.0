@@ -1,15 +1,7 @@
 {
   "schemaVersion": 1,
   "projects": {
-    "backend": [
-      {
-        "advisory": "GHSA-f88m-g3jw-g9cj",
-        "package": "sharp",
-        "maxSeverity": "high",
-        "expires": "2026-08-21",
-        "reference": "docs/security/npm-audit-debt.md#backend-ghsa-f88m-g3jw-g9cj"
-      }
-    ],
+    "backend": [],
     "frontend": [
       {
         "advisory": "GHSA-h25m-26qc-wcjf",

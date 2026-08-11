@@ -44,23 +44,36 @@ instead of adding exceptions:
   `GHSA-2v37-7h3g-55p8`.
 
 The obsolete `brace-expansion` and `fast-uri` frontend exceptions were removed in the same
-change. The exact policy now passes with backend counts `1 low / 19 moderate / 1 high` and
-frontend counts `0 low / 23 moderate / 3 high`; the remaining entries below are still active
-debt and retain their original expiry.
+change. At that point, the exact policy passed with backend counts
+`1 low / 19 moderate / 1 high` and frontend counts `0 low / 23 moderate / 3 high`;
+the then-remaining entries retained their original expiry.
+
+## Resolved Sharp/libvips debt on 2026-08-11
+
+Backend `sharp` was upgraded from `0.34.5` to `0.35.3`, which uses the patched bundled
+libvips `8.18.3`. This is the version explicitly recommended by the maintainer for
+[`GHSA-f88m-g3jw-g9cj`](https://github.com/lovell/sharp/security/advisories/GHSA-f88m-g3jw-g9cj),
+not an upgrade selected only because it was newest. It remains in the nearest fixed
+`0.35.x` line and also includes the ESM type-publication and additional input-bound
+validation fixes from the intervening patch releases.
+
+Sharp `0.35.3` requires Node.js `>=20.9.0`; the verified local and Alpine build runtime is
+Node.js `20.20.2`. The lockfile installs `@img/sharp-* 0.35.3` and bundled
+`@img/sharp-libvips-* 1.3.2`, including the Linux musl packages used by the production
+Docker image. Upload regressions cover JPEG, PNG, WebP, magic bytes, corrupt input,
+dimension and pixel limits, alpha, EXIF/orientation, file size, quotas, bounded processing,
+provider/DB failures, cleanup, and the deletion outbox.
+
+After the upgrade, `npm audit --omit=dev --audit-level=high --json` exits `0` with
+`1 low / 19 moderate / 0 high / 0 critical` findings (20 total package findings). The exact
+Sharp allowlist entry was removed and the audit-policy script must therefore reject any
+regression of this advisory.
 
 ## Backend exceptions
 
-<a id="backend-ghsa-f88m-g3jw-g9cj"></a>
-
-### Backend GHSA-f88m-g3jw-g9cj
-
-- Affected package: direct production dependency `sharp@0.34.5`.
-- Risk: inherited libvips image-processing vulnerabilities affect untrusted uploaded images.
-- Remediation owner: backend/storage maintainers.
-- Plan: upgrade Sharp/libvips to a fixed release in a dedicated change and rerun upload,
-  storage quota, image-dimension, backend build, and full backend tests.
-- Maximum allowed severity: high.
-- Expiry: 2026-08-21.
+There are currently no backend high/critical production-audit exceptions. Moderate
+Sentry/OpenTelemetry findings and the low `body-parser` finding remain visible and are not
+silently treated as resolved.
 
 ## Frontend exceptions
 

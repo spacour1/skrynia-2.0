@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link, { useRouter } from "@/lib/navigation";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -20,9 +20,16 @@ const EXPANDED_GROUPS_STORAGE_KEY = "skrynia:messages:expanded-groups";
 export default function MessagesPage() {
   return (
     <RequireAuth>
-      <MessagesContent />
+      <Suspense fallback={<MessagesLoadingFallback />}>
+        <MessagesContent />
+      </Suspense>
     </RequireAuth>
   );
+}
+
+function MessagesLoadingFallback() {
+  const { t } = useI18n();
+  return <div className="app-card p-6 text-muted">{t("common.loading")}</div>;
 }
 
 function MessagesContent() {

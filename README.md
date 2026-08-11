@@ -7,7 +7,7 @@ moderator review.
 ## Stack
 
 - Backend: Node.js, Express, TypeScript ESM, PostgreSQL, Redis, BullMQ, WebSocket
-- Frontend: Next.js 14 App Router, React Query, Zustand, TailwindCSS
+- Frontend: Next.js 15 App Router, React 19, React Query, Zustand, TailwindCSS
 - Payments: mock/dev provider plus LiqPay, Monobank, WayForPay, and manual bank transfer paths
 - Storage: local uploads in dev, S3-compatible storage in production
 

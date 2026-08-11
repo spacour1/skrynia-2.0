@@ -5,6 +5,29 @@ import {
   registerVerifiedActor
 } from "./helpers.js";
 
+test("standalone Next runtime serves locale metadata and a real 404", async ({ browser }) => {
+  const context = await browser.newContext({ locale: "en-US" });
+  const page = await context.newPage();
+
+  try {
+    const homeResponse = await page.goto("/");
+    expect(homeResponse?.ok()).toBe(true);
+    await expect(page).toHaveURL(/\/en$/);
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    expect(await page.title()).not.toBe("");
+
+    const canonical = await page.locator('link[rel="canonical"]').getAttribute("href");
+    expect(canonical).toBeTruthy();
+    expect(new URL(canonical!, page.url()).pathname).toBe("/en");
+    await expect(page.locator('link[rel="alternate"][hreflang]')).toHaveCount(4);
+
+    const missingResponse = await page.goto("/en/stage9-missing-route");
+    expect(missingResponse?.status()).toBe(404);
+  } finally {
+    await context.close();
+  }
+});
+
 test("temporary failures preserve auth, retry data, and navigation/draft affordances", async ({
   browser
 }) => {

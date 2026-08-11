@@ -1,6 +1,14 @@
 "use client";
 
-import { FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  FormEvent,
+  Suspense,
+  type ReactNode,
+  use,
+  useEffect,
+  useRef,
+  useState
+} from "react";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -60,7 +68,23 @@ type OrderDetailResponse = {
   events: OrderEvent[];
 };
 
-export default function OrderPage({ params }: { params: { id: string } }) {
+type OrderPageParams = Promise<{ id: string }>;
+
+export default function OrderPage({ params }: { params: OrderPageParams }) {
+  return (
+    <Suspense fallback={<OrderPageFallback />}>
+      <OrderPageContent params={params} />
+    </Suspense>
+  );
+}
+
+function OrderPageFallback() {
+  const { t } = useI18n();
+  return <p className="text-muted">{t("orders.loadingOrder")}</p>;
+}
+
+function OrderPageContent({ params: paramsPromise }: { params: OrderPageParams }) {
+  const params = use(paramsPromise);
   const money = useMoney();
   const user = useAuth((state) => state.user);
   const { t, locale } = useI18n();

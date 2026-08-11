@@ -14,10 +14,15 @@ async function loadProduct(id: string) {
   return data?.product ?? null;
 }
 
-export async function generateMetadata({ params }: { params: { id: string; locale: string } }): Promise<Metadata> {
-  const locale = isLocale(params.locale) ? params.locale : defaultLocale;
+export async function generateMetadata({
+  params
+}: {
+  params: Promise<{ id: string; locale: string }>;
+}): Promise<Metadata> {
+  const { id, locale: routeLocale } = await params;
+  const locale = isLocale(routeLocale) ? routeLocale : defaultLocale;
   const t = getT(locale);
-  const product = await loadProduct(params.id);
+  const product = await loadProduct(id);
   if (!product) return { title: t("product.notFound") };
 
   const description = (product.description ?? "").slice(0, 160);
@@ -73,8 +78,13 @@ function buildProductJsonLd(product: Product) {
   };
 }
 
-export default async function ProductPage({ params }: { params: { id: string } }) {
-  const product = await loadProduct(params.id);
+export default async function ProductPage({
+  params
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const product = await loadProduct(id);
 
   return (
     <>
@@ -84,7 +94,7 @@ export default async function ProductPage({ params }: { params: { id: string } }
           dangerouslySetInnerHTML={{ __html: JSON.stringify(buildProductJsonLd(product)) }}
         />
       ) : null}
-      <ProductPageClient id={params.id} />
+      <ProductPageClient id={id} />
     </>
   );
 }

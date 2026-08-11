@@ -17,8 +17,13 @@ function resolveLocale(value: string): Locale {
   return isLocale(value) ? value : defaultLocale;
 }
 
-export function generateMetadata({ params }: { params: { locale: string } }): Metadata {
-  const locale = resolveLocale(params.locale);
+export async function generateMetadata({
+  params
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale: routeLocale } = await params;
+  const locale = resolveLocale(routeLocale);
   const t = getT(locale);
   const title = t("meta.siteTitle");
   const description = t("meta.siteDescription");
@@ -35,8 +40,15 @@ export function generateMetadata({ params }: { params: { locale: string } }): Me
   };
 }
 
-export default function RootLayout({ children, params }: { children: React.ReactNode; params: { locale: string } }) {
-  const locale = resolveLocale(params.locale);
+export default async function RootLayout({
+  children,
+  params
+}: {
+  children: React.ReactNode;
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale: routeLocale } = await params;
+  const locale = resolveLocale(routeLocale);
 
   return (
     <html lang={localeToLang[locale]} className="dark" style={{ colorScheme: "dark" }} suppressHydrationWarning>

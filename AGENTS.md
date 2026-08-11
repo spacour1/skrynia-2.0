@@ -6,7 +6,7 @@ These rules apply repository-wide. A nested `AGENTS.md` adds or narrows rules fo
 its directory tree; follow both, with the nearest file taking precedence.
 
 KeepGame is a P2P digital marketplace with escrow. The stack is Node.js/Express
-with TypeScript (ESM), Next.js 14 App Router, PostgreSQL, Redis, and BullMQ.
+with TypeScript (ESM), Next.js 15 App Router, PostgreSQL, Redis, and BullMQ.
 
 Start with `docs/agent-map.md`. Do not scan generated or dependency directories
 (`node_modules`, `.next`, `dist`, `uploads`, coverage) unless the task requires it.

@@ -2,7 +2,7 @@
 
 import Link from "@/lib/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FormEvent, useState } from "react";
+import { FormEvent, use, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useMoney, type WireMoneyCents } from "@/lib/currency";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -53,7 +53,12 @@ type ParticipantDisputeMessage = {
   createdAt: string;
 };
 
-export default function AdminDisputeDetailPage({ params }: { params: { id: string } }) {
+export default function AdminDisputeDetailPage({
+  params: paramsPromise
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const params = use(paramsPromise);
   return (
     <RequireAuth roles={["admin", "moderator"]}>
       <AdminDisputeDetailContent params={params} />

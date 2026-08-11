@@ -5,7 +5,7 @@
 | Layer | Technology |
 |-------|-----------|
 | Backend | Node.js 20, Express 4, TypeScript 5 (ESM) |
-| Frontend | Next.js 14 App Router, React 18, Tailwind CSS |
+| Frontend | Next.js 15 App Router, React 19, Tailwind CSS |
 | Database | PostgreSQL 16 |
 | Cache / queues | Redis 7, BullMQ 5 |
 | Auth | JWT (access + refresh tokens in httpOnly cookies, CSRF token in readable cookie) |

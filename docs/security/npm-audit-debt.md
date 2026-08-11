@@ -75,107 +75,41 @@ There are currently no backend high/critical production-audit exceptions. Modera
 Sentry/OpenTelemetry findings and the low `body-parser` finding remain visible and are not
 silently treated as resolved.
 
+## Resolved Next.js runtime debt on 2026-08-11
+
+Frontend `next` was upgraded from unsupported `14.2.35` to exact `15.5.23`, the current
+Maintenance LTS backport. The security floor that clears the eight recorded direct Next.js
+advisories was `15.5.21`; `15.5.23` remains in the nearest supported major line and includes
+the subsequent maintenance fixes. See the official
+[`Next.js support policy`](https://nextjs.org/support-policy) and
+[`15.5.23` release](https://github.com/vercel/next.js/releases/tag/v15.5.23).
+
+Because this project uses only the App Router, React and React DOM moved from `18.3.1` to
+`19.2.8`, with matching React 19 types. The migration adopts promised route parameters in
+layouts, pages, and metadata, and adds the required Suspense boundaries around search-param
+consumers. `@sentry/nextjs@8.55.2` remains unchanged and explicitly supports Next 15; its
+separate Rollup/build-tool debt stays recorded below.
+
+Next `15.5.23` declares optional `sharp ^0.34.3`, which would otherwise install vulnerable
+`sharp@0.34.5` and reintroduce `GHSA-f88m-g3jw-g9cj`. The frontend therefore overrides that
+nested optional dependency to patched `sharp@0.35.3`; the clean dependency tree contains no
+second Sharp copy. Standalone build coverage includes static generation, locale middleware,
+fixed-host `/api/:path*` rewrites, auth return paths, password reset, metadata, real 404s,
+the strict `/en` healthcheck, and the production Alpine image.
+
+Immediately before this upgrade, the raw production audit reported
+`0 low / 23 moderate / 3 high / 0 critical` findings (26 package findings). After the
+upgrade it reports `0 low / 24 moderate / 2 high / 0 critical` (26 package findings): all
+eight direct Next.js GHSA records are absent. The remaining two high package nodes are the
+already-recorded Sentry/Rollup chain, while the Next package's remaining moderate aggregate
+is inherited from PostCSS and stays visible for the toolchain stage. The eight exact Next.js
+allowlist entries were removed; the audit-policy gate passes with only the existing Rollup
+exception.
+
 ## Frontend exceptions
 
-The remaining Sentry-related exception below requires a coordinated Sentry/toolchain update.
-The Next exceptions require a supported Next.js upgrade and complete typecheck, unit,
-production-build, and E2E verification; they must not be silently renewed because they affect
-the public web runtime.
-
-<a id="frontend-ghsa-h25m-26qc-wcjf"></a>
-
-### Frontend GHSA-h25m-26qc-wcjf
-
-- Affected package: direct `next@14.2.35` (HTTP request deserialization denial of service).
-- Remediation owner: frontend runtime maintainers.
-- Plan: coordinated supported Next.js upgrade with application-router regression coverage.
-- Maximum allowed severity: high.
-- Expiry: 2026-08-21.
-
-<a id="frontend-ghsa-q4gf-8mx6-v5v3"></a>
-
-### Frontend GHSA-q4gf-8mx6-v5v3
-
-- Affected package: direct `next@14.2.35` (Server Components denial of service).
-- Remediation owner: frontend runtime maintainers.
-- Plan: coordinated supported Next.js upgrade with production-build and request-limit checks.
-- Maximum allowed severity: high.
-- Expiry: 2026-08-21.
-
-<a id="frontend-ghsa-8h8q-6873-q5fj"></a>
-
-### Frontend GHSA-8h8q-6873-q5fj
-
-- Affected package: direct `next@14.2.35` (Server Components denial of service).
-- Remediation owner: frontend runtime maintainers.
-- Plan: coordinated supported Next.js upgrade and route-rendering regression tests.
-- Maximum allowed severity: high.
-- Expiry: 2026-08-21.
-
-<a id="frontend-ghsa-c4j6-fc7j-m34r"></a>
-
-### Frontend GHSA-c4j6-fc7j-m34r
-
-- Affected package: direct `next@14.2.35` (WebSocket-upgrade server-side request forgery).
-- Remediation owner: frontend runtime and security maintainers.
-- Plan: coordinated supported Next.js upgrade, followed by proxy/rewrite and WebSocket smoke
-  checks in the isolated E2E environment.
-- Maximum allowed severity: high.
-- Expiry: 2026-08-21.
-
-<a id="frontend-ghsa-36qx-fr4f-26g5"></a>
-
-### Frontend GHSA-36qx-fr4f-26g5
-
-- Affected package: direct `next@14.2.35` (middleware/proxy authorization bypass advisory).
-- Remediation owner: frontend runtime and security maintainers.
-- Plan: coordinated supported Next.js upgrade and locale/auth middleware regression tests.
-- Maximum allowed severity: high.
-- Expiry: 2026-08-21.
-
-<a id="frontend-ghsa-m99w-x7hq-7vfj"></a>
-
-### Frontend GHSA-m99w-x7hq-7vfj
-
-- Affected package: direct `next@14.2.35` (App Router Server Actions denial of service).
-- Reachability evidence: the current frontend has no `"use server"` directive, so no
-  application-defined Server Action was found; the installed Next.js version is nevertheless
-  in the affected range and this is not treated as proof of non-exploitability.
-- Remediation owner: frontend runtime maintainers.
-- Plan: upgrade to a supported patched Next.js release and add bounded-request regression
-  coverage before removing the exception.
-- Maximum allowed severity: high.
-- Expiry: 2026-08-21.
-
-<a id="frontend-ghsa-89xv-2m56-2m9x"></a>
-
-### Frontend GHSA-89xv-2m56-2m9x
-
-- Affected package: direct `next@14.2.35` (Server Actions server-side request forgery on
-  custom servers).
-- Reachability evidence: the production image uses Next.js standalone output rather than an
-  application custom server, and no `"use server"` directive was found. The affected
-  dependency remains deployed, so the finding stays visible.
-- Remediation owner: frontend runtime and security maintainers.
-- Plan: include this advisory in the supported Next.js upgrade and rerun standalone Docker,
-  proxy, and E2E security checks.
-- Maximum allowed severity: high.
-- Expiry: 2026-08-21.
-
-<a id="frontend-ghsa-p9j2-gv94-2wf4"></a>
-
-### Frontend GHSA-p9j2-gv94-2wf4
-
-- Affected package: direct `next@14.2.35` (server-side request forgery through rewrites with
-  an attacker-controlled destination hostname).
-- Reachability evidence: `next.config.mjs` defines one `/api/:path*` rewrite whose destination
-  hostname comes from the deployment-controlled `NEXT_PUBLIC_API_URL`; request input controls
-  only the path segment. This reduces the known route's exposure but does not patch Next.js.
-- Remediation owner: frontend runtime and security maintainers.
-- Plan: upgrade Next.js, then verify fixed-host rewrite behavior and reject unsafe deployment
-  configuration in production smoke/E2E checks.
-- Maximum allowed severity: high.
-- Expiry: 2026-08-21.
+The remaining Sentry-related exception below requires the coordinated Sentry/toolchain
+upgrade in the next stage. It must not be broadened into a package-wide exception.
 
 <a id="frontend-ghsa-mw96-cpmx-2vgc"></a>
 
@@ -198,4 +132,4 @@ the public web runtime.
    fails on unused entries.
 4. A registry/network/tool failure is a CI failure, not a clean audit.
 5. Moderate findings remain visible in every audit log and should be reduced during the
-   corresponding Sentry/OpenTelemetry and Next.js upgrades.
+   corresponding Sentry/OpenTelemetry and build-tool upgrades.

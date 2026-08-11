@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { use, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@/lib/navigation";
 import { apiFetch, type Product, type User } from "@/lib/api";
@@ -58,7 +58,12 @@ function readSetting(settings: Record<string, unknown> | undefined, ...keys: str
   return "";
 }
 
-export default function SellerPage({ params }: { params: { id: string } }) {
+export default function SellerPage({
+  params: paramsPromise
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const params = use(paramsPromise);
   const { t } = useI18n();
   const router = useRouter();
   const client = useQueryClient();

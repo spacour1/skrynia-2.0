@@ -5,6 +5,7 @@ import { TestBroadcastChannel } from "./setup";
 const AUTH_SYNC_CHANNEL = "auth-session-sync";
 const RECENT_REFRESH_KEY = "auth_last_refresh_at";
 const RECENT_REFRESH_GENERATION_KEY = "auth_last_refresh_generation";
+const SESSION_ESTABLISHED_AT_KEY = "auth_session_established_at";
 const REFRESH_LEASE_KEY_PREFIX = "auth_refresh_lease:";
 
 type RefreshLease = {
@@ -127,6 +128,7 @@ afterEach(() => {
   try {
     window.localStorage.removeItem(RECENT_REFRESH_KEY);
     window.localStorage.removeItem(RECENT_REFRESH_GENERATION_KEY);
+    window.localStorage.removeItem(SESSION_ESTABLISHED_AT_KEY);
     clearRefreshLeaseEntries();
   } catch {
     // A storage-restriction test intentionally replaces these methods with throwers.
@@ -698,6 +700,109 @@ describe("cross-tab refresh coordination", () => {
     expect(refreshLeaseEntries()).toEqual([]);
   });
 
+  it("advances a login generation beyond the shared cross-tab timestamp", async () => {
+    disableWebLocks();
+    const sharedTimestamp = Date.now() + 10;
+    window.localStorage.setItem(SESSION_ESTABLISHED_AT_KEY, String(sharedTimestamp));
+    const fetchMock = vi.fn(async () => jsonResponse(
+      { user: { id: "new-session" } },
+      { headers: { "X-Session-Rotated": "true" } }
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.resetModules();
+    const { apiFetch } = await import("@/lib/api");
+
+    await expect(apiFetch("/auth/login", { method: "POST" }))
+      .resolves.toEqual({ user: { id: "new-session" } });
+
+    expect(Number(window.localStorage.getItem(SESSION_ESTABLISHED_AT_KEY)))
+      .toBeGreaterThan(sharedTimestamp);
+  });
+
+  it("observes a peer login through storage when BroadcastChannel is unavailable", async () => {
+    vi.stubGlobal("BroadcastChannel", undefined);
+    vi.resetModules();
+    const { onSessionEstablished } = await import("@/lib/api");
+    const established = vi.fn();
+    const unsubscribe = onSessionEstablished(established);
+    const establishedAt = Date.now() + 1;
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: SESSION_ESTABLISHED_AT_KEY,
+      newValue: String(establishedAt)
+    }));
+
+    expect(established).toHaveBeenCalledWith(establishedAt, "peer");
+    unsubscribe();
+  });
+
+  it("does not drop equal peer login generations when shared storage is unavailable", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("Storage disabled", "SecurityError");
+    });
+    vi.resetModules();
+    const { onSessionEnded, onSessionEstablished } = await import("@/lib/api");
+    const established = vi.fn();
+    const unsubscribeEstablished = onSessionEstablished(established);
+    const unsubscribeEnded = onSessionEnded(() => undefined);
+    const establishedAt = Date.now() + 1;
+
+    TestBroadcastChannel.broadcast(AUTH_SYNC_CHANNEL, {
+      type: "session-established",
+      sessionEstablishedAt: establishedAt
+    });
+    TestBroadcastChannel.broadcast(AUTH_SYNC_CHANNEL, {
+      type: "session-established",
+      sessionEstablishedAt: establishedAt
+    });
+
+    expect(established).toHaveBeenCalledTimes(2);
+    expect(established).toHaveBeenNthCalledWith(1, establishedAt, "peer");
+    expect(established).toHaveBeenNthCalledWith(2, establishedAt, "peer");
+    unsubscribeEstablished();
+    unsubscribeEnded();
+  });
+
+  it("threads a caller abort through a rotating request and keeps an uncertainty fence", async () => {
+    disableWebLocks();
+    let operationSignal: AbortSignal | null | undefined;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = requestPath(input);
+      if (path !== "/api/auth/login") {
+        return Promise.reject(new Error(`Unexpected fetch: ${path}`));
+      }
+      operationSignal = init?.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) {
+          reject(new Error("Missing rotating-request signal"));
+          return;
+        }
+        const rejectOnAbort = () => reject(
+          signal.reason ?? new DOMException("Aborted", "AbortError")
+        );
+        if (signal.aborted) rejectOnAbort();
+        else signal.addEventListener("abort", rejectOnAbort, { once: true });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.resetModules();
+    const { apiFetch } = await import("@/lib/api");
+    const controller = new AbortController();
+
+    const request = apiFetch("/auth/login", {
+      method: "POST",
+      signal: controller.signal
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort(new DOMException("Caller stopped login", "AbortError"));
+
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    expect(operationSignal?.aborted).toBe(true);
+    expect(refreshLeaseEntries()).toHaveLength(1);
+    expect(refreshLeaseEntries()[0]?.lease).toMatchObject({ holding: true });
+  });
+
   it("skips redemption only when another tab refreshes after the original request starts", async () => {
     disableWebLocks();
     setCsrfCookie();
@@ -989,6 +1094,10 @@ describe("cross-tab refresh coordination", () => {
     await expect(tabA.apiFetch("/protected")).rejects.toMatchObject({ status: 401 });
     expect(refreshCalls).toBe(1);
     expect(sessionEnded).toHaveBeenCalledOnce();
+    expect(sessionEnded).toHaveBeenCalledWith({
+      logoutRequestedAt: undefined,
+      sessionEndedAt: expect.any(Number)
+    });
     unsubscribe();
   });
 
@@ -1021,5 +1130,214 @@ describe("cross-tab refresh coordination", () => {
     expect(refreshCalls).toBe(1);
     expect(sessionEnded).not.toHaveBeenCalled();
     unsubscribe();
+  });
+});
+
+describe("server logout coordination", () => {
+  it("lets the logout deadline abort while waiting for a busy Web Lock", async () => {
+    const requestLock = vi.fn(<T>(
+      _name: string,
+      options: LockOptions,
+      _callback: () => Promise<T>
+    ) => new Promise<T>((_resolve, reject) => {
+      const signal = options.signal;
+      const rejectAbort = () => reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+      signal?.addEventListener("abort", rejectAbort, { once: true });
+      if (signal?.aborted) rejectAbort();
+    }));
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: { request: requestLock }
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { requestServerLogout } = await import("@/lib/api");
+    const controller = new AbortController();
+
+    const logout = requestServerLogout({ signal: controller.signal });
+    await vi.waitFor(() => expect(requestLock).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(logout).rejects.toBeDefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps an uncertainty fence when an in-flight logout is aborted", async () => {
+    disableWebLocks();
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        const rejectAbort = () => reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+        signal?.addEventListener("abort", rejectAbort, { once: true });
+        if (signal?.aborted) rejectAbort();
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { requestServerLogout } = await import("@/lib/api");
+    const controller = new AbortController();
+
+    const logout = requestServerLogout({ signal: controller.signal });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(logout).rejects.toBeDefined();
+    expect(refreshLeaseEntries()).toHaveLength(1);
+    expect(refreshLeaseEntries()[0]?.lease).toMatchObject({ holding: true });
+  });
+
+  it("keeps the lock as an uncertainty fence when storage is unavailable", async () => {
+    vi.useFakeTimers({
+      toFake: ["Date", "performance", "setTimeout", "clearTimeout"]
+    });
+    vi.setSystemTime(new Date("2026-08-10T00:00:00.000Z"));
+    installSerializedWebLocks();
+    const getItemSpy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("Storage disabled", "SecurityError");
+    });
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Storage disabled", "SecurityError");
+    });
+    const removeItemSpy = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("Storage disabled", "SecurityError");
+    });
+    let logoutCalls = 0;
+    let loginCalls = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = requestPath(input);
+      if (path === "/api/auth/logout") {
+        logoutCalls += 1;
+        return new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          const rejectAbort = () => reject(
+            signal?.reason ?? new DOMException("Aborted", "AbortError")
+          );
+          signal?.addEventListener("abort", rejectAbort, { once: true });
+          if (signal?.aborted) rejectAbort();
+        });
+      }
+      if (path === "/api/auth/login") {
+        loginCalls += 1;
+        return Promise.resolve(jsonResponse({ ok: true }));
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${path}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.resetModules();
+    const { apiFetch, requestServerLogout } = await import("@/lib/api");
+    const controller = new AbortController();
+
+    try {
+      const logoutFailure = requestServerLogout({ signal: controller.signal })
+        .catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(logoutCalls).toBe(1);
+      controller.abort();
+      const blockedLoginFailure = apiFetch<{ ok: boolean }>("/auth/login", { method: "POST" })
+        .catch((error: unknown) => error);
+
+      await vi.advanceTimersByTimeAsync(15_100);
+      expect(loginCalls).toBe(0);
+      await expect(blockedLoginFailure).resolves.toMatchObject({
+        name: "RefreshCoordinationTimeoutError"
+      });
+      await vi.advanceTimersByTimeAsync(15_100);
+
+      await expect(logoutFailure).resolves.toBeDefined();
+      const recoveredLogin = apiFetch<{ ok: boolean }>("/auth/login", { method: "POST" });
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(recoveredLogin).resolves.toEqual({ ok: true });
+      expect(loginCalls).toBe(1);
+    } finally {
+      getItemSpy.mockRestore();
+      setItemSpy.mockRestore();
+      removeItemSpy.mockRestore();
+    }
+  });
+
+  it("reports a successful backend acknowledgement as confirmed revocation", async () => {
+    installSerializedWebLocks();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      new Response(null, { status: 204 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { requestServerLogout } = await import("@/lib/api");
+
+    await expect(requestServerLogout()).resolves.toBe("logout-confirmed");
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(requestPath(fetchMock.mock.calls[0]![0])).toBe("/api/auth/logout");
+  });
+
+  it("keeps 503 as retry-later instead of claiming server revocation", async () => {
+    installSerializedWebLocks();
+    const fetchMock = vi.fn(async () => jsonResponse(
+      { error: { message: "Unavailable" } },
+      { status: 503 }
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const { requestServerLogout } = await import("@/lib/api");
+
+    await expect(requestServerLogout()).resolves.toBe("retry-later");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a bare 401 pending because it does not confirm server revocation", async () => {
+    installSerializedWebLocks();
+    const fetchMock = vi.fn(async () => jsonResponse(
+      { error: { message: "No session" } },
+      { status: 401 }
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const { requestServerLogout } = await import("@/lib/api");
+
+    await expect(requestServerLogout()).resolves.toBe("retry-later");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("does not turn a 401 plus transient refresh failure into a false logout success", async () => {
+    installSerializedWebLocks();
+    setCsrfCookie();
+    const paths: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = requestPath(input);
+      paths.push(path);
+      if (path === "/api/auth/logout") {
+        return jsonResponse({ error: { message: "Expired access" } }, { status: 401 });
+      }
+      return jsonResponse({ error: { message: "Redis unavailable" } }, { status: 503 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { requestServerLogout } = await import("@/lib/api");
+
+    await expect(requestServerLogout()).resolves.toBe("retry-later");
+    expect(paths).toEqual(["/api/auth/logout", "/api/auth/refresh"]);
+  });
+
+  it("keeps a rolling-deploy 401, refresh and retry inside one session lock", async () => {
+    const requestLock = installSerializedWebLocks();
+    setCsrfCookie();
+    const paths: string[] = [];
+    let logoutCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = requestPath(input);
+      paths.push(path);
+      if (path === "/api/auth/logout") {
+        logoutCalls += 1;
+        return logoutCalls === 1
+          ? jsonResponse({ error: { message: "Expired access" } }, { status: 401 })
+          : new Response(null, { status: 204 });
+      }
+      return jsonResponse({ user: { id: "refreshed" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { requestServerLogout } = await import("@/lib/api");
+
+    await expect(requestServerLogout()).resolves.toBe("logout-confirmed");
+    expect(paths).toEqual([
+      "/api/auth/logout",
+      "/api/auth/refresh",
+      "/api/auth/logout"
+    ]);
+    expect(requestLock).toHaveBeenCalledOnce();
   });
 });

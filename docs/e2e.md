@@ -52,8 +52,9 @@ provider credentials to `docker-compose.e2e.yml`.
   resolves the dispute, and terminal/immutable/read-only rules are asserted.
 - `moderation.spec.ts`: warm public caches, block listing, public list/detail
   eviction, owner/admin preview, and reactivation.
-- `session-security.spec.ts`: two browser contexts and WebSockets, password
-  rotation, remote HTTP/refresh/WS revocation, and old/new password behavior.
+- `session-security.spec.ts`: two browser contexts and WebSockets, cross-tab
+  refresh fallback, offline logout recovery across reloads, password rotation,
+  remote HTTP/refresh/WS revocation, and old/new password behavior.
 - `reliability.spec.ts`: transient auth 500 without logout, aborted data request
   plus UI retry, currency switch preserving an unsaved draft, real category
   filter links, and opening a product link in a new Chromium tab.

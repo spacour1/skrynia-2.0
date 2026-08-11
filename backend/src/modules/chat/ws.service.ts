@@ -41,6 +41,7 @@ function readCookie(header: string | undefined, name: string): string | undefine
 type Client = WebSocket & {
   userId?: string;
   jti?: string;
+  familyId?: string;
   sessionVersion?: number;
   connectionId?: string;
   emailVerified?: boolean;
@@ -55,6 +56,7 @@ type Client = WebSocket & {
 type JwtPayload = {
   sub: string;
   jti: string;
+  fid?: string;
   sv?: number;
 };
 
@@ -73,6 +75,97 @@ const clientsByConversation = new Map<string, Set<Client>>();
 // One jti can have several live connections (one per browser tab sharing the same cookies),
 // so this must track a set, not a single client - see disconnectSession/leaveAll below.
 const clientsByJti = new Map<string, Set<Client>>();
+const clientsByFamily = new Map<string, Set<Client>>();
+
+function registerClientFamily(client: Client, familyId: string) {
+  if (client.readyState !== WebSocket.OPEN && client.readyState !== WebSocket.CONNECTING) return;
+  if (client.familyId === familyId && clientsByFamily.get(familyId)?.has(client)) return;
+  if (client.familyId) {
+    const previous = clientsByFamily.get(client.familyId);
+    previous?.delete(client);
+    if (previous?.size === 0) clientsByFamily.delete(client.familyId);
+  }
+  client.familyId = familyId;
+  const sameFamily = clientsByFamily.get(familyId) ?? new Set<Client>();
+  sameFamily.add(client);
+  clientsByFamily.set(familyId, sameFamily);
+}
+
+function activeFamilyRecord(raw: unknown, userId: string | undefined): boolean {
+  if (typeof raw !== "string" || !userId) return false;
+  try {
+    const record = JSON.parse(raw) as { s?: unknown; u?: unknown };
+    return record.s === "active" && record.u === userId;
+  } catch {
+    return false;
+  }
+}
+
+async function findRevokedRealtimeClients(clients: Client[]): Promise<Set<Client>> {
+  const revoked = new Set<Client>();
+  const candidates = clients.filter((client) => client.jti && client.userId);
+  if (candidates.length === 0) return revoked;
+  const redis = getRedis();
+  if (!redis) throw new Error("Realtime session verification is unavailable");
+
+  const firstPass = redis.pipeline();
+  for (const client of candidates) {
+    firstPass
+      .exists(`session_revoked:${client.jti}`)
+      .get(`session_family:${client.jti}`)
+      .exists(`session:${client.jti}`);
+  }
+  const firstResults = await firstPass.exec();
+  if (!firstResults || firstResults.some(([error]) => error)) {
+    throw new Error("Realtime session tombstone lookup failed");
+  }
+
+  const resolvedFamilies = new Map<Client, string>();
+  const familyIds = new Set<string>();
+  for (let index = 0; index < candidates.length; index += 1) {
+    const client = candidates[index]!;
+    const offset = index * 3;
+    if (Number(firstResults[offset]?.[1]) === 1) {
+      revoked.add(client);
+      continue;
+    }
+    const mappedFamily = firstResults[offset + 1]?.[1];
+    const familyId = client.familyId ??
+      (typeof mappedFamily === "string" && mappedFamily ? mappedFamily : undefined);
+    if (familyId) {
+      // Register a mapped legacy family before the second Redis await. A concurrent
+      // family event can now find the client, while close cleanup cannot be followed by
+      // a late re-add because registerClientFamily rejects closed sockets.
+      registerClientFamily(client, familyId);
+      resolvedFamilies.set(client, familyId);
+      familyIds.add(familyId);
+      continue;
+    }
+    // A pre-family legacy socket is bounded by its original access-session key. Once
+    // that key expires or is revoked, it may no longer mutate state.
+    if (Number(firstResults[offset + 2]?.[1]) !== 1) revoked.add(client);
+  }
+
+  if (familyIds.size === 0) return revoked;
+  const orderedFamilyIds = [...familyIds];
+  const familyPass = redis.pipeline();
+  for (const familyId of orderedFamilyIds) familyPass.get(`refresh_family:${familyId}`);
+  const familyResults = await familyPass.exec();
+  if (!familyResults || familyResults.some(([error]) => error)) {
+    throw new Error("Realtime session-family lookup failed");
+  }
+  const familyRecords = new Map(
+    orderedFamilyIds.map((familyId, index) => [familyId, familyResults[index]?.[1]])
+  );
+  for (const [client, familyId] of resolvedFamilies) {
+    if (!activeFamilyRecord(familyRecords.get(familyId), client.userId)) {
+      revoked.add(client);
+      continue;
+    }
+    registerClientFamily(client, familyId);
+  }
+  return revoked;
+}
 
 async function verifyUserAlive(userId: string, expectedSessionVersion?: number) {
   const result = await pool.query<{
@@ -108,19 +201,25 @@ async function authenticateSocket(
   if (!payload.jti) throw new Error("Missing session id");
 
   const redis = getRedis();
-  if (redis) {
+  if (!redis) throw new Error("Session verification unavailable");
+  {
     try {
       const exists = await redis.exists(`session:${payload.jti}`);
       assertHandshakeActive();
       if (!exists) throw new Error("Session expired");
+      if (await redis.exists(`session_revoked:${payload.jti}`)) {
+        throw new Error("Session expired");
+      }
+      if (payload.fid) {
+        const family = await redis.get(`refresh_family:${payload.fid}`);
+        if (!activeFamilyRecord(family, payload.sub)) throw new Error("Session expired");
+      }
     } catch (error) {
       if (error instanceof WebSocketShuttingDownError) throw error;
       assertHandshakeActive();
       if (error instanceof Error && error.message === "Session expired") throw error;
-      // Redis being briefly unreachable shouldn't refuse every WS connection in the
-      // building - fall back to trusting the JWT's own signature/expiry, same as the
-      // HTTP authenticate() middleware.
       logger.warn({ error, jti: payload.jti }, "ws_session_revocation_check_failed_redis_unavailable");
+      throw new Error("Session verification unavailable");
     }
   }
 
@@ -130,6 +229,7 @@ async function authenticateSocket(
   return {
     userId: user.id,
     jti: payload.jti,
+    familyId: typeof payload.fid === "string" && payload.fid ? payload.fid : undefined,
     sessionVersion,
     emailVerified: user.emailVerified
   };
@@ -155,16 +255,25 @@ async function authenticateHandshake(
     assertHandshakeActive();
     if (!identity) throw new Error("Invalid ticket");
     const redis = getRedis();
-    if (redis) {
+    if (!redis) throw new Error("Session verification unavailable");
+    {
       try {
         const exists = await redis.exists(`session:${identity.jti}`);
         assertHandshakeActive();
         if (!exists) throw new Error("Session expired");
+        if (await redis.exists(`session_revoked:${identity.jti}`)) {
+          throw new Error("Session expired");
+        }
+        if (identity.familyId) {
+          const family = await redis.get(`refresh_family:${identity.familyId}`);
+          if (!activeFamilyRecord(family, identity.userId)) throw new Error("Session expired");
+        }
       } catch (error) {
         if (error instanceof WebSocketShuttingDownError) throw error;
         assertHandshakeActive();
         if (error instanceof Error && error.message === "Session expired") throw error;
         logger.warn({ error, jti: identity.jti }, "ws_session_revocation_check_failed_redis_unavailable");
+        throw new Error("Session verification unavailable");
       }
     }
     const sessionVersion = identity.sessionVersion ?? 1;
@@ -173,6 +282,7 @@ async function authenticateHandshake(
     return {
       userId: identity.userId,
       jti: identity.jti,
+      familyId: identity.familyId,
       sessionVersion,
       emailVerified: user.emailVerified
     };
@@ -278,11 +388,28 @@ function leaveAll(client: Client) {
       if (sameSession.size === 0) clientsByJti.delete(client.jti);
     }
   }
+  if (client.familyId) {
+    const sameFamily = clientsByFamily.get(client.familyId);
+    if (sameFamily) {
+      sameFamily.delete(client);
+      if (sameFamily.size === 0) clientsByFamily.delete(client.familyId);
+    }
+  }
   for (const room of Array.from(client.rooms ?? [])) leaveConversation(client, room);
 }
 
 function disconnectSessionLocally(jti: string) {
   const clients = clientsByJti.get(jti);
+  if (!clients) return;
+  for (const client of Array.from(clients)) {
+    if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
+      client.close(WS_CLOSE_SESSION_REVOKED, "Session revoked");
+    }
+  }
+}
+
+function disconnectFamilyLocally(familyId: string) {
+  const clients = clientsByFamily.get(familyId);
   if (!clients) return;
   for (const client of Array.from(clients)) {
     if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
@@ -329,6 +456,10 @@ export function disconnectUser(userId: string, exceptSessionId?: string) {
 onSessionSecurityEvent((event) => {
   if (event.type === "session.revoked") {
     disconnectSessionLocally(event.sessionId);
+    return;
+  }
+  if (event.type === "session.family.revoked") {
+    disconnectFamilyLocally(event.familyId);
     return;
   }
   if (event.type === "user.sessions.revoked") {
@@ -446,6 +577,7 @@ export type WebSocketRuntime = {
   server: WebSocketServer;
   beginShutdown: () => Promise<void>;
   forceClose: () => void;
+  runSecuritySweep: () => Promise<void>;
 };
 
 const incomingMessageSchema = z.discriminatedUnion("type", [
@@ -484,6 +616,7 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
   let activeHandlers = 0;
   let shuttingDown = false;
   let shutdownPromise: Promise<void> | null = null;
+  let securitySweepInFlight: Promise<void> | null = null;
   const handlerDrainWaiters = new Set<() => void>();
 
   const handlerStarted = () => {
@@ -507,6 +640,29 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
   const assertHandshakeActive = () => {
     if (shuttingDown) throw new WebSocketShuttingDownError();
   };
+  const runSecuritySweep = () => {
+    if (securitySweepInFlight) return securitySweepInFlight;
+    if (shuttingDown) return Promise.resolve();
+    handlerStarted();
+    securitySweepInFlight = findRevokedRealtimeClients(
+      [...wss.clients] as Client[]
+    )
+      .then((revoked) => {
+        for (const client of revoked) {
+          if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
+            client.close(WS_CLOSE_SESSION_REVOKED, "Session revoked");
+          }
+        }
+      })
+      .catch((error) => {
+        logger.warn({ error }, "ws_session_security_sweep_failed_redis_unavailable");
+      })
+      .finally(() => {
+        securitySweepInFlight = null;
+        handlerFinished();
+      });
+    return securitySweepInFlight;
+  };
   const closeForShutdown = (client: Client) => {
     if (
       client.readyState === WebSocket.OPEN ||
@@ -528,6 +684,7 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
       ws.isAlive = false;
       ws.ping();
     }
+    void runSecuritySweep();
   }, HEARTBEAT_INTERVAL_MS);
 
   wss.on("close", () => {
@@ -600,7 +757,7 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
     try {
       if (!isOriginAllowed(req)) throw new Error("Origin not allowed");
 
-      const { userId, jti, sessionVersion, emailVerified } =
+      const { userId, jti, familyId, sessionVersion, emailVerified } =
         await authenticateHandshake(req, assertHandshakeActive);
       if (closed || client.readyState !== WebSocket.OPEN) return;
       if ((clientsByUser.get(userId)?.size ?? 0) >= MAX_CONNECTIONS_PER_USER) {
@@ -608,10 +765,41 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
       }
       client.userId = userId;
       client.jti = jti;
+      client.familyId = familyId;
       client.sessionVersion = sessionVersion;
       client.connectionId = randomUUID();
       client.emailVerified = emailVerified;
       client.rooms = new Set();
+
+      // Register synchronously before the final durable check. A logout that linearized
+      // before registration is caught by the check; one after registration can close the
+      // socket through the local event maps. Per-message checks cover missed remote PubSub.
+      const sameSession = clientsByJti.get(jti) ?? new Set<Client>();
+      sameSession.add(client);
+      clientsByJti.set(jti, sameSession);
+      if (familyId) registerClientFamily(client, familyId);
+      const userClients = clientsByUser.get(client.userId) ?? new Set<Client>();
+      userClients.add(client);
+      clientsByUser.set(client.userId, userClients);
+      mapsRegistered = true;
+
+      try {
+        const revoked = await findRevokedRealtimeClients([client]);
+        if (revoked.has(client)) throw new Error("Session expired");
+      } catch (redisError) {
+        if (redisError instanceof Error && redisError.message === "Session expired") {
+          throw redisError;
+        }
+        logger.warn(
+          { error: redisError, jti, familyId },
+          "ws_final_session_check_failed_redis_unavailable"
+        );
+        throw new Error("Session verification unavailable");
+      }
+      if (closed || client.readyState !== WebSocket.OPEN) {
+        await cleanupConnection();
+        return;
+      }
 
       // Presence is part of handshake admission, not a detached side effect. If shutdown
       // starts while Redis is pending, the close cleanup waits for registration and then
@@ -628,15 +816,6 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
         await cleanupConnection();
         return;
       }
-
-      const sameSession = clientsByJti.get(jti) ?? new Set<Client>();
-      sameSession.add(client);
-      clientsByJti.set(jti, sameSession);
-
-      const userClients = clientsByUser.get(client.userId) ?? new Set<Client>();
-      userClients.add(client);
-      clientsByUser.set(client.userId, userClients);
-      mapsRegistered = true;
 
       wsConnectionsActive.inc();
       metricRegistered = true;
@@ -711,10 +890,23 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
           const msg = validated.data;
           wsMessagesTotal.labels(msg.type).inc();
 
-          // Redis/pubsub closes revoked sockets immediately in the normal case. This DB
-          // epoch check is the durable fallback: a Redis outage must not let a socket
-          // issued before password reset/logout-all keep mutating state.
+          // PubSub closes revoked sockets immediately in the normal case. Tombstones and
+          // family state are the durable fallback when a replica missed that transient
+          // event; the DB epoch still covers password reset/logout-all/ban.
           try {
+            try {
+              const revoked = await findRevokedRealtimeClients([client]);
+              if (revoked.has(client)) {
+                client.close(WS_CLOSE_SESSION_REVOKED, "Session revoked");
+                return;
+              }
+            } catch (redisError) {
+              logger.warn(
+                { error: redisError, jti: client.jti, familyId: client.familyId },
+                "ws_session_revocation_check_failed_redis_unavailable"
+              );
+              throw new Error("Session verification unavailable");
+            }
             await verifyUserAlive(client.userId!, client.sessionVersion);
           } catch (authError) {
             if (shuttingDown) return;
@@ -896,5 +1088,5 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
     }
   };
 
-  return { server: wss, beginShutdown, forceClose };
+  return { server: wss, beginShutdown, forceClose, runSecuritySweep };
 }

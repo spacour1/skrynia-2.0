@@ -233,6 +233,7 @@ const AUTH_SYNC_CHANNEL = "auth-session-sync";
 const REFRESH_LOCK_NAME = "auth-refresh-lock";
 const RECENT_REFRESH_KEY = "auth_last_refresh_at";
 const RECENT_REFRESH_GENERATION_KEY = "auth_last_refresh_generation";
+const SESSION_ESTABLISHED_AT_KEY = "auth_session_established_at";
 const REFRESH_LEASE_KEY_PREFIX = "auth_refresh_lease:";
 const RECENT_REFRESH_WINDOW_MS = 3000;
 const REFRESH_LEASE_TTL_MS = 30_000;
@@ -243,11 +244,14 @@ const REFRESH_LEASE_RETRY_MIN_MS = 25;
 const REFRESH_LEASE_RETRY_MAX_MS = 75;
 const REFRESH_LEASE_POLL_MIN_MS = 200;
 const REFRESH_LEASE_POLL_MAX_MS = 400;
-const SESSION_ROTATING_PATHS = new Set([
+const SESSION_ESTABLISHING_PATHS = new Set([
   "/auth/register",
   "/auth/login",
   "/auth/2fa/verify",
-  "/auth/telegram",
+  "/auth/telegram"
+]);
+const SESSION_ROTATING_PATHS = new Set([
+  ...SESSION_ESTABLISHING_PATHS,
   "/users/me/password",
   "/users/me/2fa/enable",
   "/users/me/2fa/disable",
@@ -258,6 +262,9 @@ type AuthSyncMessage = {
   type?: string;
   refreshedAt?: number;
   generation?: string;
+  logoutRequestedAt?: number;
+  sessionEndedAt?: number;
+  sessionEstablishedAt?: number;
 };
 
 type RefreshLease = {
@@ -300,11 +307,86 @@ type RefreshObservation = {
 
 let lastObservedRefreshAt = 0;
 let lastObservedRefreshGeneration: string | null = null;
+let lastObservedSessionEstablishedAt = 0;
 let authChannel: BroadcastChannel | null = null;
 let authChannelUnavailable = false;
+let authStorageListenerInstalled = false;
+type SessionEstablishedSource = "local" | "peer";
+const sessionEstablishedHandlers = new Set<(
+  establishedAt: number,
+  source: SessionEstablishedSource
+) => void>();
+const sessionEndedHandlers = new Set<(message: {
+  logoutRequestedAt?: number;
+  sessionEndedAt?: number;
+}) => void>();
+
+/** Runs synchronously inside the cookie-mutation lock after login/register succeeds. */
+export function onSessionEstablished(handler: (
+  establishedAt: number,
+  source: SessionEstablishedSource
+) => void): () => void {
+  ensureAuthStorageListener();
+  sessionEstablishedHandlers.add(handler);
+  return () => sessionEstablishedHandlers.delete(handler);
+}
+
+function emitSessionEstablished(establishedAt: number, source: SessionEstablishedSource) {
+  for (const handler of sessionEstablishedHandlers) {
+    try {
+      handler(establishedAt, source);
+    } catch {
+      // An observer must not turn a successful server login into a failed request.
+    }
+  }
+}
+
+function ensureAuthStorageListener() {
+  if (typeof window === "undefined" || authStorageListenerInstalled) return;
+  authStorageListenerInstalled = true;
+  window.addEventListener("storage", (event) => {
+    if (event.key !== SESSION_ESTABLISHED_AT_KEY) return;
+    const establishedAt = validSessionEstablishedAt(event.newValue);
+    if (establishedAt !== null && establishedAt >= lastObservedSessionEstablishedAt) {
+      lastObservedSessionEstablishedAt = establishedAt;
+      emitSessionEstablished(establishedAt, "peer");
+    }
+  });
+}
+
+function notifySessionEstablished() {
+  const establishedAt = nextAuthEventTimestamp(getLastSessionEstablishedAt());
+  lastObservedSessionEstablishedAt = establishedAt;
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(SESSION_ESTABLISHED_AT_KEY, String(establishedAt));
+    } catch {
+      // BroadcastChannel and the in-memory timestamp still protect restricted contexts.
+    }
+  }
+  postAuthSyncMessage({ type: "session-established", sessionEstablishedAt: establishedAt });
+  emitSessionEstablished(establishedAt, "local");
+}
 
 function authSyncMessage(value: unknown): AuthSyncMessage | null {
   return value && typeof value === "object" ? value as AuthSyncMessage : null;
+}
+
+function validSessionEstablishedAt(value: unknown): number | null {
+  const timestamp = Number(value);
+  return Number.isSafeInteger(timestamp) &&
+    timestamp > 0 &&
+    timestamp <= Date.now() + 60_000
+    ? timestamp
+    : null;
+}
+
+function nextAuthEventTimestamp(previous = 0): number {
+  const now = Date.now();
+  const usablePrevious = Number.isSafeInteger(previous) && previous < now + 60_000
+    ? previous
+    : 0;
+  return Math.max(now, usablePrevious + 1);
 }
 
 function getAuthChannel(): BroadcastChannel | null {
@@ -320,15 +402,24 @@ function getAuthChannel(): BroadcastChannel | null {
       authChannel = new BroadcastChannel(AUTH_SYNC_CHANNEL);
       authChannel.addEventListener("message", (event) => {
         const message = authSyncMessage(event.data);
-        if (message?.type !== "session-refreshed") return;
-        const refreshedAt = Number(message.refreshedAt);
-        const observedAt = Number.isFinite(refreshedAt)
-          ? refreshedAt
-          : coordinationEpochClock();
-        if (observedAt >= lastObservedRefreshAt) {
-          lastObservedRefreshAt = observedAt;
-          lastObservedRefreshGeneration =
-            typeof message.generation === "string" ? message.generation : null;
+        if (message?.type === "session-refreshed") {
+          const refreshedAt = Number(message.refreshedAt);
+          const observedAt = Number.isFinite(refreshedAt)
+            ? refreshedAt
+            : coordinationEpochClock();
+          if (observedAt >= lastObservedRefreshAt) {
+            lastObservedRefreshAt = observedAt;
+            lastObservedRefreshGeneration =
+              typeof message.generation === "string" ? message.generation : null;
+          }
+          return;
+        }
+        if (message?.type === "session-established") {
+          const establishedAt = validSessionEstablishedAt(message.sessionEstablishedAt);
+          if (establishedAt !== null && establishedAt >= lastObservedSessionEstablishedAt) {
+            lastObservedSessionEstablishedAt = establishedAt;
+            emitSessionEstablished(establishedAt, "peer");
+          }
         }
       });
     } catch {
@@ -348,29 +439,64 @@ function postAuthSyncMessage(message: AuthSyncMessage) {
   }
 }
 
-/** Tells every other open tab that the session just ended (explicit logout or a refresh that was genuinely rejected), so they drop their cached user instead of finding out the hard way on their next request. */
-export function broadcastSessionEnded() {
-  postAuthSyncMessage({ type: "session-ended" });
+/** Tells this page and every peer that logout began or refresh was definitively rejected. */
+export function broadcastSessionEnded(logoutRequestedAt?: number, sessionEndedAt?: number) {
+  const message = { type: "session-ended", logoutRequestedAt, sessionEndedAt };
+  postAuthSyncMessage(message);
+  for (const handler of sessionEndedHandlers) {
+    try {
+      handler({ logoutRequestedAt, sessionEndedAt });
+    } catch {
+      // A UI observer must not turn session cleanup into a failed API request.
+    }
+  }
 }
 
-export function onSessionEnded(handler: () => void): () => void {
+export function onSessionEnded(
+  handler: (message: { logoutRequestedAt?: number; sessionEndedAt?: number }) => void
+): () => void {
+  sessionEndedHandlers.add(handler);
   const channel = getAuthChannel();
-  if (!channel) return () => undefined;
+  if (!channel) return () => sessionEndedHandlers.delete(handler);
   const listener = (event: MessageEvent) => {
-    if (authSyncMessage(event.data)?.type === "session-ended") handler();
+    const message = authSyncMessage(event.data);
+    if (message?.type === "session-ended") {
+      handler({
+        logoutRequestedAt: message.logoutRequestedAt,
+        sessionEndedAt: message.sessionEndedAt
+      });
+    }
   };
   try {
     channel.addEventListener("message", listener);
   } catch {
-    return () => undefined;
+    return () => sessionEndedHandlers.delete(handler);
   }
   return () => {
+    sessionEndedHandlers.delete(handler);
     try {
       channel.removeEventListener("message", listener);
     } catch {
       // The channel may already have been torn down by the browser.
     }
   };
+}
+
+/** Latest deliberate login/register generation observed locally or through shared storage. */
+export function getLastSessionEstablishedAt(): number {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = validSessionEstablishedAt(
+        window.localStorage.getItem(SESSION_ESTABLISHED_AT_KEY)
+      );
+      if (stored !== null && stored > lastObservedSessionEstablishedAt) {
+        lastObservedSessionEstablishedAt = stored;
+      }
+    } catch {
+      // Use the in-memory/BroadcastChannel observation in restricted contexts.
+    }
+  }
+  return lastObservedSessionEstablishedAt;
 }
 
 function observeRefreshGeneration(): RefreshObservation {
@@ -458,6 +584,12 @@ function markRefreshed() {
 
 type RefreshOutcome = "ok" | "invalid" | "retry-later";
 
+export type ServerLogoutOutcome =
+  | "logout-confirmed"
+  | "anonymous-unconfirmed"
+  | "retry-later"
+  | "cancelled";
+
 async function performRefresh(
   beforeRequest: RefreshObservation,
   coordinationSignal?: AbortSignal
@@ -481,6 +613,53 @@ async function performRefresh(
   } catch {
     return "retry-later";
   }
+}
+
+/**
+ * Attempts the cookie/session mutation for an explicit logout under the same cross-tab
+ * boundary as refresh and login. The caller has already made the UI anonymous; this
+ * function only reports whether the backend confirmed processing the presented logout
+ * credentials, the browser is terminally anonymous without that confirmation, or a
+ * durable retry is still required.
+ */
+export async function requestServerLogout(options: {
+  signal?: AbortSignal;
+  shouldProceed?: () => boolean;
+} = {}): Promise<ServerLogoutOutcome> {
+  const beforeRequest = observeRefreshGeneration();
+  return runWithRefreshLock(async (coordinationSignal) => {
+    if (options.shouldProceed && !options.shouldProceed()) return "cancelled";
+    const requestOptions = withCoordinationSignal(
+      { method: "POST", signal: options.signal },
+      coordinationSignal
+    );
+    let response = await rawFetch("/auth/logout", requestOptions);
+    if (response.ok) return "logout-confirmed";
+
+    // The upgraded backend accepts an expired/revoked access cookie and revokes the
+    // refresh record directly. During a rolling deploy an older backend can still answer
+    // 401 first; refresh once inside this same lock, then retry logout without opening a
+    // rotation race with another tab.
+    if (response.status === 401) {
+      // A bare 401 is not evidence that a still-present HttpOnly refresh credential was
+      // revoked. Without CSRF we cannot safely redeem/check it, so retain the marker.
+      if (!readCookie("csrf_token")) return "retry-later";
+      const refreshOutcome = await performRefresh(
+        beforeRequest,
+        requestOptions.signal ?? undefined
+      );
+      if (refreshOutcome === "invalid") return "anonymous-unconfirmed";
+      if (refreshOutcome !== "ok") return "retry-later";
+      if (options.shouldProceed && !options.shouldProceed()) return "cancelled";
+      response = await rawFetch("/auth/logout", requestOptions);
+      if (response.ok) return "logout-confirmed";
+    }
+
+    // 403 (usually CSRF), 429 and every server failure leave the server-side state
+    // unconfirmed. The pending marker must survive so an online/bootstrap retry can try
+    // again; none of these statuses may be presented as successful revocation.
+    return "retry-later";
+  }, options.signal);
 }
 
 let localRefreshLockTail: Promise<void> = Promise.resolve();
@@ -630,22 +809,92 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, milliseconds)));
 }
 
-function waitForRefreshLeaseChange(milliseconds: number): Promise<void> {
-  if (typeof window === "undefined") return delay(milliseconds);
-  return new Promise((resolve) => {
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException("The operation was aborted", "AbortError");
+}
+
+type CombinedAbortSignals = {
+  signal: AbortSignal;
+  dispose: () => void;
+};
+
+function combineAbortSignals(signals: AbortSignal[]): CombinedAbortSignals {
+  const nativeAny = (AbortSignal as typeof AbortSignal & {
+    any?: (signals: AbortSignal[]) => AbortSignal;
+  }).any;
+  if (typeof nativeAny === "function") {
+    return { signal: nativeAny(signals), dispose: () => undefined };
+  }
+
+  const controller = new AbortController();
+  const listeners = new Map<AbortSignal, () => void>();
+  let disposed = false;
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    for (const [signal, listener] of listeners) {
+      signal.removeEventListener("abort", listener);
+    }
+    listeners.clear();
+  };
+  const abortFrom = (signal: AbortSignal) => {
+    if (!controller.signal.aborted) controller.abort(abortReason(signal));
+    dispose();
+  };
+  for (const signal of signals) {
+    if (signal.aborted) {
+      abortFrom(signal);
+      break;
+    }
+    const listener = () => abortFrom(signal);
+    listeners.set(signal, listener);
+    signal.addEventListener("abort", listener, { once: true });
+  }
+  return { signal: controller.signal, dispose };
+}
+
+function rejectWhenAborted<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise<T>((resolve, reject) => {
+    const handleAbort = () => reject(abortReason(signal));
+    signal.addEventListener("abort", handleAbort, { once: true });
+    if (signal.aborted) handleAbort();
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", handleAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", handleAbort);
+        reject(error);
+      }
+    );
+  });
+}
+
+function waitForRefreshLeaseChange(
+  milliseconds: number,
+  signal?: AbortSignal
+): Promise<void> {
+  if (typeof window === "undefined") return rejectWhenAborted(delay(milliseconds), signal);
+  if (signal?.aborted) return Promise.reject(abortReason(signal));
+  return new Promise((resolve, reject) => {
     let settled = false;
     const channel = getAuthChannel();
-    const finish = () => {
+    const finish = (error?: unknown) => {
       if (settled) return;
       settled = true;
       window.clearTimeout(timer);
       window.removeEventListener("storage", onStorage);
+      signal?.removeEventListener("abort", onAbort);
       try {
         channel?.removeEventListener("message", onMessage);
       } catch {
         // The timeout/polling path still completes the bounded wait.
       }
-      resolve();
+      if (error) reject(error);
+      else resolve();
     };
     const onStorage = (event: StorageEvent) => {
       if (event.key === null || event.key.startsWith(REFRESH_LEASE_KEY_PREFIX)) finish();
@@ -654,8 +903,14 @@ function waitForRefreshLeaseChange(milliseconds: number): Promise<void> {
       const type = authSyncMessage(event.data)?.type;
       if (type === "refresh-lock-released" || type === "refresh-lock-changed") finish();
     };
+    const onAbort = () => finish(signal ? abortReason(signal) : undefined);
     const timer = window.setTimeout(finish, Math.max(1, milliseconds));
     window.addEventListener("storage", onStorage);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
     try {
       channel?.addEventListener("message", onMessage);
     } catch {
@@ -690,7 +945,10 @@ function leasePrecedes(left: RefreshLease, right: RefreshLease): boolean {
   return left.generation < right.generation;
 }
 
-async function acquireRefreshLease(): Promise<RefreshLeaseAcquisition> {
+async function acquireRefreshLease(
+  callerSignal?: AbortSignal
+): Promise<RefreshLeaseAcquisition> {
+  if (callerSignal?.aborted) throw abortReason(callerSignal);
   const startedAt = coordinationClock();
   const remainingTime = () => Math.max(
     0,
@@ -747,6 +1005,7 @@ async function acquireRefreshLease(): Promise<RefreshLeaseAcquisition> {
 
     let conflictFreeScans = 0;
     while (remainingTime() > 0) {
+      if (callerSignal?.aborted) throw abortReason(callerSignal);
       const observed = readRefreshLeases();
       if (!observed.available) return { status: "timed-out" };
       const observedAt = coordinationEpochClock();
@@ -776,7 +1035,7 @@ async function acquireRefreshLease(): Promise<RefreshLeaseAcquisition> {
             await waitForRefreshLeaseChange(Math.min(
               randomRefreshLeaseDelay(),
               Math.max(1, remainingTime())
-            ));
+            ), callerSignal);
             if (remainingTime() <= 0) return { status: "timed-out" };
             const confirmation = readRefreshLeases();
             if (!confirmation.available) return { status: "timed-out" };
@@ -813,7 +1072,7 @@ async function acquireRefreshLease(): Promise<RefreshLeaseAcquisition> {
         await waitForRefreshLeaseChange(Math.min(
           randomRefreshLeaseDelay(),
           Math.max(1, remainingTime())
-        ));
+        ), callerSignal);
         continue;
       }
 
@@ -824,7 +1083,7 @@ async function acquireRefreshLease(): Promise<RefreshLeaseAcquisition> {
         randomRefreshLeasePollDelay(),
         untilExpiry,
         Math.max(1, remainingTime())
-      ));
+      ), callerSignal);
     }
     return { status: "timed-out" };
   } finally {
@@ -928,7 +1187,10 @@ function rejectAfter<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
   });
 }
 
-async function runWithLocalPageLock<T>(operation: () => Promise<T>): Promise<T> {
+async function runWithLocalPageLock<T>(
+  operation: () => Promise<T>,
+  callerSignal?: AbortSignal
+): Promise<T> {
   const previous = localRefreshLockTail;
   let release!: () => void;
   let acquired = false;
@@ -936,7 +1198,10 @@ async function runWithLocalPageLock<T>(operation: () => Promise<T>): Promise<T> 
     release = resolve;
   });
   try {
-    await rejectAfter(previous, REFRESH_LEASE_ACQUIRE_TIMEOUT_MS);
+    await rejectAfter(
+      rejectWhenAborted(previous, callerSignal),
+      REFRESH_LEASE_ACQUIRE_TIMEOUT_MS
+    );
     acquired = true;
     return await operation();
   } finally {
@@ -955,24 +1220,50 @@ type RefreshOperation<T> = (signal?: AbortSignal) => Promise<T>;
 async function runGuardedRefreshOperation<T>(
   operation: RefreshOperation<T>,
   lease?: RefreshLease,
-  onCoordinationAbort?: () => void
+  onCoordinationAbort?: () => void,
+  callerSignal?: AbortSignal
 ): Promise<T> {
   const guard = startRefreshOperationGuard(lease);
+  const combinedSignals = callerSignal
+    ? combineAbortSignals([guard.signal, callerSignal])
+    : null;
+  const operationSignal = combinedSignals?.signal ?? guard.signal;
   try {
     // Do not release the lease merely because abort was requested. fetch() may already
     // have reached the server; wait for its actual promise to settle before leaving the
     // coordination boundary.
-    return await operation(guard.signal);
+    return await operation(operationSignal);
   } finally {
-    if (guard.signal.aborted) onCoordinationAbort?.();
+    if (operationSignal.aborted) onCoordinationAbort?.();
+    combinedSignals?.dispose();
     guard.stop();
   }
 }
 
-async function runWithRefreshLease<T>(operation: RefreshOperation<T>): Promise<T> {
-  const acquisition = await acquireRefreshLease();
+async function runWithRefreshLease<T>(
+  operation: RefreshOperation<T>,
+  callerSignal?: AbortSignal
+): Promise<T> {
+  const acquisition = await acquireRefreshLease(callerSignal);
   if (acquisition.status === "unavailable") {
-    return runGuardedRefreshOperation(operation);
+    let coordinationAborted = false;
+    try {
+      return await runGuardedRefreshOperation(
+        operation,
+        undefined,
+        () => {
+          coordinationAborted = true;
+        },
+        callerSignal
+      );
+    } finally {
+      if (coordinationAborted) {
+        // With storage unavailable there is no durable claim to publish. Keep the
+        // Web Lock/local queue itself closed for the same uncertainty window so a late
+        // Set-Cookie response cannot race a new login in this coordination domain.
+        await delay(REFRESH_LEASE_TTL_MS);
+      }
+    }
   }
   if (acquisition.status === "timed-out") throw new RefreshCoordinationTimeoutError();
   let coordinationAborted = false;
@@ -982,7 +1273,8 @@ async function runWithRefreshLease<T>(operation: RefreshOperation<T>): Promise<T
       acquisition.lease,
       () => {
         coordinationAborted = true;
-      }
+      },
+      callerSignal
     );
   } finally {
     if (coordinationAborted) {
@@ -996,7 +1288,10 @@ async function runWithRefreshLease<T>(operation: RefreshOperation<T>): Promise<T
   }
 }
 
-async function runWithRefreshLock<T>(operation: RefreshOperation<T>): Promise<T> {
+async function runWithRefreshLock<T>(
+  operation: RefreshOperation<T>,
+  callerSignal?: AbortSignal
+): Promise<T> {
   if (typeof navigator === "undefined") return operation();
 
   return runWithLocalPageLock(async () => {
@@ -1007,20 +1302,25 @@ async function runWithRefreshLock<T>(operation: RefreshOperation<T>): Promise<T>
         () => lockWaitController.abort(new RefreshCoordinationTimeoutError()),
         REFRESH_LEASE_ACQUIRE_TIMEOUT_MS
       );
+      const combinedLockSignals = callerSignal
+        ? combineAbortSignals([lockWaitController.signal, callerSignal])
+        : null;
+      const lockWaitSignal = combinedLockSignals?.signal ?? lockWaitController.signal;
       try {
         return await navigator.locks.request(
           REFRESH_LOCK_NAME,
-          { signal: lockWaitController.signal },
+          { signal: lockWaitSignal },
           async () => {
             callbackStarted = true;
             clearTimeout(lockWaitTimer);
             // Also publish the storage claim. This bridges the lock domain if another
             // tab lacks Web Locks while sharing the same cookies/localStorage.
-            return runWithRefreshLease(operation);
+            return runWithRefreshLease(operation, callerSignal);
           }
         );
       } catch (error) {
         if (callbackStarted) throw error;
+        if (callerSignal?.aborted) throw abortReason(callerSignal);
         if (lockWaitController.signal.aborted) {
           throw new RefreshCoordinationTimeoutError();
         }
@@ -1028,21 +1328,31 @@ async function runWithRefreshLock<T>(operation: RefreshOperation<T>): Promise<T>
         // request: another tab may still hold the real Web Lock.
         throw new RefreshCoordinationUnavailableError();
       } finally {
+        combinedLockSignals?.dispose();
         clearTimeout(lockWaitTimer);
       }
     }
     // Web Locks is restricted to secure contexts, while the Docker E2E origin is plain
     // HTTP. The per-tab storage bakery is the cross-tab fallback; if storage itself is
     // restricted, this module's in-page queue remains the final safe fallback.
-    return runWithRefreshLease(operation);
-  });
+    return runWithRefreshLease(operation, callerSignal);
+  }, callerSignal);
 }
 
 async function runExclusiveRefresh(
   beforeRequest: RefreshObservation
 ): Promise<RefreshOutcome> {
   try {
-    return await runWithRefreshLock((signal) => performRefresh(beforeRequest, signal));
+    return await runWithRefreshLock(async (signal) => {
+      const outcome = await performRefresh(beforeRequest, signal);
+      if (outcome === "invalid") {
+        // Publish while the cookie-mutation lock is still held. The timestamp lets a
+        // peer ignore delayed delivery if a deliberate newer login wins afterward.
+        const sessionEndedAt = nextAuthEventTimestamp(getLastSessionEstablishedAt());
+        broadcastSessionEnded(undefined, sessionEndedAt);
+      }
+      return outcome;
+    });
   } catch (error) {
     if (
       error instanceof RefreshCoordinationTimeoutError ||
@@ -1072,17 +1382,17 @@ function withCoordinationSignal(
   if (!coordinationSignal) return options;
   return {
     ...options,
-    signal: options.signal
-      ? AbortSignal.any([options.signal, coordinationSignal])
-      : coordinationSignal
+    // runWithRefreshLock already folded options.signal into this guarded signal.
+    signal: coordinationSignal
   };
 }
 
 export async function apiFetch<T>(path: string, options: RequestInit = {}, isRetry = false): Promise<T> {
   const refreshBeforeRequest = observeRefreshGeneration();
-  const coordinatesSessionRotation = SESSION_ROTATING_PATHS.has(path.split("?", 1)[0]);
+  const normalizedPath = path.split("?", 1)[0];
+  const coordinatesSessionRotation = SESSION_ROTATING_PATHS.has(normalizedPath);
   const response = coordinatesSessionRotation
-    ? await runWithRefreshLock(async (signal) => {
+      ? await runWithRefreshLock(async (signal) => {
         const rotatingResponse = await rawFetch(
           path,
           withCoordinationSignal(options, signal)
@@ -1092,10 +1402,13 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, isRet
         // in flight will then retry with the new session instead of redeeming and
         // clearing the just-rotated refresh cookie.
         if (rotatingResponse.headers.get("X-Session-Rotated") === "true") {
+          if (SESSION_ESTABLISHING_PATHS.has(normalizedPath)) {
+            notifySessionEstablished();
+          }
           markRefreshed();
         }
         return rotatingResponse;
-      })
+      }, options.signal ?? undefined)
     : await rawFetch(path, options);
 
   if (!response.ok) {
@@ -1105,7 +1418,6 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, isRet
       const outcome = await refreshSession(refreshBeforeRequest);
       if (outcome === "ok") return apiFetch<T>(path, options, true);
       if (outcome === "invalid") {
-        broadcastSessionEnded();
         if (typeof window !== "undefined" && !window.location.pathname.includes("/login")) {
           const locale = currentPathLocale() ?? readCookie("skrynia_locale") ?? "ua";
           window.location.assign(`/${locale}/login`);

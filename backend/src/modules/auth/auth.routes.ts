@@ -12,7 +12,12 @@ import {
   passwordResetRateLimit,
   wsTicketRateLimit
 } from "../../common/middleware/security.js";
-import { REFRESH_COOKIE, setAuthCookies, clearAuthCookies } from "../../common/cookies.js";
+import {
+  ACCESS_COOKIE,
+  REFRESH_COOKIE,
+  setAuthCookies,
+  clearAuthCookies
+} from "../../common/cookies.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { verifyTelegramAuth } from "./telegram.service.js";
 import {
@@ -22,9 +27,9 @@ import {
   issueSession,
   issueTwoFactorPendingToken,
   parseRefreshRecord,
+  rotateRefreshSession,
+  revokePresentedSessionCredentials,
   revokeAllUserSessions,
-  revokeRefreshToken,
-  revokeSession,
   verifyTwoFactorPendingToken
 } from "./session.service.js";
 import { verifyTwoFactorCode } from "./twofa.service.js";
@@ -273,15 +278,21 @@ router.post(
       clearAuthCookies(res);
       throw new ApiError(401, "Refresh token is invalid or expired", "refresh_token_invalid");
     }
-    delete user.sessionVersion;
-
-    // Issue the replacement session *before* revoking the one being redeemed: if anything
-    // below fails, the caller's existing refresh token must remain usable rather than
-    // leaving them with no valid session at all.
-    const session = await issueSession(user.id, user.role);
-    if (env.REFRESH_ROTATION_ENABLED) {
-      await revokeRefreshToken(refreshToken, user.id);
+    const session = await rotateRefreshSession({
+      userId: user.id,
+      role: user.role,
+      sessionVersion: user.sessionVersion,
+      familyId: record.familyId ?? tokenHash,
+      oldRefreshHash: tokenHash,
+      expectedRefreshRecord: rawRecord!,
+      previousAccessToken: req.cookies?.[ACCESS_COOKIE]
+    });
+    if (!session) {
+      clearAuthCookies(res);
+      throw new ApiError(401, "Refresh token is invalid or expired", "refresh_token_invalid");
     }
+
+    delete user.sessionVersion;
     setAuthCookies(res, session);
     delete user.isBanned;
     res.json({ user });
@@ -298,12 +309,11 @@ router.get(
 
 router.post(
   "/logout",
-  authenticate,
-  asyncHandler(async (req: AuthedRequest, res) => {
-    const refreshToken = req.cookies?.[REFRESH_COOKIE];
-    await revokeSession(req.sessionId, req.user.id);
-    await revokeRefreshToken(refreshToken, req.user.id);
-
+  asyncHandler(async (req, res) => {
+    await revokePresentedSessionCredentials({
+      accessToken: req.cookies?.[ACCESS_COOKIE],
+      refreshToken: req.cookies?.[REFRESH_COOKIE]
+    });
     clearAuthCookies(res);
     res.status(204).send();
   })
@@ -428,6 +438,7 @@ router.post(
     const { ticket, expiresInSeconds } = await issueWsTicket({
       userId: req.user.id,
       jti: req.sessionId ?? "",
+      familyId: req.sessionFamilyId,
       sessionVersion: req.sessionVersion ?? 1,
       emailVerified: req.user.emailVerified
     });

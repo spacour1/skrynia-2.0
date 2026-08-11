@@ -31,7 +31,12 @@ test("temporary failures preserve auth, retry data, and navigation/draft afforda
       await route.continue();
     });
     await page.goto("/en/dashboard");
-    await expect(page.getByText(viewer.user.displayName, { exact: true }).first()).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Log in required", exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByText(viewer.user.displayName, { exact: true })
+    ).toHaveCount(0);
     await expect
       .poll(() =>
         page.evaluate(() => Boolean(window.localStorage.getItem("auth_cached_user")))

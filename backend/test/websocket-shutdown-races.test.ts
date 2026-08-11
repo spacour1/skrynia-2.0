@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
     metric,
     poolQuery: vi.fn(),
     redisExists: vi.fn(),
+    redisGet: vi.fn(),
     consumeWsTicket: vi.fn(),
     presenceRegister: vi.fn(),
     presenceUnregister: vi.fn(),
@@ -29,7 +30,32 @@ vi.mock("../src/db/pool.js", () => ({
 }));
 
 vi.mock("../src/common/redis.js", () => ({
-  getRedis: () => ({ exists: mocks.redisExists })
+  getRedis: () => ({
+    exists: mocks.redisExists,
+    get: mocks.redisGet,
+    pipeline: () => {
+      const operations: Array<{ kind: "exists" | "get"; key: string }> = [];
+      const pipeline = {
+        exists(key: string) {
+          operations.push({ kind: "exists", key });
+          return pipeline;
+        },
+        get(key: string) {
+          operations.push({ kind: "get", key });
+          return pipeline;
+        },
+        async exec() {
+          return Promise.all(operations.map(async (operation) => [
+            null,
+            operation.kind === "exists"
+              ? await mocks.redisExists(operation.key)
+              : await mocks.redisGet(operation.key)
+          ]));
+        }
+      };
+      return pipeline;
+    }
+  })
 }));
 
 vi.mock("../src/common/logger.js", () => ({
@@ -70,7 +96,7 @@ vi.mock("../src/modules/chat/chat.service.js", () => ({
   sendMessageIdempotently: mocks.sendMessage
 }));
 
-const { attachWebSocketServer } = await import(
+const { attachWebSocketServer, WS_CLOSE_SESSION_REVOKED } = await import(
   "../src/modules/chat/ws.service.js"
 );
 
@@ -182,7 +208,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.metric.labels.mockReturnValue(mocks.metric);
   mocks.consumeWsTicket.mockResolvedValue(identity);
-  mocks.redisExists.mockResolvedValue(1);
+  mocks.redisExists.mockImplementation(async (key: string) => (
+    key.startsWith("session_revoked:") ? 0 : 1
+  ));
+  mocks.redisGet.mockResolvedValue(null);
   mocks.poolQuery.mockResolvedValue(aliveUserResult);
   mocks.presenceRegister.mockResolvedValue(true);
   mocks.presenceUnregister.mockResolvedValue(undefined);
@@ -253,6 +282,17 @@ describe("websocket shutdown admission races", () => {
     expect(mocks.presenceRegister).not.toHaveBeenCalled();
   });
 
+  it("rejects a new handshake when Redis cannot verify revocation state", async () => {
+    mocks.redisExists.mockRejectedValueOnce(new Error("redis unavailable"));
+    const testRuntime = await createRuntime();
+    const socket = openSocket(testRuntime);
+    const closed = waitForClose(socket);
+
+    await expect(closed).resolves.toEqual({ code: 1008, reason: "Unauthorized" });
+    expect(mocks.poolQuery).not.toHaveBeenCalled();
+    expect(mocks.presenceRegister).not.toHaveBeenCalled();
+  });
+
   it("stops a ticket handshake after the database session boundary", async () => {
     const userCheck = deferred<typeof aliveUserResult>();
     mocks.poolQuery.mockReturnValueOnce(userCheck.promise);
@@ -319,6 +359,29 @@ describe("websocket shutdown admission races", () => {
 
     await expectShutdownClose(closed, shutdown);
     expect(mocks.poolQuery).toHaveBeenCalledOnce();
+    expect(mocks.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("closes an admitted socket before a mutation when Redis verification fails", async () => {
+    const testRuntime = await createRuntime();
+    const socket = openSocket(testRuntime);
+    await waitForConnected(socket);
+    const closed = waitForClose(socket);
+    mocks.poolQuery.mockClear();
+    mocks.redisExists.mockRejectedValueOnce(new Error("redis unavailable"));
+
+    socket.send(
+      JSON.stringify({
+        type: "leave_conversation",
+        conversationId: "00000000-0000-4000-8000-000000000002"
+      })
+    );
+
+    await expect(closed).resolves.toEqual({
+      code: WS_CLOSE_SESSION_REVOKED,
+      reason: "Session revoked"
+    });
+    expect(mocks.poolQuery).not.toHaveBeenCalled();
     expect(mocks.sendMessage).not.toHaveBeenCalled();
   });
 

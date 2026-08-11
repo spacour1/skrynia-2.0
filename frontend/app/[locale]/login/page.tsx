@@ -14,7 +14,7 @@ import { consumeReturnPath } from "@/lib/return-path";
 // both problems entirely.
 export default function LoginPage() {
   const router = useRouter();
-  const setUser = useAuth((s) => s.setUser);
+  const establishSession = useAuth((s) => s.establishSession);
   const { t } = useI18n();
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -43,7 +43,7 @@ export default function LoginPage() {
         setTwoFactorToken(response.twoFactorToken);
         return;
       }
-      setUser(response.user);
+      establishSession(response.user);
       goNext();
     } catch (err) {
       // ApiError carries a server-written, already-user-safe message (e.g. "Invalid email
@@ -63,7 +63,7 @@ export default function LoginPage() {
         method: "POST",
         body: JSON.stringify({ twoFactorToken, code: twoFactorCode.trim() })
       });
-      setUser(response.user);
+      establishSession(response.user);
       goNext();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("common.somethingWentWrong"));

@@ -9,7 +9,7 @@ import { consumeReturnPath } from "@/lib/return-path";
 
 export default function RegisterPage() {
   const router = useRouter();
-  const setUser = useAuth((s) => s.setUser);
+  const establishSession = useAuth((s) => s.establishSession);
   const { t } = useI18n();
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -28,7 +28,7 @@ export default function RegisterPage() {
           displayName: form.get("displayName")
         })
       });
-      setUser(response.user);
+      establishSession(response.user);
       router.push(consumeReturnPath());
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("common.somethingWentWrong"));

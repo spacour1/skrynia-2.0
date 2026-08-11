@@ -10,6 +10,10 @@ export type SessionSecurityEvent =
       sessionId: string;
     }
   | {
+      type: "session.family.revoked";
+      familyId: string;
+    }
+  | {
       type: "user.sessions.revoked";
       userId: string;
       exceptSessionId?: string;
@@ -38,6 +42,13 @@ onRealtimeEvent((event) => {
     emitSessionSecurityEvent({
       type: "session.revoked",
       sessionId: event.targetId
+    });
+    return;
+  }
+  if (event.type === "session.family.revoked" && event.scope === "session") {
+    emitSessionSecurityEvent({
+      type: "session.family.revoked",
+      familyId: event.targetId
     });
     return;
   }
@@ -74,6 +85,17 @@ export function publishSessionSecurityEvent(
         type: event.type,
         scope: "session",
         targetId: event.sessionId,
+        payload: {}
+      },
+      options
+    );
+  }
+  if (event.type === "session.family.revoked") {
+    return publishRealtimeEvent(
+      {
+        type: event.type,
+        scope: "session",
+        targetId: event.familyId,
         payload: {}
       },
       options

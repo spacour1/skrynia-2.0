@@ -4,7 +4,7 @@ import * as Sentry from "@sentry/node";
 import { pool } from "../../db/pool.js";
 import { env } from "../../config/env.js";
 import { logger } from "../logger.js";
-import { ApiError } from "../errors.js";
+import { ApiError, serviceUnavailable } from "../errors.js";
 import { getRedis } from "../redis.js";
 import { ACCESS_COOKIE } from "../cookies.js";
 import type { AuthUser, AuthedRequest } from "../types.js";
@@ -12,6 +12,7 @@ import type { AuthUser, AuthedRequest } from "../types.js";
 type JwtPayload = {
   sub: string;
   jti: string;
+  fid?: string;
   /** Session version the token was issued under; absent on pre-rollout tokens (treated as 1). */
   sv?: number;
 };
@@ -26,20 +27,41 @@ const AUTH_USER_SELECT = `
   from users
   where id = $1`;
 
-// Redis only backs the immediate-revocation check (logout/ban kill a session before its JWT
-// naturally expires). A connection blip there must never look like "this user is logged out" -
-// that would mass-logout everyone for a few seconds every time Redis hiccups. So a failed
-// reachability check is treated as "can't confirm revocation right now" and falls back to
-// trusting the JWT's own signature/expiry, not as "session revoked".
-async function isSessionRevoked(jti: string): Promise<boolean> {
-  const redis = getRedis();
-  if (!redis) return false;
+// Redis is the durable per-session/family revocation authority. If it cannot be checked,
+// authenticated requests fail with a retryable 503 instead of trusting a JWT that may
+// already have been logged out. Optional authentication simply remains anonymous.
+function isActiveFamilyRecord(raw: unknown, userId: string): boolean {
+  if (typeof raw !== "string") return false;
   try {
-    const exists = await redis.exists(`session:${jti}`);
-    return !exists;
-  } catch (error) {
-    logger.warn({ error, jti }, "session_revocation_check_failed_redis_unavailable");
+    const record = JSON.parse(raw) as { s?: unknown; u?: unknown };
+    return record.s === "active" && record.u === userId;
+  } catch {
     return false;
+  }
+}
+
+async function isSessionRevoked(jti: string, familyId: string | undefined, userId: string): Promise<boolean> {
+  const redis = getRedis();
+  if (!redis) throw serviceUnavailable("Session verification is temporarily unavailable");
+  try {
+    const transaction = redis
+      .multi()
+      .exists(`session:${jti}`)
+      .exists(`session_revoked:${jti}`);
+    if (familyId) transaction.get(`refresh_family:${familyId}`);
+    const results = await transaction.exec();
+    if (!results || results.some(([error]) => error)) {
+      throw new Error("Session revocation transaction failed");
+    }
+    const sessionExists = Number(results[0]?.[1]) === 1;
+    const exactTombstoneExists = Number(results[1]?.[1]) === 1;
+    const familyActive = familyId
+      ? isActiveFamilyRecord(results[2]?.[1], userId)
+      : true;
+    return !sessionExists || exactTombstoneExists || !familyActive;
+  } catch (error) {
+    logger.warn({ error, jti, familyId }, "session_revocation_check_failed_redis_unavailable");
+    throw serviceUnavailable("Session verification is temporarily unavailable");
   }
 }
 
@@ -49,7 +71,8 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
     if (!token) throw new ApiError(401, "Missing access token", "unauthorized");
 
     const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
-    if (await isSessionRevoked(payload.jti)) {
+    const familyId = typeof payload.fid === "string" && payload.fid ? payload.fid : undefined;
+    if (await isSessionRevoked(payload.jti, familyId, payload.sub)) {
       throw new ApiError(401, "Session expired", "unauthorized");
     }
 
@@ -66,6 +89,7 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
     const { sessionVersion: _sessionVersion, ...user } = row;
     req.user = user;
     req.sessionId = payload.jti;
+    req.sessionFamilyId = familyId;
     req.sessionVersion = row.sessionVersion;
     req.rateLimitUserId = user.id;
     req.rateLimitSessionId = payload.jti;
@@ -92,7 +116,8 @@ export const authenticateOptional: RequestHandler = async (req, _res, next) => {
     if (!token) return next();
 
     const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
-    if (await isSessionRevoked(payload.jti)) return next();
+    const familyId = typeof payload.fid === "string" && payload.fid ? payload.fid : undefined;
+    if (await isSessionRevoked(payload.jti, familyId, payload.sub)) return next();
 
     const result = await pool.query<AuthUserRow>(AUTH_USER_SELECT, [payload.sub]);
     const row = result.rows[0];
@@ -100,6 +125,7 @@ export const authenticateOptional: RequestHandler = async (req, _res, next) => {
       const { sessionVersion: _sessionVersion, ...user } = row;
       req.user = user;
       req.sessionId = payload.jti;
+      req.sessionFamilyId = familyId;
       req.sessionVersion = row.sessionVersion;
       req.rateLimitUserId = user.id;
       req.rateLimitSessionId = payload.jti;

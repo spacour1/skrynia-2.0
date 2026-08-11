@@ -324,10 +324,9 @@ export function Nav() {
                   onDashboard={() => router.push("/dashboard")}
                   onSettings={() => router.push("/settings")}
                   onLogout={() => {
-                    logout().finally(() => {
-                      setProfileOpen(false);
-                      router.push("/");
-                    });
+                    void logout();
+                    setProfileOpen(false);
+                    router.push("/");
                   }}
                 />
               ) : null}

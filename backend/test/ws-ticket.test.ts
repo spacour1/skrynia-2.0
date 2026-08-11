@@ -2,6 +2,7 @@ import http from "node:http";
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { WebSocket, type RawData } from "ws";
@@ -58,6 +59,8 @@ async function sessionFor(role: "user" | "admin" = "user") {
   return {
     userId,
     jti: session.jti,
+    familyId: session.familyId,
+    accessToken: session.accessToken,
     cookie: [`access_token=${session.accessToken}`, `csrf_token=${session.csrfToken}`].join("; "),
     csrf: session.csrfToken
   };
@@ -253,6 +256,57 @@ describe("ws tickets", () => {
 });
 
 describe("realtime delivery and connection limits", () => {
+  it("closes a family socket from durable state even when the PubSub event was missed", async () => {
+    const session = await sessionFor();
+    const ticket = await getTicket(session);
+    const socket = await connectLive(`${wsUrl}?ticket=${encodeURIComponent(ticket)}`);
+    const redis = getRedis()!;
+    await redis.set(
+      `refresh_family:${session.familyId}`,
+      JSON.stringify({ s: "revoked", u: session.userId }),
+      "EX",
+      24 * 60 * 60
+    );
+
+    const closed = waitForClose(socket);
+    await websocketRuntime.runSecuritySweep();
+
+    expect((await closed).code).toBe(WS_CLOSE_SESSION_REVOKED);
+  });
+
+  it("bounds a legacy socket without family metadata by its exact session key", async () => {
+    const session = await sessionFor();
+    const payload = jwt.decode(session.accessToken) as {
+      sub: string;
+      role: string;
+      jti: string;
+      sv: number;
+    };
+    const legacyAccess = jwt.sign(
+      {
+        sub: payload.sub,
+        role: payload.role,
+        jti: payload.jti,
+        sv: payload.sv
+      },
+      process.env.JWT_SECRET!,
+      { expiresIn: "15m" }
+    );
+    const redis = getRedis()!;
+    // Model a genuinely pre-family socket: the bridge must be absent when the
+    // handshake runs, otherwise admission correctly learns and caches the family.
+    await redis.del(`session_family:${session.jti}`);
+    const socket = await connectLive(wsUrl, {
+      Cookie: `access_token=${legacyAccess}`
+    });
+    await redis.del(`session:${session.jti}`);
+
+    const closed = waitForClose(socket);
+    await websocketRuntime.runSecuritySweep();
+
+    expect((await closed).code).toBe(WS_CLOSE_SESSION_REVOKED);
+  });
+
   it("closes an already-connected socket when the durable session epoch changes", async () => {
     const session = await sessionFor();
     const ticket = await getTicket(session);

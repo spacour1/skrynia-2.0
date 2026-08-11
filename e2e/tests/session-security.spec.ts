@@ -19,6 +19,9 @@ import {
 
 const AUTH_ME_PATH = "/api/auth/me";
 const AUTH_REFRESH_PATH = "/api/auth/refresh";
+const AUTH_LOGOUT_PATH = "/api/auth/logout";
+const CACHED_USER_KEY = "auth_cached_user";
+const PENDING_LOGOUT_KEY = "auth_pending_logout";
 const REFRESH_LEASE_KEY_PREFIX = "auth_refresh_lease:";
 
 function deferred<T>() {
@@ -111,6 +114,16 @@ async function activeRefreshLeaseCount(page: Page) {
     }
     return count;
   }, REFRESH_LEASE_KEY_PREFIX);
+}
+
+async function setNavigatorOnline(page: Page, online: boolean) {
+  await page.evaluate((value) => {
+    Object.defineProperty(window.navigator, "onLine", {
+      configurable: true,
+      get: () => value
+    });
+    window.dispatchEvent(new Event(value ? "online" : "offline"));
+  }, online);
 }
 
 test("coordinates simultaneous refreshes across tabs when Web Locks are unavailable", async ({
@@ -442,5 +455,131 @@ test("password change rotates the current session and revokes HTTP, refresh, and
     expect(me.user.id).toBe(primary.user.id);
   } finally {
     await Promise.all([oldSession.close(), closeActors(primary, secondary)]);
+  }
+});
+
+test("offline logout stays anonymous across tabs and reload, then retries revocation", async ({
+  browser
+}) => {
+  const actor = await registerVerifiedActor(browser, "offline-logout-user");
+  const staleSession = await browser.newContext();
+  await staleSession.addCookies(await actor.context.cookies(baseURL));
+
+  let allowLogout = false;
+  let logoutAttempts = 0;
+  let retryResponse: Response | undefined;
+  const firstAbort = deferred<void>();
+  const observeResponse = (response: Response) => {
+    if (isApiResponse(response, AUTH_LOGOUT_PATH, "POST", 204)) {
+      retryResponse = response;
+    }
+  };
+
+  try {
+    const pageA = await actor.context.newPage();
+    const pageB = await actor.context.newPage();
+    await Promise.all([pageA.goto("/en"), pageB.goto("/en")]);
+
+    const header = (page: Page) => page.locator("header");
+    await Promise.all([
+      expect(header(pageA).getByText(actor.user.displayName, { exact: true })).toBeVisible(),
+      expect(header(pageB).getByText(actor.user.displayName, { exact: true })).toBeVisible()
+    ]);
+
+    await pageB.addInitScript(() => {
+      Object.defineProperty(window.navigator, "onLine", {
+        configurable: true,
+        get: () => false
+      });
+    });
+    await actor.context.route("**/api/auth/logout", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      logoutAttempts += 1;
+      if (!allowLogout) {
+        await route.abort("failed");
+        firstAbort.resolve(undefined);
+        return;
+      }
+      await route.continue();
+    });
+    actor.context.on("response", observeResponse);
+
+    await header(pageA)
+      .getByRole("button")
+      .filter({ hasText: actor.user.displayName })
+      .click();
+    await header(pageA)
+      .getByRole("button", { name: "Logout", exact: true })
+      .click();
+    await firstAbort.promise;
+    await Promise.all([
+      setNavigatorOnline(pageA, false),
+      setNavigatorOnline(pageB, false)
+    ]);
+
+    await Promise.all([
+      expect(header(pageA).getByText("Login", { exact: true })).toBeVisible(),
+      expect(header(pageB).getByText("Login", { exact: true })).toBeVisible()
+    ]);
+    const failedState = await pageB.evaluate(
+      ({ cachedKey, pendingKey }) => ({
+        cached: window.localStorage.getItem(cachedKey),
+        pending: window.localStorage.getItem(pendingKey)
+      }),
+      { cachedKey: CACHED_USER_KEY, pendingKey: PENDING_LOGOUT_KEY }
+    );
+    expect(failedState.cached).toBeNull();
+    expect(failedState.pending).not.toBeNull();
+    expect(JSON.parse(failedState.pending!)).toEqual({
+      requestedAt: expect.any(Number),
+      attempts: expect.any(Number),
+      state: "pending-server-logout"
+    });
+
+    await pageB.reload({ waitUntil: "domcontentloaded" });
+    await expect(pageB.evaluate(() => navigator.onLine)).resolves.toBe(false);
+    await expect(header(pageB).getByText("Login", { exact: true })).toBeVisible();
+    const reloadedState = await pageB.evaluate(
+      ({ cachedKey, pendingKey }) => ({
+        cached: window.localStorage.getItem(cachedKey),
+        pending: window.localStorage.getItem(pendingKey)
+      }),
+      { cachedKey: CACHED_USER_KEY, pendingKey: PENDING_LOGOUT_KEY }
+    );
+    expect(reloadedState.cached).toBeNull();
+    expect(reloadedState.pending).not.toBeNull();
+
+    expect((await rawApi(staleSession, "GET", "/auth/me")).status()).toBe(200);
+
+    allowLogout = true;
+    await expect.poll(
+      async () => {
+        await setNavigatorOnline(pageB, true);
+        return retryResponse?.status();
+      },
+      { timeout: 15_000, intervals: [25, 50, 100, 200] }
+    ).toBe(204);
+
+    expect(logoutAttempts).toBeGreaterThanOrEqual(2);
+    await expect.poll(() =>
+      pageB.evaluate((key) => window.localStorage.getItem(key), PENDING_LOGOUT_KEY)
+    ).toBeNull();
+    expect(
+      await pageB.evaluate((key) => window.localStorage.getItem(key), CACHED_USER_KEY)
+    ).toBeNull();
+    await expect.poll(
+      async () => (await rawApi(staleSession, "GET", "/auth/me")).status()
+    ).toBe(401);
+    await Promise.all([
+      expect(header(pageA).getByText("Login", { exact: true })).toBeVisible(),
+      expect(header(pageB).getByText("Login", { exact: true })).toBeVisible()
+    ]);
+  } finally {
+    actor.context.off("response", observeResponse);
+    await actor.context.unroute("**/api/auth/logout").catch(() => undefined);
+    await Promise.all([staleSession.close(), closeActors(actor)]);
   }
 });

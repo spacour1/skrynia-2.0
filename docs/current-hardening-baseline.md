@@ -12,21 +12,25 @@ none of those categories is a substitute for another.
 | Branch | `main` |
 | Master Hardening Plan V2 recorded baseline | `805163058855fde32b3a1474b75169ceaaa95ade` |
 | Verified Stage 1 input / pre-documentation HEAD | `805163058855fde32b3a1474b75169ceaaa95ade` |
-| Remote main at execution start | `805163058855fde32b3a1474b75169ceaaa95ade` |
-| Local/remote divergence | 0 ahead / 0 behind |
-| Working tree at execution start | Clean (`git status --short` returned no entries) |
+| Stage 1 documentation commit | `f86ebefed334103e84e859e4c57bae248f69288e` |
+| Stage 2 financial-freeze commit | `844a865b6c79ab53760416c3e2d021034625d91c` |
+| Verified Stage 3 input / current main | `844a865b6c79ab53760416c3e2d021034625d91c` |
+| Remote main before Stage 3 | `844a865b6c79ab53760416c3e2d021034625d91c` |
+| Stage 3 input divergence | 0 ahead / 0 behind |
+| Stage 3 input working tree | Clean (`git status --short` returned no entries) |
 | Local tools | Node.js `24.18.0`; npm `11.16.0`; Docker client/server `29.5.3` |
 | CI/runtime Node line | Node.js 20; production images use `node:20-alpine` |
 | Production readiness | **NOT CERTIFIED** |
 
-`8051630` is the input SHA whose application tree was validated. This document
-will be committed at a later SHA; the two values must not be presented as the
-same checkpoint.
+`8051630` remains the exact application tree for the Stage 1 local evidence.
+`f86ebef` closed the Stage 1 documentation step, and `844a865` added the
+financial-freeze policy without changing application behavior. Those checkpoints
+must not be merged into one unlabeled claim.
 
 ## Changes since the previous baseline document
 
 The previous baseline stopped at `364547c`. These later commits are part of the
-current Stage 1 input, in chronological order:
+current Stage 3 input, in chronological order:
 
 | Commit | Change |
 | --- | --- |
@@ -39,12 +43,15 @@ current Stage 1 input, in chronological order:
 | `c068219` | `fix(auth): make offline logout behavior explicit` |
 | `555cb6f` | `fix(security): upgrade image processing dependencies` |
 | `8051630` | `fix(security): upgrade Next.js runtime` |
+| `f86ebef` | `docs(hardening): refresh nonfinancial baseline` |
+| `844a865` | `chore(scope): enforce financial subsystem freeze` |
 
 The application now includes the bounded audit drain, post-commit participant
 cache invalidation, Web-Lock and fallback cross-tab refresh coordination,
 offline logout recovery, Sharp/libvips remediation, and the supported Next.js
-15 runtime upgrade. Those completed changes are not reopened without a new,
-reproducible defect.
+15 runtime upgrade. The repository also includes the reviewed fail-closed
+financial-freeze policy and CI job. Those completed changes are not reopened
+without a new, reproducible defect.
 
 ## Historical evidence
 
@@ -67,11 +74,13 @@ their later fixes:
 | `c068219` | [31517847706](https://github.com/spacour1/skrynia-2.0/actions/runs/31517847706) | PASS - 9/9 jobs |
 | `555cb6f` | [31521299384](https://github.com/spacour1/skrynia-2.0/actions/runs/31521299384) | PASS - 9/9 jobs |
 | `8051630` | [31525717518](https://github.com/spacour1/skrynia-2.0/actions/runs/31525717518) | PASS - 9/9 jobs |
+| `f86ebef` | [32003940348](https://github.com/spacour1/skrynia-2.0/actions/runs/32003940348) | PASS - 9/9 jobs |
+| `844a865` | [32014884140](https://github.com/spacour1/skrynia-2.0/actions/runs/32014884140) | PASS - 10/10 jobs |
 
 Red runs are not hidden. `130cc52` repaired the audit failure, and `e3a4806`
-repaired the frontend lease fixture. The final Stage 1 input run is green.
+repaired the frontend lease fixture. The current Stage 3 input run is green.
 
-## Exact current-tree local evidence
+## Exact Stage 1 local application evidence
 
 All commands below ran on 2026-08-17 against the `8051630` application tree on
 Windows PowerShell. PostgreSQL 16 and Redis 7 ran in an isolated Compose project;
@@ -104,10 +113,12 @@ as `TIMEOUT`, not PASS. Inspection showed active Vitest and PostgreSQL work rath
 than a deadlock. The unchanged full suite was rerun with a sufficient limit and
 completed 540/540; the successful rerun is the result reported above.
 
-## Current CI evidence
+## Current exact-SHA CI evidence
 
-GitHub Actions run [31525717518](https://github.com/spacour1/skrynia-2.0/actions/runs/31525717518)
-is the exact CI result for `8051630`: **PASS, 9/9 jobs**.
+Stage 1 documentation commit `f86ebef` passed [CI run 32003940348](https://github.com/spacour1/skrynia-2.0/actions/runs/32003940348)
+with **9/9 jobs**. The latest exact current-tree result is
+[CI run 32014884140](https://github.com/spacour1/skrynia-2.0/actions/runs/32014884140)
+for `844a865`: **PASS, 10/10 jobs**.
 
 | Job/evidence | Result |
 | --- | --- |
@@ -118,9 +129,11 @@ is the exact CI result for `8051630`: **PASS, 9/9 jobs**.
 | Audit-policy unit suite | PASS - 10/10 tests |
 | Full-history Gitleaks scan | PASS |
 | Compose validation and production image build | PASS |
+| Financial-freeze policy tests and enforcement | PASS - 45/45 policy tests; guard job green |
 
-This is CI evidence for `8051630`. The documentation commit created from this
-capture requires its own green CI run before Stage 1 is closed.
+This is current-tree CI evidence for `844a865`. The Stage 3 documentation commit
+created from this capture has a later SHA and requires its own green CI before
+Stage 3 closes.
 
 ## Dependency security baseline
 
@@ -166,8 +179,10 @@ nonfinancial scope.
 
 Production readiness remains **NOT CERTIFIED**. The principal open work is:
 
-- the financial subsystem is frozen by explicit instruction, but the automated
-  path/symbol freeze guard is not yet installed;
+- the financial subsystem is frozen by explicit instruction; `844a865` installs
+  the path/symbol/fragment guard, 45/45 policy tests, root policy, and CI
+  enforcement. It remains a reviewed repository control, not an automatic proof
+  of every future semantic boundary;
 - step-up authentication and the pending email-change workflow are not yet
   implemented;
 - verification/reset token binding, atomic consumption, password generations,

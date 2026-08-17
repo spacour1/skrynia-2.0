@@ -1,0 +1,2452 @@
+{
+  "schemaVersion": 1,
+  "pathRules": [
+    {
+      "id": "backend-financial-core",
+      "type": "files",
+      "paths": [
+        "backend/src/domain/money.ts",
+        "backend/src/modules/users/wallet.service.ts",
+        "backend/src/modules/admin/admin-finance.routes.ts",
+        "backend/src/modules/admin/admin-payouts.routes.ts",
+        "backend/src/modules/admin/reconciliation.service.ts",
+        "backend/src/modules/disputes/dispute-resolution.service.ts"
+      ]
+    },
+    {
+      "id": "backend-financial-domains",
+      "type": "prefix",
+      "prefixes": [
+        "backend/src/modules/payments/",
+        "backend/src/modules/orders/",
+        "backend/src/modules/currencies/"
+      ],
+      "extensions": [
+        ".ts"
+      ]
+    },
+    {
+      "id": "shared-financial-contracts",
+      "type": "files",
+      "paths": [
+        "shared/contracts/money.ts",
+        "shared/contracts/order.ts"
+      ]
+    },
+    {
+      "id": "frontend-financial-core",
+      "type": "files",
+      "paths": [
+        "frontend/lib/money.ts",
+        "frontend/lib/currency.tsx",
+        "frontend/lib/liqpay.ts",
+        "frontend/lib/monobank.ts",
+        "frontend/lib/wayforpay.ts",
+        "frontend/lib/admin-disputes.ts",
+        "frontend/components/CurrencySwitcher.tsx",
+        "frontend/components/ManualPaymentPanel.tsx",
+        "frontend/app/[locale]/settings/_components/PaymentsCard.tsx",
+        "frontend/app/[locale]/admin/payouts/page.tsx",
+        "frontend/app/[locale]/seller/earnings/page.tsx",
+        "frontend/app/[locale]/seller/sales/page.tsx"
+      ]
+    },
+    {
+      "id": "frontend-financial-routes",
+      "type": "prefix",
+      "prefixes": [
+        "frontend/app/[locale]/wallet/",
+        "frontend/app/[locale]/orders/",
+        "frontend/app/[locale]/admin/finance/"
+      ],
+      "extensions": [
+        ".ts",
+        ".tsx"
+      ]
+    },
+    {
+      "id": "financial-locales",
+      "type": "files",
+      "paths": [
+        "frontend/i18n/locales/en/wallet.json",
+        "frontend/i18n/locales/en/orders.json",
+        "frontend/i18n/locales/ru/wallet.json",
+        "frontend/i18n/locales/ru/orders.json",
+        "frontend/i18n/locales/ua/wallet.json",
+        "frontend/i18n/locales/ua/orders.json"
+      ]
+    },
+    {
+      "id": "dedicated-financial-tests",
+      "type": "files",
+      "paths": [
+        "backend/test/ledger.test.ts",
+        "backend/test/money-cents.test.ts",
+        "backend/test/payment-money.test.ts",
+        "backend/test/payment-webhooks.test.ts",
+        "backend/test/test-payments.test.ts",
+        "backend/test/test-payments-gate.test.ts",
+        "backend/test/validation.test.ts",
+        "backend/test/order-transitions.test.ts",
+        "backend/test/order-cache.service.test.ts",
+        "backend/test/order-cache-invalidation.test.ts",
+        "backend/test/dto-contracts.test.ts",
+        "frontend/test/currency.test.tsx",
+        "frontend/test/admin-disputes.test.ts",
+        "e2e/tests/golden.spec.ts",
+        "e2e/tests/dispute.spec.ts",
+        "load-tests/scenarios/order-flow.js"
+      ]
+    },
+    {
+      "id": "financial-code-path-names",
+      "type": "path-regex",
+      "patterns": [
+        "(?:^|/)(?:payments?|wallet|ledger|escrow|payouts?|refunds?|settlements?|reconciliation|currencies|currency|money|accounting|finance|fees?|transactions?|orders?)(?:[./_-]|$)"
+      ],
+      "extensions": [
+        ".ts",
+        ".tsx",
+        ".js",
+        ".mjs",
+        ".sql",
+        ".ps1"
+      ]
+    },
+    {
+      "id": "financial-camelcase-path-names",
+      "type": "path-regex",
+      "caseSensitive": true,
+      "patterns": [
+        "(?:^|/|[a-z0-9])(?:Payment|Wallet|Ledger|Escrow|Payout|Refund|Settlement|Reconciliation|Currency|Money|Accounting|Finance|Fee|Transaction|Order)(?=[A-Z])"
+      ],
+      "extensions": [
+        ".ts",
+        ".tsx",
+        ".js",
+        ".mjs",
+        ".sql",
+        ".ps1"
+      ]
+    },
+    {
+      "id": "deployed-migrations",
+      "type": "base-prefix",
+      "prefixes": [
+        "backend/migrations/"
+      ],
+      "extensions": [
+        ".sql"
+      ]
+    }
+  ],
+  "mixedFiles": [
+    {
+      "path": "backend/src/common/validation.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "validation-money-import",
+          "start": "^import \\{$",
+          "end": "^export const uuidSchema\\b"
+        },
+        {
+          "id": "validation-money-conversion",
+          "start": "^const MONEY_PATTERN\\b",
+          "toEnd": true
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "backend/src/common/dto.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "dto-money-import",
+          "start": "^import \\{$",
+          "end": "^export type DbDate\\b"
+        },
+        {
+          "id": "dto-money-mappers",
+          "start": "^export function toMoneyCents\\(",
+          "end": "^export function toNumber\\("
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "backend/src/domain/enums.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "domain-order-statuses",
+          "start": "^export const ORDER_STATUSES\\b",
+          "end": "^export const PRODUCT_STATUSES\\b"
+        },
+        {
+          "id": "domain-dispute-resolution-enums",
+          "start": "^export const DISPUTE_STATUSES\\b",
+          "end": "^export const DELIVERY_TYPES\\b"
+        },
+        {
+          "id": "domain-currency-enum",
+          "start": "^export const CURRENCY_CODES\\b",
+          "end": "^function includes<"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "domain-financial-enum-guards",
+          "pattern": "^export const is(?:OrderStatus|DisputeStatus|CurrencyCode)\\b",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "shared/contracts/enums.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "shared-order-statuses",
+          "start": "^export const ORDER_STATUSES\\b",
+          "end": "^export const PRODUCT_STATUSES\\b"
+        },
+        {
+          "id": "shared-dispute-statuses",
+          "start": "^export const DISPUTE_STATUSES\\b",
+          "end": "^export const MESSAGE_KINDS\\b"
+        },
+        {
+          "id": "shared-dispute-currency-enums",
+          "start": "^export const DISPUTE_DECISIONS\\b",
+          "end": "^function includes<"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "shared-financial-enum-guards",
+          "pattern": "^export const is(?:OrderStatus|DisputeStatus|CurrencyCode)\\b",
+          "expected": 3,
+          "before": 0,
+          "after": 1
+        }
+      ]
+    },
+    {
+      "path": "frontend/lib/contracts.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "frontend-order-statuses",
+          "start": "^export const ORDER_STATUSES\\b",
+          "end": "^export const PRODUCT_STATUSES\\b"
+        },
+        {
+          "id": "frontend-dispute-statuses",
+          "start": "^export const DISPUTE_STATUSES\\b",
+          "end": "^export const MESSAGE_KINDS\\b"
+        },
+        {
+          "id": "frontend-financial-primitives",
+          "start": "^export const DISPUTE_DECISIONS\\b",
+          "end": "^export type AuthUserDto\\b"
+        },
+        {
+          "id": "frontend-order-dtos",
+          "start": "^export type OrderMutationDto\\b",
+          "end": "^export type ProductMediaDto\\b"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "frontend-financial-contract-fields",
+          "pattern": "^\\s+(?:priceCents|oldPriceCents|amountCents|completedRevenueCents|resolutionDecision|resolutionOperationId|currency):",
+          "expected": 24,
+          "before": 0,
+          "after": 0
+        },
+        {
+          "id": "frontend-seller-financial-counters",
+          "pattern": "^\\s*(?:activeOrders|completedOrders|disputedOrders|refundedOrders|completedRevenueCents):",
+          "expected": 5,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/auth/auth.routes.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "registration-wallet-creation",
+          "pattern": "insert into wallets\\(user_id, currency\\)",
+          "expected": 2,
+          "before": 1,
+          "after": 3
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/users/users.routes.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "wallet-http-api",
+          "start": "^\\s*\"/me/wallet\",$",
+          "end": "^const phoneRequestSchema\\b",
+          "includeBefore": 1
+        },
+        {
+          "id": "public-seller-financial-stats",
+          "start": "^\\s*order_stats as \\($",
+          "end": "^\\s*review_stats as \\($"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "wallet-route-imports",
+          "pattern": "^import .*?(?:moneyToCents|wallet\\.service\\.js)",
+          "expected": 2,
+          "before": 0,
+          "after": 0
+        },
+        {
+          "id": "public-seller-product-prices",
+          "pattern": "select p\\.id, p\\.title, p\\.description, p\\.price_cents",
+          "expected": 1,
+          "before": 0,
+          "after": 3
+        },
+        {
+          "id": "public-seller-financial-mapping",
+          "pattern": "(?:toPublicSellerStatsDto|completedRevenueCents)",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/admin/admin-users.routes.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "admin-financial-overview-api",
+          "start": "^\\s*\"/overview\",$",
+          "end": "^\\s*\"/users\",$",
+          "includeBefore": 1
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "backend/src/modules/admin/admin.routes.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "admin-financial-route-mounts",
+          "pattern": "(?:financeRoutes|payoutsRoutes)",
+          "expected": 4,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/admin/admin-ops.routes.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "admin-financial-job-trigger",
+          "start": "^\\s*\"/jobs/:name\",$",
+          "end": "^\\s*\"/listings\",$",
+          "includeBefore": 1
+        },
+        {
+          "id": "admin-pending-orders",
+          "start": "^\\s*\"/orders/pending\",$",
+          "end": "^export default router;$",
+          "includeBefore": 1
+        },
+        {
+          "id": "admin-manual-payment-confirmation",
+          "start": "^\\s*\"/orders/:id/confirm-payment\",$",
+          "end": "^export default router;$",
+          "includeBefore": 6
+        }
+      ],
+      "anchors": [
+        {
+          "id": "admin-financial-ops-imports",
+          "pattern": "^import .*?(?:orders/ledger\\.service|paymentAttemptsTotal)",
+          "expected": 2,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/disputes/disputes.routes.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "dispute-resolution-schema",
+          "start": "^const resolveSchema\\b",
+          "end": "^const messageSchema\\b"
+        },
+        {
+          "id": "dispute-financial-detail-query",
+          "start": "^async function selectDisputeDetail\\(",
+          "end": "^\\s*\"/orders/:orderId/dispute\",$",
+          "expectedEnds": 2,
+          "endOccurrence": 1
+        },
+        {
+          "id": "dispute-open-order-transition",
+          "start": "^\\s*\"/orders/:orderId/dispute\",$",
+          "expectedStarts": 2,
+          "startOccurrence": 2,
+          "end": "^\\s*\"/:id/messages\",$",
+          "expectedEnds": 2,
+          "endOccurrence": 1,
+          "includeBefore": 1
+        },
+        {
+          "id": "dispute-resolution-route",
+          "start": "^\\s*\"/:id/resolve\",$",
+          "end": "^export default router;$",
+          "includeBefore": 1
+        },
+        {
+          "id": "dispute-staff-financial-list",
+          "start": "^\\s*\"/\",$",
+          "end": "^\\s*\"/:id\",$",
+          "includeBefore": 1
+        }
+      ],
+      "anchors": [
+        {
+          "id": "dispute-resolution-imports",
+          "pattern": "(?:orders/order-transitions|dispute-resolution\\.service|orders/orders\\.dto|orders/order-cache\\.service)",
+          "expected": 4,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/jobs/queue.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "escrow-release-worker",
+          "start": "^async function processEscrowRelease\\(",
+          "end": "^async function processDisputeTimers\\("
+        },
+        {
+          "id": "dispute-timer-worker",
+          "start": "^async function processDisputeTimers\\(",
+          "end": "^async function processPayout\\("
+        },
+        {
+          "id": "payout-worker",
+          "start": "^async function processPayout\\(",
+          "end": "^// Maps a notification"
+        },
+        {
+          "id": "reconciliation-worker",
+          "start": "^async function processReconciliationDaily\\(",
+          "end": "^export function startJobWorker\\("
+        }
+      ],
+      "anchors": [
+        {
+          "id": "financial-worker-imports",
+          "pattern": "(?:orders/ledger\\.service|admin/reconciliation\\.service|disputes/dispute-resolution\\.service)",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        },
+        {
+          "id": "financial-job-name-union",
+          "pattern": "^\\s*\\| \"(?:escrow_release|payout|dispute_timer|reconciliation_daily)\"$",
+          "expected": 4,
+          "before": 0,
+          "after": 0
+        },
+        {
+          "id": "financial-recurring-jobs",
+          "pattern": "enqueueJob\\(\"(?:escrow_release|dispute_timer|reconciliation_daily)\"",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        },
+        {
+          "id": "financial-worker-dispatch",
+          "pattern": "job\\.name === \"(?:escrow_release|dispute_timer|payout|reconciliation_daily)\"",
+          "expected": 4,
+          "before": 0,
+          "after": 0
+        },
+        {
+          "id": "wallet-notification-routing",
+          "pattern": "(?:^const WALLET_BUTTON_TYPES|^\\s*(?:payout_pending_admin|manual_payment_pending_admin|reconciliation_mismatch):|WALLET_BUTTON_TYPES\\.has)",
+          "expected": 5,
+          "before": 0,
+          "after": 1
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/outbox/outbox.service.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "financial-domain-event-types",
+          "pattern": "^\\s*\"(?:order\\.(?:created|paid|canceled|started|delivered|completed|refunded)|dispute\\.(?:opened|resolved))\",?$",
+          "expected": 9,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/outbox/domain-event.handlers.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "order-event-payloads",
+          "start": "^const baseOrderPayload\\b",
+          "end": "^const reviewCreatedPayload\\b"
+        },
+        {
+          "id": "dispute-event-payloads",
+          "start": "^const disputeOpenedPayload\\b",
+          "end": "^const messageCreatedPayload\\b"
+        },
+        {
+          "id": "strict-order-cache-invalidation",
+          "start": "^async function invalidateOrderCaches\\(",
+          "end": "^async function loadMessage\\("
+        },
+        {
+          "id": "order-event-handlers",
+          "start": "^async function handleOrderCreated\\(",
+          "end": "^async function handleReviewCreated\\("
+        },
+        {
+          "id": "dispute-event-handlers",
+          "start": "^async function handleDisputeOpened\\(",
+          "end": "^async function handleMessageCreated\\("
+        }
+      ],
+      "anchors": [
+        {
+          "id": "financial-domain-event-dispatch",
+          "pattern": "^\\s*case \"(?:order\\.(?:created|paid|canceled|started|delivered|completed|refunded)|dispute\\.(?:opened|resolved))\":$",
+          "expected": 9,
+          "before": 0,
+          "after": 1
+        }
+      ]
+    },
+    {
+      "path": "backend/src/app.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "financial-route-wiring",
+          "pattern": "(?:orderRoutes|paymentRoutes|testPaymentRoutes|disputeRoutes|currencyRoutes)",
+          "expected": 10,
+          "before": 1,
+          "after": 1
+        },
+        {
+          "id": "financial-route-prefixes",
+          "pattern": "[\"']/(?:orders|payments|disputes|currencies)[\"']",
+          "expected": 5,
+          "before": 1,
+          "after": 1
+        }
+      ]
+    },
+    {
+      "path": "backend/src/config/env.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "production-payment-provider-validation",
+          "start": "^\\s*const hasLiqpay\\b",
+          "end": "^\\}\\);$",
+          "includeEnd": true
+        }
+      ],
+      "anchors": [
+        {
+          "id": "financial-environment-schema",
+          "pattern": "^\\s{2}(?:PLATFORM_FEE_BPS|AUTO_RELEASE_HOURS|LIQPAY_PUBLIC_KEY|LIQPAY_PRIVATE_KEY|LIQPAY_SERVER_URL|MONOBANK_TOKEN|MONOBANK_WEBHOOK_URL|MANUAL_PAYMENT_CARD_NUMBER|MANUAL_PAYMENT_RECEIVER_NAME|MANUAL_PAYMENT_BANK|WAYFORPAY_MERCHANT_ACCOUNT|WAYFORPAY_MERCHANT_SECRET_KEY|WAYFORPAY_SERVICE_URL|ENABLE_TEST_PAYMENTS):",
+          "expected": 14,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/common/middleware/csrf.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "payment-callback-csrf-exemptions",
+          "pattern": "^\\s*\"/payments/(?:liqpay|monobank|wayforpay)/callback\",?$",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/common/middleware/security.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "payment-callback-rate-limit-paths",
+          "pattern": "^\\s*\"/payments/(?:liqpay|monobank|wayforpay)/callback\",?$",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/common/metrics.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "payment-attempt-metric",
+          "start": "^export const paymentAttemptsTotal\\b",
+          "end": "^export const jobProcessedTotal\\b"
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "frontend/components/Nav.tsx",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "navigation-wallet-contract",
+          "start": "^type WalletResponse\\b",
+          "end": "^export function Nav\\("
+        }
+      ],
+      "anchors": [
+        {
+          "id": "navigation-wallet-query",
+          "pattern": "apiFetch<WalletResponse>\\(\"/users/me/wallet\"\\)",
+          "expected": 1,
+          "before": 2,
+          "after": 2
+        },
+        {
+          "id": "navigation-wallet-ui",
+          "pattern": "router\\.push\\(user \\? \"/wallet\" : \"/login\"\\)",
+          "expected": 2,
+          "before": 2,
+          "after": 3
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/providers.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "currency-provider-wiring",
+          "pattern": "CurrencyProvider",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/settings/page.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "settings-payments-card-wiring",
+          "pattern": "PaymentsCard",
+          "expected": 2,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/marketplace/marketplace-products.routes.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "marketplace-product-money-writes",
+          "pattern": "(?:moneyToCents|price_cents|old_price_cents)",
+          "expected": 10,
+          "before": 1,
+          "after": 1
+        },
+        {
+          "id": "marketplace-product-money-schema",
+          "pattern": "^\\s*(?:price|currency|oldPrice):\\s+z\\.",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/marketplace/marketplace-browse.routes.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "marketplace-price-filter-conversion",
+          "pattern": "moneyToCents",
+          "expected": 3,
+          "before": 1,
+          "after": 1
+        },
+        {
+          "id": "marketplace-product-price-selects",
+          "pattern": "p\\.price_cents as \"priceCents\".*p\\.currency",
+          "expected": 3,
+          "before": 0,
+          "after": 2
+        },
+        {
+          "id": "marketplace-product-old-price-selects",
+          "pattern": "p\\.old_price_cents as \"oldPriceCents\"",
+          "expected": 3,
+          "before": 1,
+          "after": 0
+        },
+        {
+          "id": "marketplace-price-discount-sorting",
+          "pattern": "(?:input\\.discountOnly|input\\.sort === \"price_(?:asc|desc)\"|input\\.sort === \"discount\"|oldPriceCents.*priceCents)",
+          "expected": 5,
+          "before": 1,
+          "after": 1
+        },
+        {
+          "id": "marketplace-price-query-schema",
+          "pattern": "^\\s*(?:min|max|discountOnly|sort):\\s+z\\.",
+          "expected": 4,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/marketplace/marketplace.helpers.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "marketplace-money-dto-helper",
+          "pattern": "bigintToMoneyCents",
+          "expected": 3,
+          "before": 1,
+          "after": 1
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/marketplace/product.dto.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "marketplace-product-money-dto",
+          "pattern": "(?:toMoneyCents|toNullableMoneyCents)",
+          "expected": 9,
+          "before": 1,
+          "after": 1
+        }
+      ]
+    },
+    {
+      "path": "backend/src/db/seed.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "development-seed-wallets",
+          "pattern": "insert into wallets\\(user_id, currency\\)",
+          "expected": 2,
+          "before": 1,
+          "after": 1
+        }
+      ]
+    },
+    {
+      "path": "backend/src/db/seed-e2e.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "e2e-seed-wallet",
+          "pattern": "insert into wallets\\(user_id, currency\\)",
+          "expected": 1,
+          "before": 1,
+          "after": 3
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/disputes/dispute.dto.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "dispute-financial-dto-fields",
+          "pattern": "(?:CurrencyCode|resolutionDecision|resolutionOperationId|amountCents|currency)",
+          "expected": 11,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/disputes/dispute-messages.service.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "dispute-order-financial-access",
+          "start": "^async function getDisputeAccessByOrder\\(",
+          "end": "^async function selectMessage\\("
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "shared/contracts/product.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "shared-product-money-fields",
+          "pattern": "(?:MoneyCents|priceCents|oldPriceCents)",
+          "expected": 8,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "shared/contracts/seller.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "shared-seller-revenue-fields",
+          "pattern": "(?:MoneyCents|completedRevenueCents)",
+          "expected": 2,
+          "before": 0,
+          "after": 0
+        },
+        {
+          "id": "shared-seller-order-counters",
+          "pattern": "^\\s*(?:activeOrders|completedOrders|disputedOrders|refundedOrders):",
+          "expected": 4,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "shared/contracts/dispute.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "shared-dispute-money-fields",
+          "pattern": "(?:CurrencyCode|MoneyCents|resolutionDecision|resolutionOperationId|amountCents|currency)",
+          "expected": 8,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/seller/create/page.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "seller-create-price-and-fee",
+          "pattern": "(?:majorUnitsToMoneyCents|multiplyMoneyCentsByRatio|feeCents|priceCents)",
+          "expected": 9,
+          "before": 1,
+          "after": 1
+        },
+        {
+          "id": "seller-create-price-payload-and-input",
+          "pattern": "(?:price: price\\.trim\\(\\)|currency: \"UAH\"|type=\"number\" min=\"1\" step=\"0\\.01\"|value=\"UAH\" disabled)",
+          "expected": 4,
+          "before": 1,
+          "after": 1
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/admin/disputes/page.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "admin-dispute-resolution-list-ui",
+          "pattern": "(?:getDisputeFinancialAction|resolution|decision)",
+          "expected": 12,
+          "before": 1,
+          "after": 1
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/admin/disputes/[id]/page.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "admin-dispute-resolution-detail-ui",
+          "pattern": "(?:getDisputeFinancialAction|resolutionDecision|resolutionOperationId|decision)",
+          "expected": 16,
+          "before": 1,
+          "after": 1
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/admin/ops/page.tsx",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "admin-financial-job-mutation",
+          "start": "^\\s*const runJob = useMutation\\(\\{$",
+          "end": "^\\s*const latestReconciliation\\b"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "admin-financial-operations-ui",
+          "pattern": "(?:absMoneyCents|subtractMoneyCents|sumMoneyCents|WireMoneyCents|escrow_release|dispute_timer|payout|reconciliation|ledger)",
+          "expected": 32,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/dashboard/page.tsx",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "dashboard-orders-query",
+          "start": "^\\s*const orders = useQuery\\(\\{$",
+          "end": "^\\s*const wallet = useQuery\\(\\{$"
+        },
+        {
+          "id": "dashboard-wallet-query",
+          "start": "^\\s*const wallet = useQuery\\(\\{$",
+          "end": "^\\s*if \\(!user\\) return null;"
+        },
+        {
+          "id": "dashboard-order-lifecycle-hints",
+          "start": "^function OrderHint\\(",
+          "end": "^function Stat\\("
+        }
+      ],
+      "anchors": [
+        {
+          "id": "dashboard-wallet-summary",
+          "pattern": "(?:WalletResponse|/users/me/wallet|availableCents|escrowCents)",
+          "expected": 6,
+          "before": 0,
+          "after": 0
+        },
+        {
+          "id": "dashboard-order-summary",
+          "pattern": "(?:Order|/orders|amountCents|priceCents)",
+          "expected": 18,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/admin/page.tsx",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "admin-transactions-query",
+          "start": "^\\s*const transactions = useQuery\\(\\{$",
+          "end": "^\\s*const moderate = useMutation\\(\\{$"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "admin-financial-navigation",
+          "pattern": "/admin/(?:overview|transactions|finance|payouts)",
+          "expected": 4,
+          "before": 0,
+          "after": 0
+        },
+        {
+          "id": "admin-financial-overview-fields",
+          "pattern": "(?:revenueCents|amountCents|useMoney|\\bmoney\\()",
+          "expected": 7,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/chat/chat.service.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "chat-order-money-context",
+          "pattern": "(?:amountCents|currency)",
+          "expected": 7,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/users/public-seller.dto.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "public-seller-revenue-dto",
+          "pattern": "completedRevenueCents",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/products/[id]/ProductPageClient.tsx",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "product-secure-order-creation",
+          "start": "^\\s*const buySecurely = useMutation\\(",
+          "end": "^\\s*const buyError\\b"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "product-secure-order-button",
+          "pattern": "buySecurely\\.(?:mutate|isPending)",
+          "expected": 2,
+          "before": 1,
+          "after": 1
+        },
+        {
+          "id": "product-price-and-checkout-eligibility",
+          "pattern": "(?:useMoney\\(\\)|isOwnProduct|price_cents|currency: productItem\\.currency|^\\s*const isOwn =|calculateDiscountPercent|oldPriceCents|money\\(item\\.|item\\.stock < 1|className=\"app-button-action mt-5)",
+          "expected": 12,
+          "before": 1,
+          "after": 1
+        },
+        {
+          "id": "product-order-idempotency",
+          "pattern": "(?:orderIdempotencyKey|createClientUuid)",
+          "expected": 6,
+          "before": 0,
+          "after": 0
+        },
+        {
+          "id": "product-authenticated-checkout-branch",
+          "pattern": "^\\s*\\) : user \\? \\($",
+          "expected": 1,
+          "before": 2,
+          "after": 2
+        }
+      ]
+    },
+    {
+      "path": "frontend/lib/api.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "frontend-conversation-money-contract",
+          "pattern": "(?:WireMoneyCents|amountCents|currency\\?: string \\| null)",
+          "expected": 5,
+          "before": 0,
+          "after": 0
+        },
+        {
+          "id": "frontend-product-order-aliases",
+          "pattern": "^export type (?:Product|Order) =",
+          "expected": 2,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/components/ProductCard.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "product-card-money-rendering",
+          "pattern": "(?:useMoney|calculateDiscountPercent|isPositiveMoneyCents|\\bmoney\\(|priceCents|oldPriceCents)",
+          "expected": 5,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/games/[slug]/GameCatalogClient.tsx",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "game-catalog-financial-sort-options",
+          "start": "^const sortOptions = \\[$",
+          "end": "^const sellerAvatars = \\[$"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "game-catalog-money-rendering",
+          "pattern": "(?:useMoney|calculateDiscountPercent|isPositiveMoneyCents|\\bmoney\\(|priceCents|oldPriceCents)",
+          "expected": 5,
+          "before": 0,
+          "after": 0
+        },
+        {
+          "id": "game-catalog-financial-sort-wiring",
+          "pattern": "(?:const \\[sort, setSort\\]|search\\.set\\(\"sort\", sort\\)|\\bsort, selectedSectionObj|setSort\\(\"newest\"\\)|value=\\{sort\\}|onChange=\\{\\(event\\) => setSort|sortOptions\\.map)",
+          "expected": 7,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/favorites/page.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "favorites-money-rendering",
+          "pattern": "(?:useMoney|calculateDiscountPercent|isPositiveMoneyCents|\\bmoney\\(|priceCents|oldPriceCents)",
+          "expected": 5,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/page.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "homepage-money-rendering",
+          "pattern": "(?:useMoney|\\bmoney\\(|priceCents)",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/components/nav/SearchSuggest.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "search-suggestion-money-rendering",
+          "pattern": "(?:useMoney|\\bmoney\\(|priceCents)",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/components/nav/types.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "search-suggestion-money-contract",
+          "pattern": "(?:WireMoneyCents|priceCents|oldPriceCents|^\\s*currency:)",
+          "expected": 4,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/seller/products/_components/PreviewCard.tsx",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "seller-preview-money-parser",
+          "start": "^function parseFormMoney\\(",
+          "end": "^function Badge\\("
+        }
+      ],
+      "anchors": [
+        {
+          "id": "seller-preview-money-rendering",
+          "pattern": "(?:useMoney|calculateDiscountPercent|majorUnitsToMoneyCents|\\bmoney\\(|priceCents|oldPriceCents)",
+          "expected": 9,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/seller/products/_components/SellerListings.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "seller-listings-money-rendering",
+          "pattern": "(?:useMoney|isPositiveMoneyCents|moneyCentsToMajorUnits|\\bmoney\\(|priceCents|oldPriceCents)",
+          "expected": 5,
+          "before": 0,
+          "after": 0
+        },
+        {
+          "id": "seller-listing-price-write",
+          "pattern": "(?:price: editing\\.price\\.trim\\(\\)|type=\"number\" step=\"0\\.01\")",
+          "expected": 2,
+          "before": 1,
+          "after": 1
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/seller/products/_components/types.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "seller-listings-money-contract",
+          "pattern": "(?:WireMoneyCents|priceCents|oldPriceCents|^\\s*(?:price|oldPrice|currency):)",
+          "expected": 8,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/seller/products/page.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "seller-product-price-payload",
+          "pattern": "(?:price: form\\.price\\.trim\\(\\)|oldPrice: form\\.oldPrice|currency: form\\.currency)",
+          "expected": 3,
+          "before": 1,
+          "after": 1
+        },
+        {
+          "id": "seller-product-payload-serialization",
+          "pattern": "body: JSON\\.stringify",
+          "expected": 2,
+          "before": 2,
+          "after": 1
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/seller/products/_components/LotFormFields.tsx",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "seller-product-price-fields",
+          "start": "^\\s*<FormSection step=\\{3\\}>",
+          "end": "^\\s*<FormSection step=\\{4\\}>"
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "frontend/app/[locale]/sellers/[id]/SellerListingRow.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "public-seller-listing-money-rendering",
+          "pattern": "(?:useMoney|\\bmoney\\(|priceCents)",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/products/[id]/page.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "product-metadata-money",
+          "pattern": "(?:moneyCentsToMajorUnits|priceCents)",
+          "expected": 2,
+          "before": 0,
+          "after": 0
+        },
+        {
+          "id": "product-metadata-currency",
+          "pattern": "priceCurrency: product\\.currency",
+          "expected": 1,
+          "before": 1,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/messages/page.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "messages-order-money-rendering",
+          "pattern": "(?:useMoney|money\\(selectedContext\\.amountCents|selectedContext\\.currency)",
+          "expected": 3,
+          "before": 1,
+          "after": 1
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/sellers/[id]/page.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "public-seller-financial-stats-contract",
+          "pattern": "(?:WireMoneyCents|^\\s*(?:activeOrders|completedOrders|disputedOrders|refundedOrders|completedRevenueCents):)",
+          "expected": 6,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/modules/marketplace/marketplace.sql.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [],
+      "fragments": [
+        {
+          "id": "marketplace-product-financial-sql-identifiers",
+          "pattern": "(?:\\b[a-z][a-z0-9_]*\\.)?(?:[a-z][a-z0-9_]*_cents(?:_[a-z0-9_]+)?|currency|payment_provider|payment_reference|resolution_operation_id)\\b",
+          "expected": 3
+        },
+        {
+          "id": "marketplace-product-financial-code-identifiers",
+          "pattern": "\\b(?:[A-Za-z][A-Za-z0-9]*Cents|MoneyCents|CurrencyCode|lockEscrow|releaseEscrow|refundEscrow|escrow_release|dispute_timer|reconciliation_daily)\\b",
+          "expected": 2
+        },
+        {
+          "id": "marketplace-product-financial-table-identifiers",
+          "pattern": "\\b(?:wallets|wallet_topups|platform_wallets|currency_rates|ledger_accounts|ledger_entries|ledger_lines|orders|order_events|payments?|payment_attempts|payouts|transactions|refunds?|settlements?|commissions?|escrows?)\\b",
+          "expected": 0
+        },
+        {
+          "id": "marketplace-product-financial-module-or-route-identifiers",
+          "pattern": "(?:domain/money|payments/|currencies/|orders/(?:ledger|accounting|order-transition|orders\\.dto)|users/wallet\\.service|admin/(?:admin-finance|admin-payouts)\\.routes|admin/reconciliation\\.service|disputes/dispute-resolution\\.service|[\"'`](?:/orders|/payments|/users/me/wallet|/admin/(?:finance|payouts|transactions|ledger|reconciliation|jobs|orders)|/currencies)(?=[/?#\"'`]|$)|/disputes/[^\\s\"'`]*?/resolve(?=[/?#\"'`]|$))",
+          "expected": 0
+        },
+        {
+          "id": "marketplace-product-financial-select-items",
+          "pattern": "(?:^|,)\\s*p\\.(?:(?:[a-z][a-z0-9_]*_cents|currency|payment_provider|payment_reference)(?:\\s+as\\s+\"[A-Za-z][A-Za-z0-9]*\")?)\\s*(?=,)",
+          "expected": 3
+        }
+      ]
+    },
+    {
+      "path": "backend/src/entrypoints/worker.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "financial-job-worker-runtime",
+          "pattern": "(?:closeJobQueue|getJobWorkerReadiness|startJobWorker|stopJobWorker)",
+          "expected": 9,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "e2e/tests/helpers.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "e2e-financial-order-helpers",
+          "start": "^export async function createOrder\\(",
+          "end": "^export function waitForConnectedWebSocket\\("
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "backend/test/fixtures.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "test-order-wallet-fixtures",
+          "start": "^export async function createOrder\\(",
+          "end": "^export async function createConversation\\("
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "backend/test/dispute-consistency.test.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "recoverable-dispute-resolution-tests",
+          "start": "^describe\\(\"recoverable dispute resolution\"",
+          "toEnd": true
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "backend/test/domain-invariants.test.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "order-status-invariant-tests",
+          "start": "^describe\\(\"order status round-trip\"",
+          "end": "^describe\\(\"delivery type reconciliation\""
+        },
+        {
+          "id": "platform-fee-invariant-tests",
+          "start": "^describe\\(\"platform fee rule\"",
+          "end": "^describe\\(\"MoneyCents canonical representation\""
+        },
+        {
+          "id": "money-cents-invariant-tests",
+          "start": "^describe\\(\"MoneyCents canonical representation\"",
+          "end": "^describe\\(\"documentation agrees with the schema\""
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "backend/test/domain-outbox.test.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "order-created-outbox-test",
+          "start": "^\\s*it\\(\"commits an order while delivery is unavailable",
+          "end": "^\\s*it\\(\"delivers a paid intent once"
+        },
+        {
+          "id": "order-paid-outbox-test",
+          "start": "^\\s*it\\(\"delivers a paid intent once",
+          "end": "^\\s*it\\(\"lets only one of two workers"
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "backend/test/request-idempotency.test.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "order-request-idempotency-tests",
+          "start": "^\\s*it\\(\"creates one order for two concurrent requests",
+          "end": "^\\s*it\\(\"returns the same message after a transport retry"
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "backend/test/marketplace-cache-invalidation.test.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "payment-release-cache-invalidation-test",
+          "start": "^\\s*it\\(\"refreshes cached stock after payment and sales count after release",
+          "toEnd": true
+        }
+      ],
+      "anchors": [
+        {
+          "id": "payment-release-cache-test-imports",
+          "pattern": "(?:orders/ledger\\.service|createOrder)",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/test/registration-atomicity.test.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "mandatory-registration-wallet-tests",
+          "pattern": "(?:wallet|Wallet|WALLET)",
+          "expected": 21,
+          "before": 2,
+          "after": 3
+        }
+      ]
+    },
+    {
+      "path": "backend/test/dispute-moderator-permissions.test.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "dispute-resolution-permission-fields",
+          "pattern": "(?:/:id/resolve|/resolve|resolution|amountCents|currency|adminNote|DisputeDecision)",
+          "expected": 32,
+          "before": 1,
+          "after": 1
+        }
+      ]
+    },
+    {
+      "path": "backend/test/entity-dto-mappers.test.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "payment-identifier-dto-test",
+          "start": "^\\s*it\\(\"keeps payment identifiers admin-only",
+          "toEnd": true
+        }
+      ],
+      "anchors": [
+        {
+          "id": "financial-entity-dto-fixtures",
+          "pattern": "(?:payment|Payment|resolutionDecision|resolutionOperationId|amountCents|currency)",
+          "expected": 43,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/test/shared-contracts-sync.test.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "shared-financial-contract-sync",
+          "pattern": "(?:MoneyCents|OrderMutationDto|OrderSummaryDto|OrderDetailDto|AdminOrder|DisputeDecision|CurrencyCode|amountCents|priceCents)",
+          "expected": 31,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/test/pagination.test.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "order-pagination-tests",
+          "start": "^describe\\(\"GET /orders pagination\"",
+          "end": "^describe\\(\"chat list pagination\""
+        }
+      ],
+      "anchors": [
+        {
+          "id": "admin-financial-pagination-tests",
+          "pattern": "/admin/(?:transactions|ledger|reconciliation|payouts)",
+          "expected": 10,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/test/public-seller.test.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "public-seller-financial-aggregate-tests",
+          "start": "^\\s*it\\(\"calculates independent seller aggregates",
+          "end": "^describe\\(\"public category counters\""
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "frontend/test/locale-format.test.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "locale-exact-money-format-test",
+          "start": "^\\s*it\\.each\\(\\[$",
+          "end": "^\\s*it\\(\"uses the configured app default"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "locale-money-format-tests",
+          "pattern": "(?:formatMoney|CurrencyRates)",
+          "expected": 4,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/test/marketplace-navigation.test.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "marketplace-navigation-money-fixtures",
+          "pattern": "(?:CurrencyProvider|priceCents|oldPriceCents|^\\s*currency:)",
+          "expected": 7,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/test/marketplace-query-states.test.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "marketplace-query-money-fixtures",
+          "pattern": "(?:priceCents|oldPriceCents|^\\s*currency:)",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/test/chat-panel.test.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "chat-currency-isolation-test",
+          "pattern": "(?:CurrencyProvider|useCurrency|displayCurrency|setDisplayCurrency)",
+          "expected": 5,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/test/realtime-provider.test.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "realtime-currency-isolation-test",
+          "pattern": "(?:CurrencyProvider|useCurrency|displayCurrency|setDisplayCurrency)",
+          "expected": 6,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "scripts/smoke-test.ps1",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "smoke-financial-order-flow",
+          "pattern": "Invoke-Json POST \"/(?:orders(?:/|\")|payments/)",
+          "expected": 6,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/components/ToastCenter.tsx",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "toast-financial-event-copy",
+          "start": "^function eventTitle\\(",
+          "end": "^function normalizeMojibake\\("
+        }
+      ],
+      "anchors": [
+        {
+          "id": "toast-order-cache-navigation",
+          "pattern": "(?:queryKey: \\[\"orders\"|queryKey: \\[\"order\"|router\\.push\\(`/orders/)",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        },
+        {
+          "id": "toast-financial-event-icon",
+          "pattern": "type\\.includes\\(\"paid\"\\).*type\\.includes\\(\"payment\"\\)",
+          "expected": 1,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/i18n/locales/en.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "backend-en-financial-order-lifecycle",
+          "start": "^\\s*orderCreated: \\{$",
+          "end": "^\\s*reviewCreated: \\{$"
+        },
+        {
+          "id": "backend-en-financial-dispute-notifications",
+          "start": "^\\s*orderDisputed: \\{$",
+          "end": "^\\s*accountWarned: \\{$"
+        },
+        {
+          "id": "backend-en-reconciliation-payout-messages",
+          "start": "^\\s*reconciliationMismatch: \\{$",
+          "end": "^\\s*reportSubmitted: \\{$"
+        },
+        {
+          "id": "backend-en-manual-payment-message",
+          "start": "^\\s*manualPaymentPendingAdmin: \\{$",
+          "end": "^\\s*passwordChanged: \\{$"
+        },
+        {
+          "id": "backend-en-order-event-messages",
+          "start": "^\\s*orderEvents: \\{$",
+          "end": "^\\s*payments: \\{$"
+        },
+        {
+          "id": "backend-en-payment-messages",
+          "start": "^\\s*payments: \\{$",
+          "end": "^\\s*system: \\{$"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "backend-en-system-financial-messages",
+          "pattern": "^\\s*(?:paymentReceived|escrowReleased|refunded|fundsReleased):",
+          "expected": 5,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/i18n/locales/ru.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "backend-ru-financial-order-lifecycle",
+          "start": "^\\s*orderCreated: \\{$",
+          "end": "^\\s*reviewCreated: \\{$"
+        },
+        {
+          "id": "backend-ru-financial-dispute-notifications",
+          "start": "^\\s*orderDisputed: \\{$",
+          "end": "^\\s*accountWarned: \\{$"
+        },
+        {
+          "id": "backend-ru-reconciliation-payout-messages",
+          "start": "^\\s*reconciliationMismatch: \\{$",
+          "end": "^\\s*reportSubmitted: \\{$"
+        },
+        {
+          "id": "backend-ru-manual-payment-message",
+          "start": "^\\s*manualPaymentPendingAdmin: \\{$",
+          "end": "^\\s*passwordChanged: \\{$"
+        },
+        {
+          "id": "backend-ru-order-event-messages",
+          "start": "^\\s*orderEvents: \\{$",
+          "end": "^\\s*payments: \\{$"
+        },
+        {
+          "id": "backend-ru-payment-messages",
+          "start": "^\\s*payments: \\{$",
+          "end": "^\\s*system: \\{$"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "backend-ru-system-financial-messages",
+          "pattern": "^\\s*(?:paymentReceived|escrowReleased|refunded|fundsReleased):",
+          "expected": 5,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/i18n/locales/ua.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "backend-ua-financial-order-lifecycle",
+          "start": "^\\s*orderCreated: \\{$",
+          "end": "^\\s*reviewCreated: \\{$"
+        },
+        {
+          "id": "backend-ua-financial-dispute-notifications",
+          "start": "^\\s*orderDisputed: \\{$",
+          "end": "^\\s*accountWarned: \\{$"
+        },
+        {
+          "id": "backend-ua-reconciliation-payout-messages",
+          "start": "^\\s*reconciliationMismatch: \\{$",
+          "end": "^\\s*reportSubmitted: \\{$"
+        },
+        {
+          "id": "backend-ua-manual-payment-message",
+          "start": "^\\s*manualPaymentPendingAdmin: \\{$",
+          "end": "^\\s*passwordChanged: \\{$"
+        },
+        {
+          "id": "backend-ua-order-event-messages",
+          "start": "^\\s*orderEvents: \\{$",
+          "end": "^\\s*payments: \\{$"
+        },
+        {
+          "id": "backend-ua-payment-messages",
+          "start": "^\\s*payments: \\{$",
+          "end": "^\\s*system: \\{$"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "backend-ua-system-financial-messages",
+          "pattern": "^\\s*(?:paymentReceived|escrowReleased|refunded|fundsReleased):",
+          "expected": 5,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/i18n/locales/en/admin.json",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "frontend-en-admin-financial-actions",
+          "pattern": "^\\s*\"(?:refundBuyer|releaseSeller)\":",
+          "expected": 2,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/i18n/locales/ru/admin.json",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "frontend-ru-admin-financial-actions",
+          "pattern": "^\\s*\"(?:refundBuyer|releaseSeller)\":",
+          "expected": 2,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/i18n/locales/ua/admin.json",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "frontend-ua-admin-financial-actions",
+          "pattern": "^\\s*\"(?:refundBuyer|releaseSeller)\":",
+          "expected": 2,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/i18n/locales/en/product.json",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "frontend-en-product-financial-copy",
+          "pattern": "^\\s*\"(?:escrowProtected|escrowText|buy|buying|loginToBuy|lotPrice|buySecurely|loginAndBuy|earningsText|inEscrow)\":",
+          "expected": 10,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/i18n/locales/ru/product.json",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "frontend-ru-product-financial-copy",
+          "pattern": "^\\s*\"(?:escrowProtected|escrowText|buy|buying|loginToBuy|lotPrice|buySecurely|loginAndBuy|earningsText|inEscrow)\":",
+          "expected": 10,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/i18n/locales/ua/product.json",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "frontend-ua-product-financial-copy",
+          "pattern": "^\\s*\"(?:escrowProtected|escrowText|buy|buying|loginToBuy|lotPrice|buySecurely|loginAndBuy|earningsText|inEscrow)\":",
+          "expected": 10,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/i18n/locales/en/notifications.json",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "frontend-en-financial-order-lifecycle",
+          "start": "^\\s*\"orderCreated\": \\{$",
+          "end": "^\\s*\"reviewCreated\": \\{$"
+        },
+        {
+          "id": "frontend-en-financial-dispute-notifications",
+          "start": "^\\s*\"orderDisputed\": \\{$",
+          "end": "^\\s*\"accountWarned\": \\{$"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "frontend-en-reconciliation-notification",
+          "pattern": "^\\s*\"reconciliationMismatch\": \\{$",
+          "expected": 1,
+          "before": 0,
+          "after": 2
+        }
+      ]
+    },
+    {
+      "path": "frontend/i18n/locales/ru/notifications.json",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "frontend-ru-financial-order-lifecycle",
+          "start": "^\\s*\"orderCreated\": \\{$",
+          "end": "^\\s*\"reviewCreated\": \\{$"
+        },
+        {
+          "id": "frontend-ru-financial-dispute-notifications",
+          "start": "^\\s*\"orderDisputed\": \\{$",
+          "end": "^\\s*\"accountWarned\": \\{$"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "frontend-ru-reconciliation-notification",
+          "pattern": "^\\s*\"reconciliationMismatch\": \\{$",
+          "expected": 1,
+          "before": 0,
+          "after": 2
+        }
+      ]
+    },
+    {
+      "path": "frontend/i18n/locales/ua/notifications.json",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "frontend-ua-financial-order-lifecycle",
+          "start": "^\\s*\"orderCreated\": \\{$",
+          "end": "^\\s*\"reviewCreated\": \\{$"
+        },
+        {
+          "id": "frontend-ua-financial-dispute-notifications",
+          "start": "^\\s*\"orderDisputed\": \\{$",
+          "end": "^\\s*\"accountWarned\": \\{$"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "frontend-ua-reconciliation-notification",
+          "pattern": "^\\s*\"reconciliationMismatch\": \\{$",
+          "expected": 1,
+          "before": 0,
+          "after": 2
+        }
+      ]
+    },
+    {
+      "path": "frontend/i18n/locales/en/chat.json",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "frontend-en-financial-chat-system",
+          "start": "^\\s*\"system\": \\{$",
+          "end": "^\\s*\"messages\": \\{$"
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "frontend/i18n/locales/ru/chat.json",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "frontend-ru-financial-chat-system",
+          "start": "^\\s*\"system\": \\{$",
+          "end": "^\\s*\"messages\": \\{$"
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "frontend/i18n/locales/ua/chat.json",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "frontend-ua-financial-chat-system",
+          "start": "^\\s*\"system\": \\{$",
+          "end": "^\\s*\"messages\": \\{$"
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "frontend/i18n/locales/en/settings.json",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "frontend-en-payment-settings-copy",
+          "start": "^\\s*\"payments\": \\{$",
+          "end": "^\\s*\"emailVerify\": \\{$"
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "frontend/i18n/locales/ru/settings.json",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "frontend-ru-payment-settings-copy",
+          "start": "^\\s*\"payments\": \\{$",
+          "end": "^\\s*\"emailVerify\": \\{$"
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": "frontend/i18n/locales/ua/settings.json",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "frontend-ua-payment-settings-copy",
+          "start": "^\\s*\"payments\": \\{$",
+          "end": "^\\s*\"emailVerify\": \\{$"
+        }
+      ],
+      "anchors": []
+    },
+    {
+      "path": ".env.example",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "root-financial-env-example",
+          "pattern": "(?:PLATFORM_FEE_BPS|AUTO_RELEASE_HOURS)",
+          "expected": 2,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/.env.example",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "backend-financial-env-example",
+          "pattern": "(?:PLATFORM_FEE_BPS|AUTO_RELEASE_HOURS|LIQPAY_|MONOBANK_|MANUAL_PAYMENT_|WAYFORPAY_|ENABLE_TEST_PAYMENTS)",
+          "expected": 14,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/.env.example",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "frontend-financial-env-example",
+          "pattern": "(?:ENABLE_TEST_PAYMENTS|NEXT_PUBLIC_ENABLE_TEST_PAYMENTS)",
+          "expected": 2,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "docker-compose.yml",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "production-financial-compose",
+          "pattern": "(?:PLATFORM_FEE_BPS|AUTO_RELEASE_HOURS|LIQPAY_|MONOBANK_|MANUAL_PAYMENT_|WAYFORPAY_|ENABLE_TEST_PAYMENTS|NEXT_PUBLIC_ENABLE_TEST_PAYMENTS)",
+          "expected": 15,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "docker-compose.e2e.yml",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "e2e-financial-compose",
+          "pattern": "(?:ENABLE_TEST_PAYMENTS|NEXT_PUBLIC_ENABLE_TEST_PAYMENTS)",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/Dockerfile",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "frontend-financial-build-flag",
+          "pattern": "NEXT_PUBLIC_ENABLE_TEST_PAYMENTS",
+          "expected": 2,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "shared/contracts/index.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "shared-financial-contract-exports",
+          "pattern": "^export \\* from \"\\./(?:dispute|enums|money|order|product|seller)\\.js\";$",
+          "expected": 6,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/i18n/dictionaries.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "financial-dictionary-wiring",
+          "pattern": "\\b(?:ua|ru|en)(?:Orders|Wallet)\\b",
+          "expected": 12,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/app/[locale]/seller/products/_components/constants.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "seller-product-money-defaults",
+          "pattern": "^\\s*(?:price|oldPrice|currency):",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "frontend/components/nav/NavDropdowns.tsx",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "currency-switcher-wiring",
+          "pattern": "CurrencySwitcher",
+          "expected": 2,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    },
+    {
+      "path": "backend/src/common/middleware/require-phone-verified.ts",
+      "protectRenameDelete": true,
+      "symbols": [],
+      "anchors": [
+        {
+          "id": "wallet-phone-verification-gate",
+          "pattern": "(?:requirePhoneVerified|phoneVerified|phone_not_verified)",
+          "expected": 3,
+          "before": 1,
+          "after": 2
+        }
+      ]
+    },
+    {
+      "path": "backend/src/db/pool.ts",
+      "protectRenameDelete": true,
+      "symbols": [
+        {
+          "id": "serializable-financial-transaction-retry",
+          "start": "^export async function inSerializableTx<",
+          "end": "^async function inTxWithIsolation<"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "transaction-boundary-queries",
+          "pattern": "(?:BEGIN ISOLATION LEVEL|client\\.query\\(\"COMMIT\"\\)|client\\.query\\(\"ROLLBACK\"\\))",
+          "expected": 3,
+          "before": 0,
+          "after": 0
+        }
+      ]
+    }
+  ],
+  "changedContentRules": [
+    {
+      "id": "changed-financial-backend",
+      "prefixes": [
+        "backend/src/"
+      ],
+      "excludePaths": [
+        "backend/src/modules/marketplace/marketplace.sql.ts"
+      ],
+      "extensions": [
+        ".ts"
+      ],
+      "patterns": [
+        "(?:domain/money|payments/|currencies/|orders/(?:ledger|accounting|order-transition|orders\\.dto)|users/wallet\\.service|admin/(?:admin-finance|admin-payouts)\\.routes|admin/reconciliation\\.service|disputes/dispute-resolution\\.service)",
+        "\\b(?:wallets|wallet_topups|platform_wallets|currency_rates|ledger_accounts|ledger_entries|ledger_lines|orders|order_events|payments?|payment_attempts|payouts|transactions|refunds?|settlements?|commissions?|escrows?)\\b",
+        "(?:\\b[a-z][a-z0-9_]*_cents(?:_[a-z0-9_]+)?\\b|MoneyCents|priceCents|oldPriceCents|amountCents|feeCents|completedRevenueCents|CurrencyCode)",
+        "[\"'`](?:/orders|/payments|/users/me/wallet|/admin/(?:finance|payouts|transactions|ledger|reconciliation|jobs|orders)|/currencies)(?=[/?#\"'`]|$)",
+        "/disputes/[^\\s\"'`]*?/resolve(?=[/?#\"'`]|$)",
+        "(?:lockEscrow|releaseEscrow|refundEscrow|escrow_release|dispute_timer|reconciliation_daily|payment_provider|payment_reference|resolution_operation_id)"
+      ]
+    },
+    {
+      "id": "changed-financial-frontend",
+      "prefixes": [
+        "frontend/"
+      ],
+      "extensions": [
+        ".ts",
+        ".tsx"
+      ],
+      "patterns": [
+        "(?:(?:@/|\\./|(?:\\.\\./)+)lib/(?:money|currency|liqpay|monobank|wayforpay)|\\./(?:money|currency|liqpay|monobank|wayforpay))",
+        "[\"'`](?:/orders|/payments|/users/me/wallet|/admin/(?:finance|payouts|transactions|ledger|reconciliation|jobs|orders)|/currencies)(?=[/?#\"'`]|$)",
+        "/disputes/[^\\s\"'`]*?/resolve(?=[/?#\"'`]|$)",
+        "(?:WireMoneyCents|MoneyCents|priceCents|oldPriceCents|amountCents|feeCents|completedRevenueCents|CurrencyCode)",
+        "(?:moneyCentsToMajorUnits|majorUnitsToMoneyCents|multiplyMoneyCentsByRatio|calculateDiscountPercent|isPositiveMoneyCents|useMoney\\(|useCurrency\\()",
+        "(?:lockEscrow|releaseEscrow|refundEscrow|escrow_release|dispute_timer|payout|reconciliation)"
+      ],
+      "contextPatterns": [
+        {
+          "pattern": "/marketplace/products(?:/[^\\s\"'`]*)?[\\s\\S]{0,800}method:\\s*[\"'](?:POST|PATCH)",
+          "signals": [
+            "/marketplace/products",
+            "method:\\s*[\"'](?:POST|PATCH)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "changed-financial-test",
+      "prefixes": [
+        "backend/test/",
+        "frontend/test/",
+        "e2e/tests/",
+        "load-tests/"
+      ],
+      "extensions": [
+        ".ts",
+        ".tsx",
+        ".js",
+        ".mjs",
+        ".cjs",
+        ".mts",
+        ".cts"
+      ],
+      "patterns": [
+        "(?:modules/payments/|orders/ledger\\.service|users/wallet\\.service|domain/money|lockEscrow|releaseEscrow|refundEscrow|escrow_release|ledger_entries)",
+        "[\"'`](?:/orders|/payments|/users/me/wallet|/admin/(?:finance|payouts|transactions|ledger|reconciliation|jobs|orders)|/currencies)(?=[/?#\"'`]|$)",
+        "/disputes/[^\\s\"'`]*?/resolve(?=[/?#\"'`]|$)",
+        "(?:WireMoneyCents|MoneyCents|priceCents|oldPriceCents|amountCents|feeCents|completedRevenueCents|CurrencyCode|\\b[a-z][a-z0-9_]*_cents(?:_[a-z0-9_]+)?\\b)",
+        "\\b(?:wallets|wallet_topups|platform_wallets|ledger_entries|ledger_lines|orders|order_events|payments?|payment_attempts|payouts|transactions|refunds?|settlements?|escrows?)\\b"
+      ]
+    },
+    {
+      "id": "changed-financial-shared-contracts",
+      "prefixes": [
+        "shared/contracts/"
+      ],
+      "extensions": [
+        ".ts"
+      ],
+      "patterns": [
+        "(?:\\./money|\\./order|MoneyCents|CurrencyCode|priceCents|oldPriceCents|amountCents|feeCents|balanceCents|revenueCents|completedRevenueCents|paymentProvider|paymentReference|resolutionDecision|resolutionOperationId)"
+      ]
+    },
+    {
+      "id": "changed-financial-operations",
+      "prefixes": [
+        "scripts/",
+        "backend/scripts/"
+      ],
+      "excludePaths": [
+        "scripts/check-financial-freeze.mjs",
+        "scripts/check-financial-freeze.test.mjs"
+      ],
+      "extensions": [
+        ".ts",
+        ".js",
+        ".mjs",
+        ".cjs",
+        ".ps1",
+        ".sql"
+      ],
+      "patterns": [
+        "(?:domain/money|modules/(?:payments|currencies)/|orders/ledger\\.service|users/wallet\\.service|admin/(?:admin-finance|admin-payouts)\\.routes|admin/reconciliation\\.service)",
+        "\\b(?:wallets|wallet_topups|platform_wallets|currency_rates|ledger_accounts|ledger_entries|ledger_lines|orders|order_events|payments?|payment_attempts|payouts|transactions|refunds?|settlements?|commissions?|escrows?)\\b",
+        "(?:\\b[a-z][a-z0-9_]*_cents(?:_[a-z0-9_]+)?\\b|MoneyCents|CurrencyCode|lockEscrow|releaseEscrow|refundEscrow|escrow_release|reconciliation_daily)"
+      ]
+    }
+  ],
+  "newFileRules": [
+    {
+      "id": "new-financial-migration",
+      "prefixes": [
+        "backend/migrations/"
+      ],
+      "extensions": [
+        ".sql"
+      ],
+      "patterns": [
+        "\\b(?:wallets|wallet_topups|platform_wallets|currency_rates|ledger_accounts|ledger_entries|ledger_lines|payouts|reconciliation_snapshots)\\b",
+        "\\b[a-z][a-z0-9_]*_cents(?:_[a-z0-9_]+)?\\b",
+        "\\b(?:orders_status_check|payment_provider|payment_reference|fee_cents|resolution_decision|resolution_operation_id)\\b",
+        "\\b(?:orders|order_events|payments?|payment_attempts|refunds?|settlements?|fees?|commissions?|escrows?|transactions)\\b",
+        "\\b(?:create|alter|drop|truncate)\\s+table\\s+(?:if\\s+(?:not\\s+)?exists\\s+)?(?:orders|order_events|payments?|payment_attempts|refunds?|settlements?|fees?|commissions?|escrows?)\\b",
+        "\\b(?:create|alter|drop|truncate)\\s+table\\s+(?:if\\s+exists\\s+)?transactions\\b",
+        "\\b(?:insert\\s+into|update|delete\\s+from|references)\\s+transactions\\b"
+      ]
+    },
+    {
+      "id": "new-financial-worker",
+      "prefixes": [
+        "backend/src/modules/jobs/",
+        "backend/src/entrypoints/"
+      ],
+      "extensions": [
+        ".ts"
+      ],
+      "patterns": [
+        "(?:payments/|orders/ledger\\.service|users/wallet\\.service|admin/reconciliation\\.service|disputes/dispute-resolution\\.service)",
+        "\"(?:escrow_release|dispute_timer|payout|reconciliation_daily)\"",
+        "(?:domain/money|\\b(?:wallets|wallet_topups|ledger_entries|ledger_lines|payouts|transactions)\\b)"
+      ]
+    },
+    {
+      "id": "new-financial-test",
+      "prefixes": [
+        "backend/test/",
+        "frontend/test/",
+        "e2e/tests/",
+        "load-tests/"
+      ],
+      "extensions": [
+        ".ts",
+        ".tsx",
+        ".js",
+        ".mjs",
+        ".cjs",
+        ".mts",
+        ".cts"
+      ],
+      "patterns": [
+        "(?:modules/payments/|orders/ledger\\.service|users/wallet\\.service|domain/money|lockEscrow|releaseEscrow|refundEscrow|escrow_release|ledger_entries|priceCents|oldPriceCents|amountCents|completedRevenueCents|feeCents|CurrencyCode|MoneyCents)",
+        "[\"'`](?:/orders|/payments|/users/me/wallet|/admin/(?:finance|payouts|transactions|ledger|reconciliation|jobs|orders)|/currencies)(?=[/?#\"'`]|$)",
+        "/disputes/[^\\s\"'`]*?/resolve(?=[/?#\"'`]|$)"
+      ]
+    },
+    {
+      "id": "new-financial-frontend",
+      "prefixes": [
+        "frontend/"
+      ],
+      "extensions": [
+        ".ts",
+        ".tsx"
+      ],
+      "patterns": [
+        "(?:(?:@/|\\./|(?:\\.\\./)+)lib/(?:money|currency|liqpay|monobank|wayforpay)|\\./(?:money|currency|liqpay|monobank|wayforpay)|WireMoneyCents|MoneyCents|CurrencyCode|priceCents|oldPriceCents|amountCents|feeCents|completedRevenueCents|moneyCentsToMajorUnits|majorUnitsToMoneyCents|useMoney\\()",
+        "[\"'`](?:/orders|/payments|/users/me/wallet|/admin/(?:finance|payouts|transactions|ledger|reconciliation|jobs|orders)|/currencies)(?=[/?#\"'`]|$)",
+        "/disputes/[^\\s\"'`]*?/resolve(?=[/?#\"'`]|$)",
+        "/marketplace/products(?:/[^\\s\"'`]*)?[\\s\\S]{0,800}method:\\s*[\"'](?:POST|PATCH)"
+      ]
+    }
+  ]
+}

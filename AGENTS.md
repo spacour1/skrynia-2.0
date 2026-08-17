@@ -37,6 +37,16 @@ Do not read lockfiles unless dependency resolution is in scope.
   keys, provider/webhook/Telegram/S3 credentials, tokens, cookies, passwords,
   backup codes, and TOTP secrets.
 
+## Financial subsystem freeze
+
+The financial subsystem is frozen by explicit user instruction.
+
+Do not modify payment, wallet, ledger, escrow, settlement, payout, refund, fee,
+currency, money, or other financial lifecycle implementation.
+
+If a nonfinancial fix requires financial changes, stop and record the work in
+`docs/deferred-financial-scope.md`.
+
 ## Graph-assisted repository navigation
 
 Graphify is a navigation aid, not a correctness oracle. Before broad searches:

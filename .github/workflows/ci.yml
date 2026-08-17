@@ -9,8 +9,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Pull requests share a cancellable group; every push gets a unique group so
+  # no before->HEAD financial-freeze transition can be dropped from the queue.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  # Every main push must run its own before->HEAD freeze check. Cancelling push A
+  # after push B starts would let B inspect only A->B and skip A's transition.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   backend:
@@ -116,6 +120,24 @@ jobs:
           node-version: "20"
       - name: Test npm audit policy
         run: node --test .github/scripts/check-npm-audit.test.mjs
+
+  financial-freeze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "20"
+      - name: Test financial freeze policy
+        run: node --test scripts/check-financial-freeze.test.mjs
+      - name: Enforce financial freeze
+        env:
+          FINANCIAL_FREEZE_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/check-financial-freeze.mjs --base "$FINANCIAL_FREEZE_BASE"
 
   dependency-audit:
     runs-on: ubuntu-latest

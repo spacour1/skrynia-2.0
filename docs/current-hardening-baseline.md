@@ -1,110 +1,140 @@
 # Current hardening baseline
 
-This document captures the evidence available on 2026-08-01. It separates old
-test records, current-tree local checks, CI, staging, and real-provider evidence
-so that a result from one category is not presented as proof for another.
+This document captures the nonfinancial hardening evidence available on
+2026-08-17. It keeps local, CI, staging, and real-provider evidence separate;
+none of those categories is a substitute for another.
 
 ## Snapshot
 
 | Item | Value |
 | --- | --- |
-| Evidence capture date | 2026-08-01 |
+| Evidence capture date | 2026-08-17 |
 | Branch | `main` |
-| Prompt-recorded prior SHA | `7043159` (`chore(security): document secret scan placeholder exception`) |
-| Verified execution-start HEAD | `a7553a2` |
-| Stage 3 baseline input / current pre-Stage-3 `main` | `364547c` |
-| Local/remote parity | `main == origin/main == 364547c` |
-| Working tree | Clean at evidence capture (`git status --short` returned no entries) |
-| Production readiness | **Not certified** |
+| Master Hardening Plan V2 recorded baseline | `805163058855fde32b3a1474b75169ceaaa95ade` |
+| Verified Stage 1 input / pre-documentation HEAD | `805163058855fde32b3a1474b75169ceaaa95ade` |
+| Remote main at execution start | `805163058855fde32b3a1474b75169ceaaa95ade` |
+| Local/remote divergence | 0 ahead / 0 behind |
+| Working tree at execution start | Clean (`git status --short` returned no entries) |
+| Local tools | Node.js `24.18.0`; npm `11.16.0`; Docker client/server `29.5.3` |
+| CI/runtime Node line | Node.js 20; production images use `node:20-alpine` |
+| Production readiness | **NOT CERTIFIED** |
 
-The prompt's prior reference, `7043159`, is retained as provenance. The HEAD
-that was actually checked before this execution began was `a7553a2`; these are
-different facts and must not be collapsed into one start SHA.
+`8051630` is the input SHA whose application tree was validated. This document
+will be committed at a later SHA; the two values must not be presented as the
+same checkpoint.
 
-## Commits after the old closeout snapshot
+## Changes since the previous baseline document
 
-The prior closeout snapshot ended at `dab02a8`. All 12 later commits present in
-the Stage 3 input tree are recorded here in chronological order:
+The previous baseline stopped at `364547c`. These later commits are part of the
+current Stage 1 input, in chronological order:
 
 | Commit | Change |
 | --- | --- |
-| `09a827b` | `docs(hardening): align closeout baseline with current main` |
-| `6f98673` | `fix(api): complete canonical marketplace contract boundaries` |
-| `c38e7a5` | `fix(backend): resolve final hardening validation defects` |
-| `926d31a` | `fix(frontend): resolve final reliability validation defects` |
-| `ae74285` | `fix(ops): resolve final runtime and shutdown defects` |
-| `71db37b` | `chore: checkpoint marketplace hardening work` |
-| `36c318d` | `fix(e2e): resolve critical marketplace flow regressions` |
-| `f96588c` | `fix(ci): provide release migration encryption key` |
-| `7043159` | `chore(security): document secret scan placeholder exception` |
-| `a7553a2` | `chore(devx): install scoped Graphify pilot` |
-| `23f5b28` | `docs(devx): complete local Graphify pilot` |
-| `364547c` | `docs(agents): add scoped Graphify and risk-based verification rules` |
+| `43cd59a` | `docs(hardening): align execution baseline with current main` |
+| `650a973` | `fix(ops): drain pending audit writes before database shutdown` |
+| `d47985a` | `refactor(orders): centralize post-commit participant cache invalidation` |
+| `130cc52` | `fix(security): patch transitive dependency advisories` |
+| `012bb99` | `fix(auth): coordinate refresh rotation without Web Locks` |
+| `e3a4806` | `test(auth): align lease fixtures with monotonic clock` |
+| `c068219` | `fix(auth): make offline logout behavior explicit` |
+| `555cb6f` | `fix(security): upgrade image processing dependencies` |
+| `8051630` | `fix(security): upgrade Next.js runtime` |
 
-The prompt-recorded prior SHA is `7043159`; the verified execution-start HEAD is
-`a7553a2`. The commits after `a7553a2` change documentation and agent instructions
-only, so they do not provide a new local full-suite run on `364547c`.
+The application now includes the bounded audit drain, post-commit participant
+cache invalidation, Web-Lock and fallback cross-tab refresh coordination,
+offline logout recovery, Sharp/libvips remediation, and the supported Next.js
+15 runtime upgrade. Those completed changes are not reopened without a new,
+reproducible defect.
 
 ## Historical evidence
 
-Before the later hardening work, the recorded baseline at `36ea677` was:
+The local suite and Graphify measurements previously recorded for `a7553a2`
+remain historical evidence for that SHA only. Subsequent application and
+dependency changes mean those test counts and graph statistics are not current-
+tree evidence and are intentionally not relabelled as such.
 
-| Command | Recorded result |
-| --- | --- |
-| `cd backend && npm ci` | PASS |
-| `cd backend && npm run lint` | PASS |
-| `cd backend && npm run build` | PASS |
-| `cd backend && npm test` | PASS - 293/293 tests in 33 files (277.77s) |
-| `cd frontend && npm ci` | PASS |
-| `cd frontend && npm run typecheck` | PASS |
-| `cd frontend && npm run i18n:check` | PASS - 0 errors, 25 baseline warnings |
-| `cd frontend && npm test` | PASS - 6/6 legacy realtime-client tests |
-| `cd frontend && npm run build` | PASS |
-| Production and development Compose config | PASS |
-| `docker compose build` | PASS |
+The CI history since the previous baseline is retained, including red runs and
+their later fixes:
 
-These results are historical evidence for `36ea677` only. They are not current-
-tree, staging, or production-provider evidence.
+| Commit | GitHub Actions run | Result |
+| --- | --- | --- |
+| `43cd59a` | [30698893213](https://github.com/spacour1/skrynia-2.0/actions/runs/30698893213) | PASS - 9/9 jobs |
+| `650a973` | [30701279467](https://github.com/spacour1/skrynia-2.0/actions/runs/30701279467) | PASS - 9/9 jobs |
+| `d47985a` | [31338684075](https://github.com/spacour1/skrynia-2.0/actions/runs/31338684075) | FAIL - backend and frontend dependency-audit jobs |
+| `130cc52` | [31340099094](https://github.com/spacour1/skrynia-2.0/actions/runs/31340099094) | PASS - 9/9 jobs |
+| `012bb99` | [31343311963](https://github.com/spacour1/skrynia-2.0/actions/runs/31343311963) | FAIL - frontend unit-test job |
+| `e3a4806` | [31343893915](https://github.com/spacour1/skrynia-2.0/actions/runs/31343893915) | PASS - 9/9 jobs |
+| `c068219` | [31517847706](https://github.com/spacour1/skrynia-2.0/actions/runs/31517847706) | PASS - 9/9 jobs |
+| `555cb6f` | [31521299384](https://github.com/spacour1/skrynia-2.0/actions/runs/31521299384) | PASS - 9/9 jobs |
+| `8051630` | [31525717518](https://github.com/spacour1/skrynia-2.0/actions/runs/31525717518) | PASS - 9/9 jobs |
 
-## Current-tree evidence
+Red runs are not hidden. `130cc52` repaired the audit failure, and `e3a4806`
+repaired the frontend lease fixture. The final Stage 1 input run is green.
 
-The following commands completed against `a7553a2` on Windows PowerShell with
-Node.js 20.20.2 and isolated Docker PostgreSQL 16/Redis 7 services. Every PASS
-below had exit code 0; durations are wall-clock measurements captured by the
-local wrapper.
+## Exact current-tree local evidence
+
+All commands below ran on 2026-08-17 against the `8051630` application tree on
+Windows PowerShell. PostgreSQL 16 and Redis 7 ran in an isolated Compose project;
+the containers, network, and dedicated PostgreSQL volume were removed after the
+gate. No production service, provider, credential, or data was used.
 
 | Area | Exact command | Result |
 | --- | --- | --- |
-| Backend | `cd backend; npm run lint` | PASS - exit 0, 23.31s, test count not applicable |
-| Backend | `cd backend; npm run build` | PASS - exit 0, 5.93s, test count not applicable |
-| Backend | `cd backend; npm test` | PASS - exit 0, 55 files / 488 tests, 467.25s |
-| Database | `cd backend; npm run migrate:deploy` against a fresh isolated `marketplace_test` database | PASS - exit 0, 40 SQL migrations, 2.77s |
-| Database | second consecutive `cd backend; npm run migrate:deploy` | PASS - exit 0, 0 SQL migrations pending, 0.71s |
-| Database | `cd backend; npx vitest run test/schema-contract.test.ts` | PASS - exit 0, 7 tests, 12.28s wrapper duration |
-| Frontend | `cd frontend; npm run typecheck` | PASS - exit 0, 24.30s, test count not applicable |
-| Frontend | `cd frontend; npm run i18n:check` | PASS - exit 0, 0 errors / 25 baseline warnings, 1.45s |
-| Frontend | `cd frontend; npm test` | PASS - exit 0, 14 files / 62 tests, 54.45s wrapper duration |
-| Frontend | `cd frontend; npm run build` | PASS - exit 0 on the completed rerun, 55.17s; the earlier wrapper attempt timed out and was not counted as PASS |
+| Backend install | `cd backend; npm ci` | PASS - exit 0; 400 packages installed; install/lint/build chain 69.9s total |
+| Backend lint/typecheck | `cd backend; npm run lint` | PASS - exit 0 |
+| Backend build | `cd backend; npm run build` | PASS - exit 0 |
+| Database | `cd backend; npm run migrate:deploy` against a new isolated `marketplace_test` database | PASS - exit 0; 40 SQL migrations |
+| Database repeatability | second consecutive `cd backend; npm run migrate:deploy` | PASS - exit 0; 0 SQL migrations pending |
+| Backend tests | `cd backend; npm test -- --reporter=verbose` | PASS - exit 0; 57 files / 540 tests; Vitest 499.49s, wall 501.8s |
+| Frontend install | `cd frontend; npm ci` | PASS - exit 0; part of the 159.5s frontend gate |
+| Frontend typecheck | `cd frontend; npm run typecheck` | PASS - exit 0 |
+| Frontend i18n | `cd frontend; npm run i18n:check` | PASS - exit 0; 0 errors / 25 pre-existing warnings |
+| Frontend tests | `cd frontend; npm test` | PASS - exit 0; 19 files / 145 tests; 33.17s |
+| Frontend build | `cd frontend; npm run build` | PASS - exit 0; Next.js 15.5.23; 96 static pages generated |
+| Compose production | `docker compose --profile '*' config --quiet` | PASS - exit 0 |
+| Compose development | `docker compose -f docker-compose.dev.yml config --quiet` | PASS - exit 0 |
+| Compose E2E | `docker compose -f docker-compose.e2e.yml config --quiet` | PASS - exit 0 |
+| Production images | `docker compose --profile '*' build` | PASS - exit 0; backend, migrate, worker, outbox, and frontend image targets; 134.6s |
+| Backend dependency policy | `node .github/scripts/check-npm-audit.mjs backend` | PASS - exit 0; 1 low / 19 moderate / 0 high / 0 critical |
+| Frontend dependency policy | `node .github/scripts/check-npm-audit.mjs frontend` | PASS - exit 0; 0 low / 24 moderate / 2 high / 0 critical; one exact allowed Rollup advisory |
+| E2E dependency policy | `node .github/scripts/check-npm-audit.mjs e2e` | PASS - exit 0; no findings |
 
-Because `23f5b28` and `364547c` are documentation/instruction-only changes, this
-is relevant implementation evidence for the application code that remains in
-the current tree. It is not an exact local full-suite rerun at `364547c`; that
-rerun remains unrecorded.
+The first backend test attempt used a 10-minute command timeout and was recorded
+as `TIMEOUT`, not PASS. Inspection showed active Vitest and PostgreSQL work rather
+than a deadlock. The unchanged full suite was rerun with a sufficient limit and
+completed 540/540; the successful rerun is the result reported above.
 
-The current local Graphify snapshot covers 535 files and contains 3,176 nodes,
-8,571 edges, 13 hyperedges, and 179 named communities. Graph health reports 0
-warnings. Generated Graphify outputs are ignored by Git and remain local
-navigation evidence, not application-correctness or production-readiness proof.
+## Current CI evidence
 
-## CI evidence
+GitHub Actions run [31525717518](https://github.com/spacour1/skrynia-2.0/actions/runs/31525717518)
+is the exact CI result for `8051630`: **PASS, 9/9 jobs**.
 
-| Commit | GitHub Actions run | Required jobs | Result |
-| --- | --- | --- | --- |
-| `23f5b28` | [30697353208](https://github.com/spacour1/skrynia-2.0/actions/runs/30697353208) | 9/9 | PASS |
-| `364547c` | [30697861790](https://github.com/spacour1/skrynia-2.0/actions/runs/30697861790) | 9/9 | PASS |
+| Job/evidence | Result |
+| --- | --- |
+| Backend build, clean migrations, repeat migrations, schema contract, full tests | PASS - 40 then 0 migrations; schema 7/7; 57 files / 540 tests |
+| Frontend install, typecheck, i18n, tests, production build | PASS - 19 files / 145 tests; Next.js build green |
+| Isolated Chromium E2E | PASS - 9/9 tests |
+| Backend/frontend/E2E dependency-audit policy | PASS |
+| Audit-policy unit suite | PASS - 10/10 tests |
+| Full-history Gitleaks scan | PASS |
+| Compose validation and production image build | PASS |
 
-These green runs are CI evidence for their exact SHAs. They do not replace
-staging, rollback, production-sized search, or real-provider validation.
+This is CI evidence for `8051630`. The documentation commit created from this
+capture requires its own green CI run before Stage 1 is closed.
+
+## Dependency security baseline
+
+The current audit policy is fail-closed and passes for all three npm projects.
+There are no backend or E2E high/critical exceptions. Frontend retains one exact
+temporary exception:
+
+- `rollup` / `GHSA-mw96-cpmx-2vgc`, maximum severity `high`, expires
+  2026-08-21, owned by the Sentry/toolchain remediation stage.
+
+The two frontend high package nodes are the aggregate `@sentry/nextjs` node and
+the same concrete Rollup advisory, not two separately accepted GHSAs. Moderate
+findings in Sentry/OpenTelemetry, DOMPurify, PostCSS, and UUID remain visible in
+the audit output and are not described as resolved.
 
 ## Staging evidence
 
@@ -112,10 +142,10 @@ staging, rollback, production-sized search, or real-provider validation.
 | --- | --- |
 | Production-like staging rollout, restart, and failure-path exercise | **NOT RUN** |
 | Rollback and recovery rehearsal | **NOT RUN** |
-| Production-target `pg_trgm`/`unaccent` permission verification | **NOT RUN** |
-| Final multilingual search benchmark on a production-sized data clone | **NOT RUN** |
+| Multi-replica production-like validation | **NOT RUN** |
+| Final multilingual search benchmark on production-sized synthetic data | **NOT RUN** |
 
-No staging result is promoted to PASS in this capture.
+No local Docker or CI result is promoted to staging evidence.
 
 ## Production-provider evidence
 
@@ -126,32 +156,34 @@ No staging result is promoted to PASS in this capture.
 | Real SMS provider | **NOT RUN** |
 | Real Telegram integration | **NOT RUN** |
 | Real S3/object-storage provider | **NOT RUN** |
+| Real Sentry event/source-map upload | **NOT RUN** |
 
 Mocks, local services, and green CI jobs do not constitute real-provider
-evidence.
+evidence. Financial-provider validation is also outside the current frozen
+nonfinancial scope.
 
 ## Current blockers and remaining work
 
-Production readiness remains blocked by the uncompleted or unverified parts of
-the closeout plan, notably:
+Production readiness remains **NOT CERTIFIED**. The principal open work is:
 
-- no exact local full-suite rerun is recorded for the `364547c` baseline input;
-- staging deployment, failure recovery, rollback, and final search benchmarking
-  remain `NOT RUN`;
-- real payment, email, SMS, Telegram, and object-storage paths remain `NOT RUN`;
-- audit-log draining and shutdown guarantees still require closeout work and
-  verification;
-- transaction boundaries, Redis/external calls, and cache-consistency paths
-  still require hardening and validation;
-- cross-tab refresh fallback and offline logout behavior remain to be closed;
-- side-effecting GET flows still require durable command/intent semantics;
-- provider verification/persistence separation and immutable payment reference,
-  amount, and currency checks remain to be completed;
-- TOTP and secret-handling hardening remains open;
-- time-limited npm audit exceptions in `docs/security/npm-audit-debt.md` expire
-  on 2026-08-21;
-- production capacity and operational failure testing remain outstanding.
+- the financial subsystem is frozen by explicit instruction, but the automated
+  path/symbol freeze guard is not yet installed;
+- step-up authentication and the pending email-change workflow are not yet
+  implemented;
+- verification/reset token binding, atomic consumption, password generations,
+  unified password policy, and login timing hardening remain open;
+- production backend and frontend configuration still require fail-fast
+  validation;
+- the expiring Rollup/Sentry exception and observability sanitization remain
+  open;
+- TOTP replay/timing and the full backup-code lifecycle require validation;
+- private attachment authorization, multi-replica WebSocket behaviour, outbox
+  recovery, deterministic pagination, moderation visibility/cache consistency,
+  and browser security headers remain open;
+- dedicated nonfinancial E2E, disaster recovery, failure injection,
+  multi-replica staging, load evidence, and the final restore drill remain open;
+- real staging, rollback, and nonfinancial provider boundaries remain `NOT RUN`.
 
-The repository must not be described as production-ready until the remaining
-release gates have evidence and no unexplained `NOT RUN`, `FAIL`, or `BLOCKED`
-result remains.
+The repository must not be described as nonfinancial production-ready until the
+remaining stages and final release gates have recorded evidence and remaining
+P0 risk is zero.

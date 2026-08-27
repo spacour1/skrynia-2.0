@@ -58,19 +58,21 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          node-version: "20"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - name: Install backend dependencies
         run: npm ci
+      - name: Backend ESLint
+        run: npm run lint
+      - name: Backend typecheck
+        run: npm run typecheck
       - name: Backend production build
         run: npm run build
       - name: Apply all migrations to a clean database
         run: npm run migrate:deploy
       - name: Verify migrations are repeatable
         run: npm run migrate:deploy
-      - name: Backend typecheck
-        run: npm run lint
       - name: Schema contract
         run: npx vitest run test/schema-contract.test.ts
       - name: Backend tests
@@ -91,11 +93,13 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          node-version: "20"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Install frontend dependencies
         run: npm ci
+      - name: Frontend ESLint
+        run: npm run lint
       - name: Frontend typecheck
         run: npm run typecheck
       # Missing/extra translation keys and new hardcoded UI strings fail the build.
@@ -117,9 +121,24 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          node-version: "20"
+          node-version-file: .nvmrc
       - name: Test npm audit policy
         run: node --test .github/scripts/check-npm-audit.test.mjs
+
+  verification-runner-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: .nvmrc
+      - name: Test the D5 verification runner
+        run: node --test scripts/verify-all.test.mjs
+      - name: Validate the side-effect-free D5 plan
+        run: node scripts/verify-all.mjs --list
 
   financial-freeze:
     runs-on: ubuntu-latest
@@ -131,7 +150,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          node-version: "20"
+          node-version-file: .nvmrc
       - name: Test financial freeze policy
         run: node --test scripts/check-financial-freeze.test.mjs
       - name: Enforce financial freeze
@@ -152,7 +171,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          node-version: "20"
+          node-version-file: .nvmrc
       - name: Audit production dependencies
         run: node .github/scripts/check-npm-audit.mjs ${{ matrix.project }}
 
@@ -199,7 +218,20 @@ jobs:
           persist-credentials: false
       - name: Validate all Compose profiles
         run: docker compose --profile '*' config --quiet
-      - name: Build production images
+      - name: Validate development Compose topology
+        run: docker compose -f docker-compose.dev.yml config --quiet
+      - name: Set up pinned Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Prime production image cache with Buildx Bake
+        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
+        with:
+          files: docker-compose.yml
+          load: true
+          set: |
+            *.cache-from=type=gha,scope=production-images
+            *.cache-to=type=gha,mode=max,scope=production-images
+      # Keep the canonical Compose build as the fail-closed acceptance command.
+      - name: Verify production images through Compose
         run: docker compose --profile '*' build
 
   e2e:

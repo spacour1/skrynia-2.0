@@ -8,6 +8,7 @@ import request from "supertest";
 import { WebSocket, type RawData } from "ws";
 import { createApp } from "../src/app.js";
 import { getRedis } from "../src/common/redis.js";
+import { env } from "../src/config/env.js";
 import { pool } from "../src/db/pool.js";
 import { issueSession, revokeSession } from "../src/modules/auth/session.service.js";
 import {
@@ -233,7 +234,7 @@ describe("ws tickets", () => {
   it("accepts the configured frontend Origin", async () => {
     const session = await sessionFor();
     const ticket = await getTicket(session);
-    const result = await connect(`${wsUrl}?ticket=${encodeURIComponent(ticket)}`, { Origin: "http://localhost:3000" });
+    const result = await connect(`${wsUrl}?ticket=${encodeURIComponent(ticket)}`, { Origin: env.FRONTEND_URL });
     expect(result.outcome).toBe("connected");
   });
 

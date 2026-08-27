@@ -3,6 +3,19 @@
 This file is the fast entrypoint for humans and AI agents. Read it before opening
 large route or page files.
 
+## Role routing
+
+| Role | Scope | Write authority | Required handoff |
+| --- | --- | --- | --- |
+| Coordinator | Plan, file ownership, integration, risk gates, commits, pushes, exact-SHA CI | Repository integration only after reviewing all agent work | Consolidated PASS/FAIL/BLOCKED/NOT RUN evidence and remaining external actions |
+| Implementation | One assigned feature or toolchain slice, normally 10–15 candidate files | Assigned paths only; no commits, pushes, provider settings, or secrets | Changed files, verified dependency paths, commands, exit codes, durations, and rollback note |
+| Verification | Reproduce the relevant risk gate and challenge acceptance claims | Read-only | Concrete failures or an evidence-backed PASS; never repairs its own findings |
+| Security reviewer | One changed trust boundary such as auth, storage, WebSocket, telemetry, or CI | Read-only by default | Exploit path, affected boundary, missing negative test, and severity |
+
+Use no more than two subagents concurrently. Give them non-overlapping ownership and
+resolve overlap before either continues. Graphify narrows cross-domain navigation; it does
+not increase the file budget or authorize repository-wide rescans.
+
 ## Ignore By Default
 
 - `node_modules/`, `.next/`, `dist/`, `uploads/`, coverage output

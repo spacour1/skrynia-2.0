@@ -75,15 +75,34 @@ For this hardening task, the user's direct-to-`main` workflow explicitly replace
 the repository's normal PR-only rule:
 
 1. Work on an up-to-date local `main` with a clean, understood worktree.
-2. Run the risk gate below and review the staged diff; commit one logical topic.
-3. Fetch `origin` and compare `origin/main...main` before pushing.
-4. If remote advanced, rebase onto `origin/main` and rerun the complete risk gate.
-5. Only after PASS, run `git push origin main`, verify local/remote SHA equality,
-   and check GitHub Actions for that SHA.
+2. Commit one logical topic and run the smallest sufficient risk gate below.
+3. For the approved milestone-gating run, execute the complete D5 gate and push only
+   at milestones 0, 4, 8, and 13. Keep every intermediate stage as its own commit.
+4. Before a milestone push, review every accumulated commit, fetch `origin`, and
+   compare `origin/main...main`.
+5. If remote advanced, rebase onto `origin/main` and rerun the complete D5 gate.
+6. Only after PASS, run `git push origin main`, verify local/remote SHA equality,
+   and check GitHub Actions for the exact milestone SHA.
 
 Never force-push, rewrite published `main`, discard unknown work with
 `git reset --hard`, push an unverified commit, or continue past red CI without a
 documented external blocker.
+
+## Collaboration roles and limits
+
+- The Coordinator owns the plan, assigns non-overlapping file sets, integrates changes,
+  reviews the complete diff, runs milestone gates, and is the only role that commits or
+  pushes unless the user explicitly delegates that authority.
+- An Implementation agent may edit only its assigned scope. Start from a 10–15-file
+  candidate budget, verify dependencies directly, and stop before crossing a financial
+  boundary or another agent's ownership.
+- A Verification agent is read-only. It reproduces commands and reports PASS, FAIL,
+  BLOCKED, or NOT RUN with evidence; it does not repair findings in the same review.
+- A Security reviewer is read-only by default and scoped to the changed trust boundary
+  (for example auth, storage, WebSocket, observability, or CI). It reports concrete
+  exploit paths and missing tests without broad repository rewrites.
+- Run no more than two subagents concurrently. The Coordinator resolves overlap before
+  work resumes; agents never commit, push, change provider settings, or handle secrets.
 
 ## Risk-based validation matrix
 

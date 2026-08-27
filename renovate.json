@@ -1,0 +1,60 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "timezone": "Etc/UTC",
+  "schedule": [
+    "* 0-5 * * 1"
+  ],
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "Dependency Dashboard",
+  "minimumReleaseAge": "14 days",
+  "minimumReleaseAgeBehaviour": "timestamp-required",
+  "automerge": false,
+  "separateMajorMinor": true,
+  "labels": [
+    "dependencies"
+  ],
+  "ignorePaths": [
+    ".env.example",
+    "backend/.env.example",
+    "config/financial-freeze.json",
+    "docker-compose.e2e.yml",
+    "docker-compose.yml",
+    "frontend/.env.example",
+    "frontend/Dockerfile"
+  ],
+  "packageRules": [
+    {
+      "description": "Disable automated updates for current or future payment-provider packages while the financial subsystem is frozen",
+      "matchPackageNames": [
+        "*adyen*",
+        "*braintree*",
+        "*liqpay*",
+        "*monobank*",
+        "*paypal*",
+        "*stripe*",
+        "*wayforpay*"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Group patch and minor dependency updates into one weekly change",
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "groupName": "all non-major dependencies",
+      "groupSlug": "all-non-major"
+    },
+    {
+      "description": "Keep each major dependency update separate and require dashboard approval",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "groupName": null,
+      "dependencyDashboardApproval": true
+    }
+  ]
+}

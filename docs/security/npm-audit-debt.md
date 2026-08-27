@@ -5,17 +5,18 @@ audit gate. The gate still reports moderate findings and fails on any new high/c
 advisory, a severity escalation, an expired exception, a malformed/tool-error response, or
 an exception that is no longer used.
 
-Baseline date: **2026-07-24**. All exceptions expire at the end of **2026-08-21 UTC**.
-Expiry is deliberately short: renewal requires a new review, updated evidence, and an
-explicit documentation change. Package-name-wide exceptions are prohibited; CI matches the
-exact project, package, and GHSA identifier.
+Current review date: **2026-08-27**. There are no active high/critical exceptions. All three
+project arrays in `.github/npm-audit-allowlist.json` are empty. Any future exception must be
+short-lived and requires a new review, updated evidence, and an explicit documentation
+change. Package-name-wide exceptions are prohibited; CI matches the exact project, package,
+and GHSA identifier.
 
 On 2026-07-24 the registry began returning four additional high advisories for the unchanged
 frontend lockfile. The policy rejected them before this review. They are recorded below as
 individual, expiring exceptions; this does not turn the gate into a package-wide Next.js or
 PostCSS exception.
 
-## Baseline commands and counts
+## Historical baseline commands and counts
 
 | Project | Command | Status | low | moderate | high | critical | total package findings |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -106,21 +107,43 @@ is inherited from PostCSS and stays visible for the toolchain stage. The eight e
 allowlist entries were removed; the audit-policy gate passes with only the existing Rollup
 exception.
 
-## Frontend exceptions
+## Resolved Sentry and Rollup debt on 2026-08-27
 
-The remaining Sentry-related exception below requires the coordinated Sentry/toolchain
-upgrade in the next stage. It must not be broadened into a package-wide exception.
+The expired `GHSA-mw96-cpmx-2vgc` exception was removed instead of renewed. Frontend
+`@sentry/nextjs` and backend `@sentry/node` were moved together from `8.55.2` to the exact
+`10.54.0` security floor after reviewing the official v8-to-v9 and v9-to-v10 migration
+notes. `10.40.0` is the first npm high-free Sentry floor, but `10.54.0` is the first tested
+floor that also removes the Sentry/OpenTelemetry and UUID moderate advisory chain. It remains
+compatible with the repository's Next.js 15, React 19, TypeScript 5, and Node.js 20 runtime.
 
-<a id="frontend-ghsa-mw96-cpmx-2vgc"></a>
+The resulting lockfiles resolve:
 
-### Frontend GHSA-mw96-cpmx-2vgc
+- frontend `@sentry/nextjs@10.54.0`, `rollup@4.63.0`,
+  `@sentry/webpack-plugin@5.4.0`, and `@sentry/bundler-plugin-core@5.3.0`;
+- backend `@sentry/node@10.54.0`, `@sentry/core@10.54.0`, and
+  `@sentry/opentelemetry@10.54.0`.
 
-- Affected path: `@sentry/nextjs@8.55.2 -> rollup@3.29.5` (build-time arbitrary file write).
-- Remediation owner: frontend/observability and CI maintainers.
-- Plan: coordinated Sentry/toolchain upgrade, then verify clean checkout, frontend build,
-  source-map handling, and production Docker build.
-- Maximum allowed severity: high.
-- Expiry: 2026-08-21.
+The removed `hideSourceMaps` option is not carried forward. Builds without a complete
+Sentry upload credential set explicitly disable source-map generation. Builds with an auth
+token, organization, and project upload maps and set
+`sourcemaps.deleteSourcemapsAfterUpload: true`. Frontend runtime configuration explicitly
+disables default PII collection and sanitizes request, user, breadcrumb, transaction,
+context, and extra data. The existing backend request/event sanitizer remains in place, and
+backend default PII collection is now explicitly disabled.
+
+Fresh Node.js 20 policy results after lockfile resolution:
+
+| Project | Status | low | moderate | high | critical | total package findings |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Backend | PASS | 1 | 0 | 0 | 0 | 1 |
+| Frontend | PASS | 0 | 3 | 0 | 0 | 3 |
+| E2E | PASS | 0 | 0 | 0 | 0 | 0 |
+
+The remaining frontend moderate aggregate consists of concrete DOMPurify
+`GHSA-55q2-fjhq-7xh7` and PostCSS `GHSA-fxqj-rqcc-2cmp` findings; npm also reports the
+affected Next.js aggregate through PostCSS. The remaining backend low finding is
+`body-parser`. They stay visible and are not allowlisted. A dedicated weekly workflow now
+runs the fail-closed audit policy even when no application commit occurs.
 
 ## Operating rules
 

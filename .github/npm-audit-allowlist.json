@@ -2,15 +2,7 @@
   "schemaVersion": 1,
   "projects": {
     "backend": [],
-    "frontend": [
-      {
-        "advisory": "GHSA-mw96-cpmx-2vgc",
-        "package": "rollup",
-        "maxSeverity": "high",
-        "expires": "2026-08-21",
-        "reference": "docs/security/npm-audit-debt.md#frontend-ghsa-mw96-cpmx-2vgc"
-      }
-    ],
+    "frontend": [],
     "e2e": []
   }
 }

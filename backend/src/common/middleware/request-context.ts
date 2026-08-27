@@ -56,6 +56,7 @@ export function initErrorTracking() {
     dsn: env.SENTRY_DSN,
     environment: env.NODE_ENV,
     release: env.SENTRY_RELEASE ?? process.env.GITHUB_SHA ?? process.env.RAILWAY_DEPLOYMENT_ID,
+    sendDefaultPii: false,
     tracesSampleRate: env.SENTRY_TRACES_SAMPLE_RATE ?? (env.NODE_ENV === "production" ? 0.1 : 0),
     integrations: [Sentry.httpIntegration()],
     beforeBreadcrumb: (breadcrumb) => sanitizeSentryBreadcrumb(breadcrumb),

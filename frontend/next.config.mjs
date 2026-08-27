@@ -10,19 +10,32 @@ const nextConfig = {
   }
 };
 
+export function createSentryBuildOptions(environment = process.env) {
+  const canUploadSourceMaps = Boolean(
+    environment.SENTRY_AUTH_TOKEN && environment.SENTRY_ORG && environment.SENTRY_PROJECT
+  );
+
+  return {
+    org: environment.SENTRY_ORG,
+    project: environment.SENTRY_PROJECT,
+    authToken: environment.SENTRY_AUTH_TOKEN,
+    silent: true,
+    tunnelRoute: "/monitoring",
+    webpack: {
+      treeshake: {
+        removeDebugLogging: true,
+      },
+    },
+    // Sentry v9 removed hideSourceMaps. Generate maps only when the build can
+    // upload them, then delete the browser maps after the upload completes.
+    sourcemaps: canUploadSourceMaps
+      ? { deleteSourcemapsAfterUpload: true }
+      : { disable: true },
+  };
+}
+
 // Skip Sentry webpack plugins entirely when DSN is not configured — avoids adding build
 // overhead in local dev and CI environments that don't have a Sentry project set up.
 export default process.env.NEXT_PUBLIC_SENTRY_DSN
-  ? withSentryConfig(nextConfig, {
-      org: process.env.SENTRY_ORG,
-      project: process.env.SENTRY_PROJECT,
-      // SENTRY_AUTH_TOKEN is only needed for source map upload; absent = maps skipped.
-      authToken: process.env.SENTRY_AUTH_TOKEN,
-      silent: true,
-      disableLogger: true,
-      // Proxy Sentry ingestion through /monitoring to avoid ad-blocker interference.
-      tunnelRoute: "/monitoring",
-      // Don't expose source maps in the browser — upload to Sentry only.
-      hideSourceMaps: true,
-    })
+  ? withSentryConfig(nextConfig, createSentryBuildOptions())
   : nextConfig;

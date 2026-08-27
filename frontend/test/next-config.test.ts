@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 // @ts-expect-error The runtime config is intentionally authored as native ESM JavaScript.
-import nextConfig from "../next.config.mjs";
+import nextConfig, { createSentryBuildOptions } from "../next.config.mjs";
 
 type RewriteConfig = {
   rewrites(): Promise<Array<{ source: string; destination: string }>>;
@@ -26,5 +26,23 @@ describe("Next runtime config", () => {
         destination: "https://backend.internal.example:4443/:path*"
       }
     ]);
+  });
+
+  it("generates source maps only for an authenticated upload and removes them afterward", () => {
+    expect(createSentryBuildOptions({})).toMatchObject({
+      sourcemaps: { disable: true },
+      webpack: { treeshake: { removeDebugLogging: true } },
+    });
+    expect(
+      createSentryBuildOptions({
+        SENTRY_AUTH_TOKEN: "test-auth-token",
+        SENTRY_ORG: "test-org",
+        SENTRY_PROJECT: "test-project",
+      })
+    ).toMatchObject({
+      sourcemaps: { deleteSourcemapsAfterUpload: true },
+      webpack: { treeshake: { removeDebugLogging: true } },
+    });
+    expect(createSentryBuildOptions({})).not.toHaveProperty("hideSourceMaps");
   });
 });

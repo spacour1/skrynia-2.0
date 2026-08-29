@@ -37,8 +37,11 @@ services:
     image: node:20.20.2-alpine
     working_dir: /app
     command: ["npm", "run", "migrate"]
-    env_file:
-      - ./backend/.env
+    env_file: &backend-env-files
+      - path: ./backend/.env.example
+        required: true
+      - path: ./backend/.env
+        required: false
     environment:
       NODE_ENV: development
       DATABASE_URL: postgres://marketplace:marketplace@postgres:5432/marketplace
@@ -60,8 +63,7 @@ services:
     # Run it manually when you actually want fresh demo data:
     #   docker compose -f docker-compose.dev.yml exec backend npm run seed
     command: ["npm", "run", "dev:api"]
-    env_file:
-      - ./backend/.env
+    env_file: *backend-env-files
     environment: &backend-environment
       NODE_ENV: development
       PORT: 4000
@@ -95,8 +97,7 @@ services:
     image: node:20.20.2-alpine
     working_dir: /app
     command: ["npm", "run", "dev:worker"]
-    env_file:
-      - ./backend/.env
+    env_file: *backend-env-files
     environment:
       <<: *backend-environment
       JOB_WORKER_ENABLED: "true"
@@ -116,8 +117,7 @@ services:
     image: node:20.20.2-alpine
     working_dir: /app
     command: ["npm", "run", "dev:outbox"]
-    env_file:
-      - ./backend/.env
+    env_file: *backend-env-files
     environment:
       <<: *backend-environment
       JOB_WORKER_ENABLED: "false"
@@ -138,7 +138,10 @@ services:
     working_dir: /app
     command: sh -c "npm ci && npm run dev -- -H 0.0.0.0"
     env_file:
-      - ./frontend/.env.local
+      - path: ./frontend/.env.example
+        required: true
+      - path: ./frontend/.env.local
+        required: false
     environment:
       # Read only by next.config.mjs's server-side rewrite (the Next.js process proxies
       # /api/* to this address) — it runs inside this container, so it needs the backend's

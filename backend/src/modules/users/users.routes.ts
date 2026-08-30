@@ -2,12 +2,13 @@ import { Router, type Response } from "express";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { inTx, pool } from "../../db/pool.js";
-import { asyncHandler, badRequest, notFound } from "../../common/errors.js";
+import { asyncHandler, badRequest, notFound, unauthorized } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireEmailVerified } from "../../common/middleware/require-email-verified.js";
 import { requirePhoneVerified } from "../../common/middleware/require-phone-verified.js";
 import {
   credentialRateLimit,
+  emailChangeRateLimit,
   phoneOtpRateLimit
 } from "../../common/middleware/security.js";
 import { cacheGet, cacheSet } from "../../common/redis.js";
@@ -15,8 +16,12 @@ import { moneyToCents } from "../../common/validation.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { isUserOnline } from "../chat/ws.service.js";
 import { requestWithdrawal } from "./wallet.service.js";
-import { createAndSendVerificationEmail, fireAndForget } from "../auth/verification.service.js";
 import { issueSession, revokeAllUserSessions } from "../auth/session.service.js";
+import { createStepUpToken } from "../auth/step-up.service.js";
+import {
+  confirmEmailChange,
+  requestEmailChange
+} from "../auth/email-change.service.js";
 import { setAuthCookies } from "../../common/cookies.js";
 import { checkPhoneResendRateLimit } from "./phone-verification.service.js";
 import { sendPhoneVerificationCode, checkPhoneVerificationCode } from "../../common/sms.js";
@@ -96,6 +101,43 @@ const changePasswordSchema = z.object({
     .refine((value) => /[^A-Za-z0-9]/.test(value), "Password must contain a special character")
 });
 
+const stepUpSchema = z.object({
+  purpose: z.literal("change_email"),
+  method: z.enum(["password", "two_factor"]),
+  currentPassword: z.string().min(1).max(256).optional(),
+  code: z.string().min(1).max(64).optional()
+}).strict().superRefine((value, ctx) => {
+  const passwordMethod = value.method === "password";
+  if (
+    (passwordMethod && (!value.currentPassword || value.code)) ||
+    (!passwordMethod && (!value.code || value.currentPassword))
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Credential does not match the selected reauthentication method"
+    });
+  }
+});
+
+const emailChangeRequestSchema = z.object({
+  email: z.string().trim().email().max(254),
+  stepUpToken: z.string().min(32).max(128)
+}).strict();
+
+const emailChangeConfirmSchema = z.object({
+  token: z.string().min(32).max(128)
+}).strict();
+
+function securitySession(req: AuthedRequest) {
+  if (!req.sessionId || !Number.isInteger(req.sessionVersion)) {
+    throw unauthorized("Authenticated session is unavailable");
+  }
+  return {
+    sessionId: req.sessionId,
+    sessionVersion: req.sessionVersion as number
+  };
+}
+
 async function rotateSecuritySession(req: AuthedRequest, res: Response) {
   await revokeAllUserSessions(req.user.id);
   const session = await issueSession(req.user.id, req.user.role);
@@ -114,9 +156,18 @@ router.get(
               u.created_at as "createdAt",
               (u.email_verified_at is not null or u.telegram_id is not null) as "emailVerified",
               u.phone, (u.phone_verified_at is not null) as "phoneVerified",
-              (ta.connected_at is not null) as "telegramConnected"
+              (ta.connected_at is not null) as "telegramConnected",
+              email_change.pending_email as "pendingEmail",
+              email_change.expires_at as "pendingEmailExpiresAt"
        from users u
        left join telegram_accounts ta on ta.user_id = u.id
+       left join lateral (
+         select pending_email, expires_at
+         from user_email_change_requests
+         where user_id = u.id
+           and delivery_confirmed = true
+           and expires_at > now()
+       ) email_change on true
        where u.id = $1`,
       [req.user.id]
     );
@@ -129,10 +180,8 @@ router.patch(
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = updateMeSchema.parse(req.body);
-    const emailChanged = Boolean(input.email && input.email.toLowerCase() !== req.user.email.toLowerCase());
-    if (emailChanged) {
-      const exists = await pool.query(`select id from users where email = $1 and id != $2`, [input.email!.toLowerCase(), req.user.id]);
-      if (exists.rows[0]) throw badRequest("Email is already used");
+    if (input.email && input.email.toLowerCase() !== req.user.email.toLowerCase()) {
+      throw badRequest("Use the secure email-change flow to change email");
     }
 
     const user = await inTx(async (client) => {
@@ -184,25 +233,23 @@ router.patch(
       const updated = await client.query(
         `update users
          set display_name = coalesce($2, display_name),
-             email = coalesce($3, email),
              avatar_url = case
-               when $4 then null
-               when $5::text is not null then $5
+               when $3 then null
+               when $4::text is not null then $4
                else avatar_url
              end,
              avatar_storage_object_id = case
-               when $4 then null
-               when $6::uuid is not null then $6
+               when $3 then null
+               when $5::uuid is not null then $5
                else avatar_storage_object_id
              end,
              seller_banner_storage_object_id = case
-               when $7 then null
-               when $8::uuid is not null then $8
+               when $6 then null
+               when $7::uuid is not null then $7
                else seller_banner_storage_object_id
              end,
-             push_enabled = coalesce($9, push_enabled),
-             settings = $10,
-             email_verified_at = case when $11 then null else email_verified_at end,
+             push_enabled = coalesce($8, push_enabled),
+             settings = $9,
              updated_at = now()
          where id = $1
          returning id, email, display_name as "displayName", role,
@@ -213,15 +260,13 @@ router.patch(
         [
           req.user.id,
           input.displayName,
-          input.email?.toLowerCase(),
           Boolean(input.clearAvatar),
           avatar ? buildMediaUrl(avatar.objectKey) : null,
           avatar?.id ?? null,
           Boolean(input.clearSellerBanner),
           banner?.id ?? null,
           input.pushEnabled,
-          settings,
-          emailChanged
+          settings
         ]
       );
 
@@ -242,22 +287,55 @@ router.patch(
       }
       return updated.rows[0];
     });
-    if (emailChanged) {
-      fireAndForget(
-        createAndSendVerificationEmail(user, getRequestLocale(req)).then((created) => created.sendPromise),
-        "profile_email_change_verification_failed"
-      );
-      // Alerts the address being replaced, not the new one — the account may not be the
-      // one who changed it, so the old inbox is the one that needs to know.
-      await createNotification({
-        userId: user.id,
-        type: "email_changed",
-        templateKey: "notifications.emailChanged",
-        params: { newEmail: user.email },
-        emailOverride: req.user.email
-      });
-    }
     res.json({ user });
+  })
+);
+
+router.post(
+  "/me/step-up",
+  authenticate,
+  credentialRateLimit,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const input = stepUpSchema.parse(req.body);
+    const session = securitySession(req);
+    const proof = await createStepUpToken({
+      userId: req.user.id,
+      ...session,
+      purpose: input.purpose,
+      currentPassword: input.currentPassword,
+      code: input.code
+    });
+    res.set("Cache-Control", "no-store");
+    res.json(proof);
+  })
+);
+
+router.post(
+  "/me/email-change/request",
+  authenticate,
+  emailChangeRateLimit,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const input = emailChangeRequestSchema.parse(req.body);
+    const session = securitySession(req);
+    const pending = await requestEmailChange({
+      userId: req.user.id,
+      ...session,
+      pendingEmail: input.email,
+      stepUpToken: input.stepUpToken,
+      locale: getRequestLocale(req)
+    });
+    res.set("Cache-Control", "no-store");
+    res.status(202).json(pending);
+  })
+);
+
+router.post(
+  "/email-change/confirm",
+  emailChangeRateLimit,
+  asyncHandler(async (req, res) => {
+    const input = emailChangeConfirmSchema.parse(req.body);
+    const activated = await confirmEmailChange(input);
+    res.json({ ok: true, email: activated.email });
   })
 );
 

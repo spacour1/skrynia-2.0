@@ -385,6 +385,39 @@ describe("websocket shutdown admission races", () => {
     expect(mocks.sendMessage).not.toHaveBeenCalled();
   });
 
+  it("closes a stale session from the database when the Redis sweep is unavailable", async () => {
+    const testRuntime = await createRuntime();
+    const socket = openSocket(testRuntime);
+    await waitForConnected(socket);
+    const closed = waitForClose(socket);
+    mocks.poolQuery.mockClear();
+    mocks.poolQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          id: identity.userId,
+          isBanned: false,
+          sessionVersion: identity.sessionVersion + 1
+        }
+      ]
+    });
+    mocks.redisExists.mockRejectedValue(new Error("redis unavailable"));
+
+    await testRuntime.runtime.runSecuritySweep();
+
+    await expect(closed).resolves.toEqual({
+      code: WS_CLOSE_SESSION_REVOKED,
+      reason: "Session revoked"
+    });
+    expect(mocks.poolQuery).toHaveBeenCalledWith(
+      expect.stringContaining("session_version"),
+      [[identity.userId]]
+    );
+    expect(mocks.loggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.any(Error) }),
+      "ws_session_security_sweep_failed_redis_unavailable"
+    );
+  });
+
   it("rejects frames delivered after the shutdown admission gate closes", async () => {
     const testRuntime = await createRuntime();
     const socket = openSocket(testRuntime);

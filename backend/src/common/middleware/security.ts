@@ -55,6 +55,9 @@ const DEDICATED_WRITE_PATHS = new Set([
   "/auth/password/forgot",
   "/auth/password/reset",
   "/auth/ws-ticket",
+  "/users/me/step-up",
+  "/users/me/email-change/request",
+  "/users/email-change/confirm",
   "/users/me/password",
   "/users/me/phone/request",
   "/users/me/phone/confirm",
@@ -126,6 +129,17 @@ function emailVerificationIdentity(req: Request) {
   const token = bodyString(req, "token");
   return token
     ? `token:${hashIdentity("email-verification-token", token)}`
+    : undefined;
+}
+
+function emailChangeIdentity(req: Request) {
+  const userId = requestUserId(req);
+  if (userId) return `user:${userId}`;
+  const email = bodyString(req, "email");
+  if (email) return `email:${hashIdentity("email-change", email.trim().toLowerCase())}`;
+  const token = bodyString(req, "token");
+  return token
+    ? `token:${hashIdentity("email-change-token", token)}`
     : undefined;
 }
 
@@ -379,6 +393,20 @@ export const emailVerificationRateLimit = composeMiddleware(
   ),
   ipLimiter(
     "rl:email-verification:ip:",
+    15 * 60 * 1000,
+    env.EMAIL_VERIFICATION_RATE_LIMIT_PER_IP_15MIN
+  )
+);
+
+export const emailChangeRateLimit = composeMiddleware(
+  subjectLimiter(
+    "rl:email-change:identity:",
+    15 * 60 * 1000,
+    env.EMAIL_VERIFICATION_RATE_LIMIT_PER_15MIN,
+    emailChangeIdentity
+  ),
+  ipLimiter(
+    "rl:email-change:ip:",
     15 * 60 * 1000,
     env.EMAIL_VERIFICATION_RATE_LIMIT_PER_IP_15MIN
   )

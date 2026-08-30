@@ -172,6 +172,22 @@ export default {
       cta: "Reset password",
       footer: "If you didn't request a password reset, just ignore this email — your password stays the same.",
       text: "Reset your password via this link: {link}"
+    },
+    emailChangeConfirm: {
+      subject: "Confirm your new email on SKRYNIA",
+      title: "Confirm your new email",
+      body: "An email change was requested for your SKRYNIA account. Your current email remains active until you confirm this address. The link is valid for 24 hours.",
+      cta: "Confirm new email",
+      footer: "If you didn't request this change, do not use the link and contact support.",
+      text: "Confirm your new email via this link: {link}"
+    },
+    emailChangeAlert: {
+      subject: "Email change requested on SKRYNIA",
+      title: "Email change requested",
+      body: "Someone requested a new email address for your SKRYNIA account. Your current email is still active. If this wasn't you, secure your account immediately.",
+      cta: "Review account security",
+      footer: "The email will not change unless the new address is confirmed.",
+      text: "An email change was requested for your SKRYNIA account. If this wasn't you, review your account security immediately. Your current email remains active."
     }
   },
   telegram: {

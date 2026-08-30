@@ -22,6 +22,7 @@ function VerifyEmailContent() {
   const router = useRouter();
   const hydrate = useAuth((state) => state.hydrate);
   const token = searchParams.get("token");
+  const isEmailChange = searchParams.get("purpose") === "email-change";
   const [status, setStatus] = useState<"ready" | "loading" | "success" | "error">(token ? "ready" : "error");
   const [message, setMessage] = useState("");
 
@@ -31,7 +32,7 @@ function VerifyEmailContent() {
   function confirm() {
     if (!token || status === "loading") return;
     setStatus("loading");
-    apiFetch("/auth/verify-email/confirm", {
+    apiFetch(isEmailChange ? "/users/email-change/confirm" : "/auth/verify-email/confirm", {
       method: "POST",
       body: JSON.stringify({ token })
     })
@@ -53,10 +54,12 @@ function VerifyEmailContent() {
             <span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-brand/10 text-brand">
               <MailCheck className="h-9 w-9" />
             </span>
-            <h1 className="mt-4 text-xl font-black text-ink">{t("verify.title")}</h1>
+            <h1 className="mt-4 text-xl font-black text-ink">
+              {t(isEmailChange ? "verify.emailChangeTitle" : "verify.title")}
+            </h1>
             <p className="mt-2 text-sm leading-6 text-muted">{t("verify.checkInbox")}</p>
             <button className="app-button mt-6 w-full" type="button" onClick={confirm}>
-              {t("verify.confirmCta")}
+              {t(isEmailChange ? "verify.emailChangeConfirmCta" : "verify.confirmCta")}
             </button>
           </>
         ) : null}
@@ -73,10 +76,18 @@ function VerifyEmailContent() {
             <span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-emerald-500/10 text-emerald-500">
               <CheckCircle2 className="h-9 w-9" />
             </span>
-            <h1 className="mt-4 text-xl font-black text-ink">{t("verify.confirmed")}</h1>
-            <p className="mt-2 text-sm leading-6 text-muted">{t("verify.confirmedText")}</p>
-            <button className="app-button mt-6 w-full" type="button" onClick={() => router.push("/dashboard")}>
-              {t("verify.continueToSite")}
+            <h1 className="mt-4 text-xl font-black text-ink">
+              {t(isEmailChange ? "verify.emailChanged" : "verify.confirmed")}
+            </h1>
+            <p className="mt-2 text-sm leading-6 text-muted">
+              {t(isEmailChange ? "verify.emailChangedText" : "verify.confirmedText")}
+            </p>
+            <button
+              className="app-button mt-6 w-full"
+              type="button"
+              onClick={() => router.push(isEmailChange ? "/login" : "/dashboard")}
+            >
+              {t(isEmailChange ? "auth.goToLogin" : "verify.continueToSite")}
             </button>
           </>
         ) : null}

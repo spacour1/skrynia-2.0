@@ -40,17 +40,25 @@ export function ProfileCard({
   avatarSrc,
   initial,
   role,
+  currentEmail,
+  pendingEmail,
+  twoFactorEnabled,
   emailVerified,
   phone,
   phoneVerified,
   profileMessage,
+  emailChangeCredential,
+  emailChangeMessage,
   verifyMessage,
   uploadPending,
   updatePending,
+  emailChangePending,
   resendPending,
   onSubmit,
   onPickAvatar,
   onClearAvatar,
+  onEmailChangeCredential,
+  onRequestEmailChange,
   onResendVerification,
   t
 }: {
@@ -59,17 +67,25 @@ export function ProfileCard({
   avatarSrc: string;
   initial: string;
   role: string;
+  currentEmail: string;
+  pendingEmail: string | null;
+  twoFactorEnabled: boolean;
   emailVerified: boolean;
   phone: string;
   phoneVerified: boolean;
   profileMessage: string;
+  emailChangeCredential: string;
+  emailChangeMessage: string;
   verifyMessage: string;
   uploadPending: boolean;
   updatePending: boolean;
+  emailChangePending: boolean;
   resendPending: boolean;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onPickAvatar: (file?: File) => void;
   onClearAvatar: () => void;
+  onEmailChangeCredential: (value: string) => void;
+  onRequestEmailChange: () => void;
   onResendVerification: () => void;
   t: SettingsT;
 }) {
@@ -105,7 +121,7 @@ export function ProfileCard({
             <div className="mt-5 grid gap-3 md:grid-cols-2">
               <ContactRow
                 icon={Mail}
-                value={profile.email || "—"}
+                value={currentEmail || "—"}
                 verified={emailVerified}
                 action={
                   emailVerified ? undefined : (
@@ -151,7 +167,7 @@ export function ProfileCard({
                 required
               />
             </Field>
-            <Field label={t("auth.email")}>
+            <Field label={t("auth.emailChange.newEmail")}>
               <input
                 className="app-input w-full"
                 type="email"
@@ -161,6 +177,47 @@ export function ProfileCard({
               />
             </Field>
           </div>
+          {pendingEmail ? (
+            <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-800 dark:text-amber-200">
+              {t("auth.emailChange.pending", { email: pendingEmail })}
+            </p>
+          ) : null}
+          {profile.email.trim().toLowerCase() !== currentEmail.trim().toLowerCase() ? (
+            <div className="space-y-3 rounded-lg border border-line bg-panel/35 p-4">
+              <div>
+                <p className="text-sm font-black text-ink">{t("auth.emailChange.title")}</p>
+                <p className="mt-1 text-xs leading-5 text-muted">{t("auth.emailChange.text")}</p>
+              </div>
+              <input
+                className="app-input w-full"
+                type={twoFactorEnabled ? "text" : "password"}
+                inputMode={twoFactorEnabled ? "numeric" : undefined}
+                autoComplete={twoFactorEnabled ? "one-time-code" : "current-password"}
+                aria-label={
+                  twoFactorEnabled
+                    ? t("auth.emailChange.twoFactorCredential")
+                    : t("auth.emailChange.passwordCredential")
+                }
+                placeholder={
+                  twoFactorEnabled
+                    ? t("auth.emailChange.twoFactorCredential")
+                    : t("auth.emailChange.passwordCredential")
+                }
+                value={emailChangeCredential}
+                onChange={(event) => onEmailChangeCredential(event.target.value)}
+              />
+              <button
+                className="app-button w-full"
+                type="button"
+                disabled={!emailChangeCredential.trim() || emailChangePending}
+                onClick={onRequestEmailChange}
+              >
+                {emailChangePending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+                {t("auth.emailChange.submit")}
+              </button>
+              <StatusMessage message={emailChangeMessage} />
+            </div>
+          ) : null}
           <Field label={t("settings.profile.bio")}>
             <textarea
               className="app-input min-h-[110px] w-full resize-y font-normal leading-6"

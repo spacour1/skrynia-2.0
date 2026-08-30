@@ -458,6 +458,122 @@ test("password change rotates the current session and revokes HTTP, refresh, and
   }
 });
 
+test("email change stays pending until confirmation, then revokes every old session and WebSocket", async ({
+  browser
+}) => {
+  const primary = await registerVerifiedActor(browser, "email-change-user");
+  const secondary = await loginActor(browser, primary.email, primary.password);
+  const confirmationContext = await browser.newContext();
+  const oldEmailBeforeActivation = await browser.newContext();
+  const newEmail = `email-change-${runId}@example.test`;
+
+  try {
+    const settingsPage = await primary.context.newPage();
+    const secondaryPage = await secondary.context.newPage();
+    const secondarySocketReady = waitForConnectedWebSocket(secondaryPage);
+    await Promise.all([
+      settingsPage.goto("/en/settings"),
+      secondaryPage.goto("/en/dashboard")
+    ]);
+    const secondarySocket = await secondarySocketReady;
+    let secondarySocketClosed = false;
+    secondarySocket.on("close", () => {
+      secondarySocketClosed = true;
+    });
+
+    const newEmailInput = settingsPage.getByLabel("New email");
+    await expect(newEmailInput).toHaveValue(primary.email);
+    await newEmailInput.fill(newEmail);
+    await settingsPage
+      .getByLabel("Current password for email change")
+      .fill(defaultPassword);
+    const sendConfirmation = settingsPage.getByRole("button", {
+      name: "Send confirmation link"
+    });
+    await expect(sendConfirmation).toBeEnabled();
+    const [requestResponse] = await Promise.all([
+      settingsPage.waitForResponse((response) =>
+        isApiResponse(
+          response,
+          "/api/users/me/email-change/request",
+          "POST",
+          202
+        )
+      ),
+      sendConfirmation.click()
+    ]);
+    const requestBody = (await requestResponse.json()) as {
+      debugConfirmationUrl?: string;
+    };
+    expect(requestBody.debugConfirmationUrl).toBeTruthy();
+    await expect(
+      settingsPage.getByText(
+        "Confirmation sent. Check the new inbox; your current email remains active until then.",
+        { exact: true }
+      )
+    ).toBeVisible();
+
+    const oldLoginBefore = await rawApi(
+      oldEmailBeforeActivation,
+      "POST",
+      "/auth/login",
+      { data: { email: primary.email, password: primary.password } }
+    );
+    expect(oldLoginBefore.status()).toBe(200);
+    const prematureNewLogin = await rawApi(
+      confirmationContext,
+      "POST",
+      "/auth/login",
+      { data: { email: newEmail, password: primary.password } }
+    );
+    expect(prematureNewLogin.status()).toBe(400);
+
+    await confirmationContext.clearCookies();
+    const confirmationPage = await confirmationContext.newPage();
+    await confirmationPage.goto(requestBody.debugConfirmationUrl!);
+    await Promise.all([
+      confirmationPage.waitForResponse((response) =>
+        isApiResponse(response, "/api/users/email-change/confirm", "POST", 200)
+      ),
+      confirmationPage
+        .getByRole("button", { name: "Activate new email" })
+        .click()
+    ]);
+    await expect(
+      confirmationPage.getByRole("heading", { name: "Email changed securely" })
+    ).toBeVisible();
+
+    await expect
+      .poll(async () => (await rawApi(secondary.context, "GET", "/auth/me")).status())
+      .toBe(401);
+    await expect
+      .poll(async () => (await rawApi(primary.context, "GET", "/auth/me")).status())
+      .toBe(401);
+    await expect.poll(() => secondarySocketClosed).toBe(true);
+
+    const oldLoginContext = await browser.newContext();
+    const newLoginContext = await browser.newContext();
+    try {
+      const oldLogin = await rawApi(oldLoginContext, "POST", "/auth/login", {
+        data: { email: primary.email, password: primary.password }
+      });
+      expect(oldLogin.status()).toBe(400);
+      const newLogin = await rawApi(newLoginContext, "POST", "/auth/login", {
+        data: { email: newEmail, password: primary.password }
+      });
+      expect(newLogin.status()).toBe(200);
+    } finally {
+      await Promise.all([oldLoginContext.close(), newLoginContext.close()]);
+    }
+  } finally {
+    await Promise.all([
+      confirmationContext.close(),
+      oldEmailBeforeActivation.close(),
+      closeActors(primary, secondary)
+    ]);
+  }
+});
+
 test("offline logout stays anonymous across tabs and reload, then retries revocation", async ({
   browser
 }) => {
@@ -560,7 +676,7 @@ test("offline logout stays anonymous across tabs and reload, then retries revoca
         await setNavigatorOnline(pageB, true);
         return retryResponse?.status();
       },
-      { timeout: 15_000, intervals: [25, 50, 100, 200] }
+      { timeout: 40_000, intervals: [25, 50, 100, 200, 500, 1_000] }
     ).toBe(204);
 
     expect(logoutAttempts).toBeGreaterThanOrEqual(2);

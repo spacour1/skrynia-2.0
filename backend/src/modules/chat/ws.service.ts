@@ -101,6 +101,35 @@ function activeFamilyRecord(raw: unknown, userId: string | undefined): boolean {
   }
 }
 
+async function findStaleSessionVersionClients(clients: Client[]): Promise<Set<Client>> {
+  const stale = new Set<Client>();
+  const candidates = clients.filter(
+    (client): client is Client & { userId: string; sessionVersion: number } =>
+      Boolean(client.userId) && typeof client.sessionVersion === "number"
+  );
+  if (candidates.length === 0) return stale;
+
+  const userIds = [...new Set(candidates.map((client) => client.userId))];
+  const result = await pool.query<{
+    id: string;
+    sessionVersion: number;
+    isBanned: boolean;
+  }>(
+    `select id, session_version as "sessionVersion", is_banned as "isBanned"
+     from users
+     where id = any($1::uuid[])`,
+    [userIds]
+  );
+  const liveUsers = new Map(result.rows.map((row) => [row.id, row]));
+  for (const client of candidates) {
+    const user = liveUsers.get(client.userId);
+    if (!user || user.isBanned || user.sessionVersion !== client.sessionVersion) {
+      stale.add(client);
+    }
+  }
+  return stale;
+}
+
 async function findRevokedRealtimeClients(clients: Client[]): Promise<Set<Client>> {
   const revoked = new Set<Client>();
   const candidates = clients.filter((client) => client.jti && client.userId);
@@ -644,10 +673,29 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
     if (securitySweepInFlight) return securitySweepInFlight;
     if (shuttingDown) return Promise.resolve();
     handlerStarted();
-    securitySweepInFlight = findRevokedRealtimeClients(
-      [...wss.clients] as Client[]
-    )
-      .then((revoked) => {
+    const sweepClients = [...wss.clients] as Client[];
+    securitySweepInFlight = Promise.allSettled([
+      findStaleSessionVersionClients(sweepClients),
+      findRevokedRealtimeClients(sweepClients)
+    ])
+      .then(([databaseSweep, redisSweep]) => {
+        const revoked = new Set<Client>();
+        if (databaseSweep.status === "fulfilled") {
+          for (const client of databaseSweep.value) revoked.add(client);
+        } else {
+          logger.warn(
+            { error: databaseSweep.reason },
+            "ws_session_security_sweep_failed_database_unavailable"
+          );
+        }
+        if (redisSweep.status === "fulfilled") {
+          for (const client of redisSweep.value) revoked.add(client);
+        } else {
+          logger.warn(
+            { error: redisSweep.reason },
+            "ws_session_security_sweep_failed_redis_unavailable"
+          );
+        }
         for (const client of revoked) {
           if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
             client.close(WS_CLOSE_SESSION_REVOKED, "Session revoked");
@@ -655,7 +703,7 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
         }
       })
       .catch((error) => {
-        logger.warn({ error }, "ws_session_security_sweep_failed_redis_unavailable");
+        logger.warn({ error }, "ws_session_security_sweep_failed");
       })
       .finally(() => {
         securitySweepInFlight = null;

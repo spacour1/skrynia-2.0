@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
@@ -213,5 +213,66 @@ describe("2FA schema contract", () => {
     await pool.query(`delete from users where id = $1`, [userId]);
     const after = await pool.query(`select 1 from user_2fa_backup_codes where user_id = $1`, [userId]);
     expect(after.rows).toHaveLength(0);
+  });
+});
+
+describe("pending email change schema contract", () => {
+  it("stores only token hashes and enforces one user and one normalized pending email", async () => {
+    const firstUser = await createUser("user");
+    const secondUser = await createUser("user");
+    const rawToken = `raw-${randomUUID()}`;
+    const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+
+    await pool.query(
+      `insert into user_email_change_requests(
+         user_id, pending_email, token_hash, requested_session_version,
+         expires_at, delivery_confirmed
+       )
+       values ($1, 'pending@example.test', $2, 1, now() + interval '24 hours', true)`,
+      [firstUser, tokenHash]
+    );
+
+    const stored = await pool.query<{
+      tokenHash: string;
+      pendingEmail: string;
+      deliveryConfirmed: boolean;
+    }>(
+      `select token_hash as "tokenHash", pending_email as "pendingEmail",
+              delivery_confirmed as "deliveryConfirmed"
+       from user_email_change_requests
+       where user_id = $1`,
+      [firstUser]
+    );
+    expect(stored.rows[0]).toEqual({
+      tokenHash,
+      pendingEmail: "pending@example.test",
+      deliveryConfirmed: true
+    });
+    expect(stored.rows[0].tokenHash).not.toContain(rawToken);
+
+    await expect(
+      pool.query(
+        `insert into user_email_change_requests(
+           user_id, pending_email, token_hash, requested_session_version, expires_at
+         ) values ($1, 'PENDING@example.test', $2, 1, now() + interval '1 hour')`,
+        [secondUser, "b".repeat(64)]
+      )
+    ).rejects.toThrow(/pending_email_normalized_check|idx_user_email_change_pending_email_unique/);
+
+    await expect(
+      pool.query(
+        `insert into user_email_change_requests(
+           user_id, pending_email, token_hash, requested_session_version, expires_at
+         ) values ($1, 'another@example.test', $2, 1, now() + interval '1 hour')`,
+        [firstUser, "c".repeat(64)]
+      )
+    ).rejects.toThrow(/user_email_change_requests_user_unique/);
+
+    await pool.query(`delete from users where id = $1`, [firstUser]);
+    const afterDelete = await pool.query(
+      `select 1 from user_email_change_requests where user_id = $1`,
+      [firstUser]
+    );
+    expect(afterDelete.rows).toHaveLength(0);
   });
 });

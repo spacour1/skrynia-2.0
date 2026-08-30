@@ -35,6 +35,8 @@ function SettingsContent() {
   const { locale, switchLocale, t } = useI18n();
   const [profile, setProfile] = useState<ProfileState>(emptyProfile);
   const [profileMessage, setProfileMessage] = useState("");
+  const [emailChangeCredential, setEmailChangeCredential] = useState("");
+  const [emailChangeMessage, setEmailChangeMessage] = useState("");
   const [passwordMessage, setPasswordMessage] = useState("");
   const [avatarPreview, setAvatarPreview] = useState("");
   const [avatarUploadId, setAvatarUploadId] = useState("");
@@ -74,7 +76,12 @@ function SettingsContent() {
   });
 
   function saveProfile(next: ProfileState) {
-    const { avatarUrl, ...profileFields } = next;
+    const { avatarUrl } = next;
+    const profileFields = {
+      displayName: next.displayName,
+      profileDescription: next.profileDescription,
+      pushEnabled: next.pushEnabled
+    };
     return apiFetch<{ user: User }>("/users/me", {
       method: "PATCH",
       body: JSON.stringify({
@@ -106,6 +113,45 @@ function SettingsContent() {
       applySavedUser(response);
     },
     onError: (err) => setProfileMessage(err instanceof Error ? err.message : t("settings.profile.saveFailed"))
+  });
+
+  const requestEmailChange = useMutation({
+    mutationFn: async () => {
+      const pendingEmail = profile.email.trim().toLowerCase();
+      const usesTwoFactor = Boolean(me.data?.user.twoFactorEnabled);
+      const stepUp = await apiFetch<{ stepUpToken: string }>("/users/me/step-up", {
+        method: "POST",
+        body: JSON.stringify(
+          usesTwoFactor
+            ? {
+                purpose: "change_email",
+                method: "two_factor",
+                code: emailChangeCredential.trim()
+              }
+            : {
+                purpose: "change_email",
+                method: "password",
+                currentPassword: emailChangeCredential
+              }
+        )
+      });
+      return apiFetch<{ pendingEmail: string; pendingEmailExpiresAt: string }>(
+        "/users/me/email-change/request",
+        {
+          method: "POST",
+          body: JSON.stringify({ email: pendingEmail, stepUpToken: stepUp.stepUpToken })
+        }
+      );
+    },
+    onSuccess: () => {
+      setEmailChangeCredential("");
+      setEmailChangeMessage(t("auth.emailChange.sent"));
+      queryClient.invalidateQueries({ queryKey: ["me-settings"] });
+    },
+    onError: (err) =>
+      setEmailChangeMessage(
+        err instanceof Error ? err.message : t("auth.emailChange.failed")
+      )
   });
 
   const [pushMessage, setPushMessage] = useState("");
@@ -349,13 +395,19 @@ function SettingsContent() {
         avatarSrc={avatarSrc}
         initial={initial}
         role={authUser?.role ?? "-"}
+        currentEmail={me.data?.user.email ?? authUser?.email ?? ""}
+        pendingEmail={me.data?.user.pendingEmail ?? null}
+        twoFactorEnabled={Boolean(me.data?.user.twoFactorEnabled)}
         emailVerified={Boolean(me.data?.user.emailVerified)}
         phone={me.data?.user.phone ?? ""}
         phoneVerified={Boolean(me.data?.user.phoneVerified)}
         profileMessage={profileMessage}
+        emailChangeCredential={emailChangeCredential}
+        emailChangeMessage={emailChangeMessage}
         verifyMessage={verifyMessage}
         uploadPending={uploadAvatar.isPending}
         updatePending={updateProfile.isPending}
+        emailChangePending={requestEmailChange.isPending}
         resendPending={resendVerification.isPending}
         onSubmit={(event) => {
           event.preventDefault();
@@ -363,6 +415,11 @@ function SettingsContent() {
         }}
         onPickAvatar={pickAvatar}
         onClearAvatar={clearAvatar}
+        onEmailChangeCredential={setEmailChangeCredential}
+        onRequestEmailChange={() => {
+          setEmailChangeMessage("");
+          requestEmailChange.mutate();
+        }}
         onResendVerification={() => resendVerification.mutate()}
         t={t}
       />

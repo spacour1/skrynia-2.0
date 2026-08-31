@@ -1,11 +1,11 @@
 import crypto from "node:crypto";
-import bcrypt from "bcryptjs";
 import { pool } from "../../db/pool.js";
 import {
   serviceUnavailable,
   unauthorized
 } from "../../common/errors.js";
 import { getRedis } from "../../common/redis.js";
+import { verifyPassword } from "./password.service.js";
 import { verifyTwoFactorCode } from "./twofa.service.js";
 
 export const STEP_UP_TTL_SECONDS = 5 * 60;
@@ -74,7 +74,7 @@ async function verifyStepUpCredential(
   if (
     !user.passwordHash ||
     !credential.currentPassword ||
-    !(await bcrypt.compare(credential.currentPassword, user.passwordHash))
+    !(await verifyPassword(credential.currentPassword, user.passwordHash))
   ) {
     // Accounts without either an enabled 2FA method or a password fail closed. In
     // particular, a Telegram-only login cannot turn possession of one session into an

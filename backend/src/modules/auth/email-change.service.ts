@@ -306,6 +306,7 @@ export async function confirmEmailChange(
         `update users
          set email = $2,
              email_verified_at = now(),
+             email_generation = email_generation + 1,
              session_version = session_version + 1,
              updated_at = now()
          where id = $1

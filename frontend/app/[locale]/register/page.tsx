@@ -60,7 +60,8 @@ export default function RegisterPage() {
             placeholder={t("auth.password")}
             autoComplete="new-password"
             required
-            minLength={8}
+            minLength={12}
+            maxLength={72}
           />
           {error && <p className="text-sm text-rose-600">{error}</p>}
           <button className="app-button w-full disabled:cursor-not-allowed disabled:opacity-60" disabled={submitting}>

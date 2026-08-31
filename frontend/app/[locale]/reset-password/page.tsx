@@ -89,8 +89,8 @@ function ResetPasswordContent() {
         </div>
         <div className="p-6">
           <form className="space-y-4" onSubmit={submit}>
-            <input className="app-input w-full" name="password" type="password" minLength={8} placeholder={t("auth.newPassword")} required />
-            <input className="app-input w-full" name="repeat" type="password" minLength={8} placeholder={t("auth.repeatPassword")} required />
+            <input className="app-input w-full" name="password" type="password" minLength={12} maxLength={72} placeholder={t("auth.newPassword")} required />
+            <input className="app-input w-full" name="repeat" type="password" minLength={12} maxLength={72} placeholder={t("auth.repeatPassword")} required />
             {error && <p className="text-sm text-rose-600">{error}</p>}
             <button className="app-button w-full" disabled={pending}>
               {t("auth.resetPasswordSubmit")}

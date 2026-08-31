@@ -1,4 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import request from "supertest";
+import { createApp } from "../src/app.js";
 import { pool } from "../src/db/pool.js";
 import { getRedis } from "../src/common/redis.js";
 import { requireEmailVerified } from "../src/common/middleware/require-email-verified.js";
@@ -10,6 +12,7 @@ import {
 import { closeDb, createUser, resetDb } from "./fixtures.js";
 
 const EMAIL_VERIFIED_EXPR = `(email_verified_at is not null or telegram_id is not null) as "emailVerified"`;
+const app = createApp();
 
 beforeEach(resetDb);
 afterAll(async () => {
@@ -83,7 +86,11 @@ describe("email verification token lifecycle", () => {
     const userId = await createUser();
     const token = await createEmailVerificationToken(userId);
     const resolved = await consumeEmailVerificationToken(token);
-    expect(resolved).toBe(userId);
+    expect(resolved).toMatchObject({
+      userId,
+      expectedEmail: `${userId}@test.local`,
+      emailGeneration: 1
+    });
   });
 
   it("consuming the same token twice fails the second time", async () => {
@@ -95,6 +102,30 @@ describe("email verification token lifecycle", () => {
 
   it("an unknown/invalid token is rejected", async () => {
     await expect(consumeEmailVerificationToken("not-a-real-token")).rejects.toThrow(/invalid or expired/i);
+  });
+
+  it("does not let an old generation verify an address after it changes away and back", async () => {
+    const userId = await createUser();
+    const originalEmail = `${userId}@test.local`;
+    const token = await createEmailVerificationToken(userId, originalEmail);
+    await pool.query(
+      `update users
+       set email = $2, email_generation = email_generation + 1
+       where id = $1`,
+      [userId, `temporary-${userId}@test.local`]
+    );
+    await pool.query(
+      `update users
+       set email = $2, email_generation = email_generation + 1
+       where id = $1`,
+      [userId, originalEmail]
+    );
+
+    await request(app)
+      .post("/auth/verify-email/confirm")
+      .send({ token })
+      .expect(400);
+    expect(await isEmailVerified(userId)).toBe(false);
   });
 });
 

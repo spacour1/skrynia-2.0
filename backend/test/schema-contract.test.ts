@@ -276,3 +276,30 @@ describe("pending email change schema contract", () => {
     expect(afterDelete.rows).toHaveLength(0);
   });
 });
+
+describe("authentication generation schema contract", () => {
+  it("starts both generations at one and enforces positive values", async () => {
+    const userId = await createUser("user");
+    const initial = await pool.query<{
+      emailGeneration: number;
+      passwordGeneration: number;
+    }>(
+      `select email_generation as "emailGeneration",
+              password_generation as "passwordGeneration"
+       from users
+       where id = $1`,
+      [userId]
+    );
+    expect(initial.rows[0]).toEqual({
+      emailGeneration: 1,
+      passwordGeneration: 1
+    });
+
+    await expect(
+      pool.query(`update users set email_generation = 0 where id = $1`, [userId])
+    ).rejects.toThrow(/users_email_generation_positive_check/);
+    await expect(
+      pool.query(`update users set password_generation = 0 where id = $1`, [userId])
+    ).rejects.toThrow(/users_password_generation_positive_check/);
+  });
+});

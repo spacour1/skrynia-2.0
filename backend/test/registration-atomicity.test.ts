@@ -71,7 +71,7 @@ describe("email registration atomicity", () => {
     const email = uniqueEmail();
     const response = await request(app)
       .post("/auth/register")
-      .send({ email, password: "password-123", displayName: "Atomic User" });
+      .send({ email, password: "Password-123!", displayName: "Atomic User" });
 
     expect(response.status).toBe(201);
     const user = await getUserByEmail(email);
@@ -86,7 +86,7 @@ describe("email registration atomicity", () => {
     try {
       const response = await request(app)
         .post("/auth/register")
-        .send({ email, password: "password-123", displayName: "Atomic User" });
+        .send({ email, password: "Password-123!", displayName: "Atomic User" });
 
       expect(response.status).toBe(500);
       expect(response.headers["set-cookie"]).toBeUndefined();
@@ -100,12 +100,12 @@ describe("email registration atomicity", () => {
     const email = uniqueEmail();
     await request(app)
       .post("/auth/register")
-      .send({ email, password: "password-123", displayName: "First" })
+      .send({ email, password: "Password-123!", displayName: "First" })
       .expect(201);
 
     const duplicate = await request(app)
       .post("/auth/register")
-      .send({ email, password: "password-456", displayName: "Second" });
+      .send({ email, password: "Password-456!", displayName: "Second" });
 
     expect(duplicate.status).toBe(409);
     expect(duplicate.headers["set-cookie"]).toBeUndefined();
@@ -119,7 +119,7 @@ describe("email registration atomicity", () => {
     const email = uniqueEmail();
     const response = await request(app)
       .post("/auth/register")
-      .send({ email, password: "password-123", displayName: "Atomic User" });
+      .send({ email, password: "Password-123!", displayName: "Atomic User" });
 
     expect(response.status).toBe(201);
     expect(await getUserByEmail(email)).not.toBeNull();

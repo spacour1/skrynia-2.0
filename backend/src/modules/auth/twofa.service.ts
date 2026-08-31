@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { inTx, pool, type DbClient } from "../../db/pool.js";
 import { badRequest } from "../../common/errors.js";
 import { buildOtpauthUri, generateTotpSecret, verifyTotpCode } from "./totp.service.js";
+import { verifyPassword } from "./password.service.js";
 import { bumpSessionVersion } from "./session.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
 import {
@@ -219,7 +220,7 @@ async function requireReauthentication(
   if (
     input.currentPassword &&
     user.passwordHash &&
-    (await bcrypt.compare(input.currentPassword, user.passwordHash))
+    (await verifyPassword(input.currentPassword, user.passwordHash))
   ) {
     return;
   }

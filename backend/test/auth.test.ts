@@ -45,7 +45,7 @@ class AuthedAgent {
   csrfToken = "";
   userId = "";
   email = "";
-  password = "correct-horse-battery-staple";
+  password = "Correct-horse-battery-staple1!";
 
   async register(overrides: { email?: string } = {}) {
     this.email = overrides.email ?? `${randomUUID()}@test.local`;
@@ -827,7 +827,7 @@ describe("password reset invalidates old sessions", () => {
     await auth.get("/auth/me").expect(200);
 
     const token = await createPasswordResetToken(auth.userId);
-    await request(app).post("/auth/password/reset").send({ token, password: "a-brand-new-password" }).expect(200);
+    await request(app).post("/auth/password/reset").send({ token, password: "A-brand-new-password1!" }).expect(200);
 
     await auth.get("/auth/me").expect(401);
     await auth.refresh().then((r) => expect(r.status).toBe(401));

@@ -20,8 +20,8 @@ export function PasswordPanel({
     <form className="space-y-4" onSubmit={onSubmit}>
       <h3 className="font-black text-ink">{t("settings.password.change")}</h3>
       <input className="app-input w-full" name="currentPassword" type="password" placeholder={t("settings.password.current")} autoComplete="current-password" required />
-      <input className="app-input w-full" name="newPassword" type="password" placeholder={t("settings.password.new")} autoComplete="new-password" minLength={8} required />
-      <input className="app-input w-full" name="repeatPassword" type="password" placeholder={t("settings.password.repeat")} autoComplete="new-password" minLength={8} required />
+      <input className="app-input w-full" name="newPassword" type="password" placeholder={t("settings.password.new")} autoComplete="new-password" minLength={12} maxLength={72} required />
+      <input className="app-input w-full" name="repeatPassword" type="password" placeholder={t("settings.password.repeat")} autoComplete="new-password" minLength={12} maxLength={72} required />
       <p className="text-xs leading-5 text-muted">{t("settings.password.text")}</p>
       <StatusMessage message={message} />
       <button className="app-button w-full" disabled={isPending}>

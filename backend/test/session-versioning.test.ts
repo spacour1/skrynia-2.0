@@ -11,6 +11,7 @@ import {
   setupTwoFactor
 } from "../src/modules/auth/twofa.service.js";
 import { generateTotpCode } from "../src/modules/auth/totp.service.js";
+import { createPasswordResetToken } from "../src/modules/auth/verification.service.js";
 import { closeDb, resetDb } from "./fixtures.js";
 
 const app = createApp();
@@ -125,9 +126,7 @@ describe("password reset", () => {
   it("kills every existing session even when Redis revocation is lost", async () => {
     const { email, password, userId, session } = await registerSession();
 
-    const redis = getRedis()!;
-    const resetToken = `test-reset-${randomUUID()}`;
-    await redis.set(`pwd_reset:${createHash("sha256").update(resetToken).digest("hex")}`, userId, "EX", 600);
+    const resetToken = await createPasswordResetToken(userId);
 
     await request(app)
       .post("/auth/password/reset")

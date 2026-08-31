@@ -1,4 +1,3 @@
-import bcrypt from "bcryptjs";
 import { Router } from "express";
 import { z } from "zod";
 import { env } from "../../config/env.js";
@@ -35,8 +34,14 @@ import {
 import { verifyTwoFactorCode } from "./twofa.service.js";
 import { issueWsTicket } from "./ws-ticket.service.js";
 import {
+  existingPasswordSchema,
+  hashPassword,
+  newPasswordSchema,
+  verifyPassword
+} from "./password.service.js";
+import {
   consumeEmailVerificationToken,
-  createPasswordResetToken,
+  issuePasswordResetToken,
   consumePasswordResetToken,
   createAndSendVerificationEmail,
   checkResendRateLimit,
@@ -50,13 +55,13 @@ const router = Router();
 
 const registerSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(8),
+  password: newPasswordSchema,
   displayName: z.string().min(2).max(80)
 });
 
 const loginSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(1)
+  password: existingPasswordSchema
 });
 
 const telegramSchema = z.object({
@@ -69,9 +74,9 @@ const telegramSchema = z.object({
   hash: z.string()
 });
 
-const emailVerifyConfirmSchema = z.object({ token: z.string().min(1) });
+const emailVerifyConfirmSchema = z.object({ token: z.string().min(1).max(512) });
 const passwordForgotSchema = z.object({ email: z.string().email() });
-const passwordResetSchema = z.object({ token: z.string().min(1), password: z.string().min(8) });
+const passwordResetSchema = z.object({ token: z.string().min(1).max(512), password: newPasswordSchema });
 const twoFactorVerifySchema = z.object({ twoFactorToken: z.string().min(1), code: z.string().min(4).max(16) });
 
 router.post(
@@ -79,7 +84,7 @@ router.post(
   credentialRateLimit,
   asyncHandler(async (req, res) => {
     const input = registerSchema.parse(req.body);
-    const passwordHash = await bcrypt.hash(input.password, 12);
+    const passwordHash = await hashPassword(input.password);
 
     // The account and its mandatory child rows commit or roll back together — a failure
     // after the user insert must not leave a wallet-less account behind. A duplicate
@@ -135,11 +140,11 @@ router.post(
       [input.email.toLowerCase()]
     );
     const user = result.rows[0];
-    if (!user?.password_hash) throw badRequest("Invalid email or password");
+    const passwordMatches = await verifyPassword(input.password, user?.password_hash);
+    if (!user?.password_hash || !passwordMatches) {
+      throw badRequest("Invalid email or password");
+    }
     if (user.isBanned) throw forbidden("Account is banned");
-
-    const ok = await bcrypt.compare(input.password, user.password_hash);
-    if (!ok) throw badRequest("Invalid email or password");
 
     if (user.twoFactorEnabled) {
       const twoFactorToken = await issueTwoFactorPendingToken(user.id, user.sessionVersion);
@@ -379,8 +384,19 @@ router.post(
   emailVerificationRateLimit,
   asyncHandler(async (req, res) => {
     const input = emailVerifyConfirmSchema.parse(req.body);
-    const userId = await consumeEmailVerificationToken(input.token);
-    await pool.query(`update users set email_verified_at = now() where id = $1 and email_verified_at is null`, [userId]);
+    const verification = await consumeEmailVerificationToken(input.token);
+    const updated = await pool.query(
+      `update users
+       set email_verified_at = coalesce(email_verified_at, now()), updated_at = now()
+       where id = $1
+         and lower(email) = $2
+         and email_generation = $3
+       returning id`,
+      [verification.userId, verification.expectedEmail, verification.emailGeneration]
+    );
+    if (updated.rowCount !== 1) {
+      throw badRequest("Verification link is invalid or expired");
+    }
     res.json({ status: "verified" });
   })
 );
@@ -396,10 +412,19 @@ router.post(
     // Always respond the same way whether or not the account exists, so this endpoint
     // can't be used to enumerate registered emails.
     if (user) {
-      const locale = getRequestLocale(req);
-      const token = await createPasswordResetToken(user.id);
-      const link = `${env.FRONTEND_URL}/${locale}/reset-password?token=${token}`;
-      fireAndForget(sendPasswordResetEmail(user, link, locale), "password_reset_email_failed");
+      try {
+        const locale = getRequestLocale(req);
+        const issued = await issuePasswordResetToken(user.id, user.email);
+        const link = `${env.FRONTEND_URL}/${locale}/reset-password?token=${issued.token}`;
+        fireAndForget(
+          sendPasswordResetEmail({ ...user, email: issued.expectedEmail }, link, locale),
+          "password_reset_email_failed"
+        );
+      } catch {
+        // Preserve the generic response even when Redis is unavailable for an existing
+        // account. Do not attach the email, raw token or infrastructure error to logs.
+        logger.error({ userId: user.id }, "password_reset_token_issue_failed");
+      }
     }
     res.json({ status: "sent" });
   })
@@ -410,19 +435,37 @@ router.post(
   passwordResetRateLimit,
   asyncHandler(async (req, res) => {
     const input = passwordResetSchema.parse(req.body);
-    const userId = await consumePasswordResetToken(input.token);
-    const passwordHash = await bcrypt.hash(input.password, 12);
+    const reset = await consumePasswordResetToken(input.token);
+    const passwordHash = await hashPassword(input.password);
     // The password change and the session-version bump commit together: every
     // previously issued access/refresh session is dead the instant the new password
     // exists, even if the Redis revocation below fails.
-    await pool.query(
-      `update users set password_hash = $2, session_version = session_version + 1, updated_at = now() where id = $1`,
-      [userId, passwordHash]
+    const updated = await pool.query(
+      `update users
+       set password_hash = $2,
+           password_generation = password_generation + 1,
+           session_version = session_version + 1,
+           updated_at = now()
+       where id = $1
+         and password_generation = $3
+         and email_generation = $4
+         and lower(email) = $5
+       returning id`,
+      [
+        reset.userId,
+        passwordHash,
+        reset.passwordGeneration,
+        reset.emailGeneration,
+        reset.expectedEmail
+      ]
     );
+    if (updated.rowCount !== 1) {
+      throw badRequest("Reset link is invalid or expired");
+    }
     // The password changed via an out-of-band email link, not from inside any active
     // session - every existing session (this device or any other) must re-authenticate.
     // Redis revocation remains the immediate kill switch (WS close, refresh delete).
-    await revokeAllUserSessions(userId);
+    await revokeAllUserSessions(reset.userId);
     res.json({ status: "reset" });
   })
 );

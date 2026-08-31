@@ -41,14 +41,14 @@
       "text": "Protect your account"
     },
     "password": {
-      "text": "At least 8 characters, with an uppercase letter, a number, and a special character. Use the new password the next time you sign in.",
+      "text": "Use at least 12 characters. Long passphrases and Unicode are supported. Use the new password the next time you sign in.",
       "current": "Current password",
       "new": "New password",
       "repeat": "Repeat new password",
       "change": "Change password",
       "updated": "Password updated",
       "mismatch": "New passwords don't match",
-      "weak": "Password must contain an uppercase letter, a number, and a special character",
+      "weak": "Password must contain at least 12 characters and fit the secure length limit",
       "changeFailed": "Could not change the password"
     },
     "twofa": {

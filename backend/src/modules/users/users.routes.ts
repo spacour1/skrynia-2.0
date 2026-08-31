@@ -1,5 +1,4 @@
 import { Router, type Response } from "express";
-import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { inTx, pool } from "../../db/pool.js";
 import { asyncHandler, badRequest, notFound, unauthorized } from "../../common/errors.js";
@@ -18,6 +17,12 @@ import { isUserOnline } from "../chat/ws.service.js";
 import { requestWithdrawal } from "./wallet.service.js";
 import { issueSession, revokeAllUserSessions } from "../auth/session.service.js";
 import { createStepUpToken } from "../auth/step-up.service.js";
+import {
+  existingPasswordSchema,
+  hashPassword,
+  newPasswordSchema,
+  verifyPassword
+} from "../auth/password.service.js";
 import {
   confirmEmailChange,
   requestEmailChange
@@ -92,13 +97,8 @@ const updateMeSchema = z.object({
 });
 
 const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1),
-  newPassword: z
-    .string()
-    .min(8)
-    .refine((value) => /[A-Z]/.test(value), "Password must contain an uppercase letter")
-    .refine((value) => /[0-9]/.test(value), "Password must contain a number")
-    .refine((value) => /[^A-Za-z0-9]/.test(value), "Password must contain a special character")
+  currentPassword: existingPasswordSchema,
+  newPassword: newPasswordSchema
 });
 
 const stepUpSchema = z.object({
@@ -359,19 +359,39 @@ router.post(
   credentialRateLimit,
   asyncHandler(async (req: AuthedRequest, res) => {
     const input = changePasswordSchema.parse(req.body);
-    const result = await pool.query(`select password_hash from users where id = $1`, [req.user.id]);
-    const hash = result.rows[0]?.password_hash;
+    const result = await pool.query<{
+      passwordHash: string | null;
+      passwordGeneration: number;
+    }>(
+      `select password_hash as "passwordHash",
+              password_generation as "passwordGeneration"
+       from users
+       where id = $1`,
+      [req.user.id]
+    );
+    const password = result.rows[0];
+    const hash = password?.passwordHash;
     if (!hash) throw badRequest("Password login is not enabled for this account");
-    const ok = await bcrypt.compare(input.currentPassword, hash);
+    const ok = await verifyPassword(input.currentPassword, hash);
     if (!ok) throw badRequest("Current password is incorrect");
-    const nextHash = await bcrypt.hash(input.newPassword, 12);
+    const nextHash = await hashPassword(input.newPassword);
     // One UPDATE = one implicit transaction: the new password and the session-version
     // bump land together, so old sessions die with the change even if the Redis
     // revocation in rotateSecuritySession fails.
-    await pool.query(
-      `update users set password_hash = $2, session_version = session_version + 1, updated_at = now() where id = $1`,
-      [req.user.id, nextHash]
+    const updated = await pool.query(
+      `update users
+       set password_hash = $2,
+           password_generation = password_generation + 1,
+           session_version = session_version + 1,
+           updated_at = now()
+       where id = $1
+         and password_generation = $3
+         and password_hash = $4`,
+      [req.user.id, nextHash, password.passwordGeneration, hash]
     );
+    if (updated.rowCount !== 1) {
+      throw badRequest("Current password is incorrect");
+    }
     // Kill every session on a password change - including this one's refresh token, which
     // exceptJti used to leave dangling-revoked (the tab then silently logged out ~15 min
     // later when its access token expired). Instead the caller immediately gets a brand

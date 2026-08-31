@@ -9,5 +9,6 @@ export const emptyProfile: ProfileState = {
 };
 
 export function isStrongPassword(value: string): boolean {
-  return value.length >= 8 && /[A-Z]/.test(value) && /[0-9]/.test(value) && /[^A-Za-z0-9]/.test(value);
+  const normalized = value.normalize("NFC");
+  return Array.from(normalized).length >= 12 && new TextEncoder().encode(normalized).length <= 72;
 }

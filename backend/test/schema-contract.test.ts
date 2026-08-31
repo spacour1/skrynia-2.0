@@ -181,9 +181,10 @@ describe("2FA schema contract", () => {
          active_secret_iv,
          active_secret_auth_tag,
          active_secret_version,
+         last_accepted_counter,
          confirmed_at
        )
-       values ($1, 'ciphertext', 'iv', 'auth-tag', 1, now())`,
+       values ($1, 'ciphertext', 'iv', 'auth-tag', 1, 123, now())`,
       [userId]
     );
     await pool.query(`insert into user_2fa_backup_codes(user_id, code_hash) values ($1, 'hash-1'), ($1, 'hash-2')`, [userId]);
@@ -191,16 +192,27 @@ describe("2FA schema contract", () => {
     const method = await pool.query<{
       legacy_secret: string | null;
       active_secret_ciphertext: string | null;
+      last_accepted_counter: string | null;
     }>(
-      `select legacy_secret, active_secret_ciphertext
+      `select legacy_secret, active_secret_ciphertext, last_accepted_counter
        from user_2fa_methods
        where user_id = $1`,
       [userId]
     );
     expect(method.rows[0]).toEqual({
       legacy_secret: null,
-      active_secret_ciphertext: "ciphertext"
+      active_secret_ciphertext: "ciphertext",
+      last_accepted_counter: "123"
     });
+
+    await expect(
+      pool.query(
+        `update user_2fa_methods
+         set last_accepted_counter = -1
+         where user_id = $1`,
+        [userId]
+      )
+    ).rejects.toThrow(/user_2fa_last_accepted_counter_check/);
 
     const codes = await pool.query<{ code_hash: string; used_at: string | null }>(
       `select code_hash, used_at from user_2fa_backup_codes where user_id = $1 order by code_hash`,

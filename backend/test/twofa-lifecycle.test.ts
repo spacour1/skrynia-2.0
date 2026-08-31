@@ -3,6 +3,7 @@ import request from "supertest";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { getRedis } from "../src/common/redis.js";
+import { env } from "../src/config/env.js";
 import { pool } from "../src/db/pool.js";
 import { issueSession } from "../src/modules/auth/session.service.js";
 import {
@@ -22,6 +23,7 @@ import { decryptTwoFactorSecret } from "../src/modules/auth/twofa-crypto.service
 import { closeDb, createUser, resetDb } from "./fixtures.js";
 
 const PASSWORD = "CurrentPassword1!";
+const TOTP_PERIOD_MS = 30_000;
 const app = createApp();
 
 beforeEach(async () => {
@@ -45,7 +47,10 @@ async function createPasswordUser() {
 
 async function enableTwoFactor(userId: string) {
   const setup = await setupTwoFactor(userId, `${userId}@test.local`);
-  const backupCodes = await confirmTwoFactor(userId, generateTotpCode(setup.secret));
+  const backupCodes = await confirmTwoFactor(
+    userId,
+    generateTotpCode(setup.secret, Date.now() - TOTP_PERIOD_MS)
+  );
   return { ...setup, backupCodes };
 }
 
@@ -113,7 +118,10 @@ describe("secure two-factor lifecycle", () => {
       )
     ).toBe(replacement.secret);
 
-    const replacementBackupCodes = await confirmTwoFactor(userId, pendingCode);
+    const replacementBackupCodes = await confirmTwoFactor(
+      userId,
+      generateTotpCode(replacement.secret, Date.now() - TOTP_PERIOD_MS)
+    );
     expect(replacementBackupCodes).toHaveLength(10);
     expect(await verifyTwoFactorCode(userId, generateTotpCode(replacement.secret))).toBe(true);
     expect(await verifyTwoFactorCode(userId, oldCode)).toBe(false);
@@ -178,6 +186,46 @@ describe("secure two-factor lifecycle", () => {
       [userId]
     );
     expect(used.rows[0].count).toBe("1");
+    const audits = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+       from audit_logs
+       where user_id = $1 and action = 'two_factor_backup_code_consumed'`,
+      [userId]
+    );
+    expect(audits.rows[0].count).toBe("1");
+  });
+
+  it("atomically accepts one TOTP counter once across concurrent requests", async () => {
+    const userId = await createPasswordUser();
+    const enabled = await enableTwoFactor(userId);
+    await pool.query(
+      `delete from audit_logs
+       where user_id = $1 and action = 'two_factor_totp_accepted'`,
+      [userId]
+    );
+    const code = generateTotpCode(enabled.secret);
+
+    const results = await Promise.all([
+      verifyTwoFactorCode(userId, code),
+      verifyTwoFactorCode(userId, code)
+    ]);
+
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(await verifyTwoFactorCode(userId, code)).toBe(false);
+
+    const state = await pool.query<{
+      lastAcceptedCounter: string | null;
+      audits: string;
+    }>(
+      `select m.last_accepted_counter as "lastAcceptedCounter",
+              (select count(*) from audit_logs
+               where user_id = $1 and action = 'two_factor_totp_accepted')::text as audits
+       from user_2fa_methods m
+       where m.user_id = $1`,
+      [userId]
+    );
+    expect(Number(state.rows[0].lastAcceptedCounter)).toBeGreaterThan(0);
+    expect(state.rows[0].audits).toBe("1");
   });
 
   it("requires reauthentication when rotating backup codes", async () => {
@@ -327,5 +375,77 @@ describe("secure two-factor lifecycle", () => {
       )
     ).toBe(legacySecret);
     expect(await verifyTwoFactorCode(userId, generateTotpCode(legacySecret))).toBe(true);
+  });
+
+  it("lazily re-encrypts an accepted code with the current key version", async () => {
+    const userId = await createPasswordUser();
+    const enabled = await enableTwoFactor(userId);
+    const previousConfig = {
+      key: env.TWO_FACTOR_ENCRYPTION_KEY,
+      version: env.TWO_FACTOR_ENCRYPTION_KEY_VERSION,
+      previousKeys: env.TWO_FACTOR_ENCRYPTION_PREVIOUS_KEYS
+    };
+
+    try {
+      env.TWO_FACTOR_ENCRYPTION_KEY = "22".repeat(32);
+      env.TWO_FACTOR_ENCRYPTION_KEY_VERSION = 2;
+      env.TWO_FACTOR_ENCRYPTION_PREVIOUS_KEYS = [
+        { version: previousConfig.version, keyHex: previousConfig.key }
+      ];
+
+      expect(await verifyTwoFactorCode(userId, generateTotpCode(enabled.secret))).toBe(true);
+
+      const rotated = await pool.query<{
+        ciphertext: string;
+        iv: string;
+        authTag: string;
+        version: number;
+      }>(
+        `select active_secret_ciphertext as ciphertext,
+                active_secret_iv as iv,
+                active_secret_auth_tag as "authTag",
+                active_secret_version as version
+         from user_2fa_methods
+         where user_id = $1`,
+        [userId]
+      );
+      expect(rotated.rows[0].version).toBe(2);
+      expect(
+        decryptTwoFactorSecret(rotated.rows[0], userId)
+      ).toBe(enabled.secret);
+    } finally {
+      env.TWO_FACTOR_ENCRYPTION_KEY = previousConfig.key;
+      env.TWO_FACTOR_ENCRYPTION_KEY_VERSION = previousConfig.version;
+      env.TWO_FACTOR_ENCRYPTION_PREVIOUS_KEYS = previousConfig.previousKeys;
+    }
+  });
+
+  it("fails closed when an encrypted authenticator envelope is malformed", async () => {
+    const userId = await createPasswordUser();
+    const enabled = await enableTwoFactor(userId);
+    const before = await pool.query<{ counter: string | null }>(
+      `select last_accepted_counter as counter
+       from user_2fa_methods
+       where user_id = $1`,
+      [userId]
+    );
+    await pool.query(
+      `update user_2fa_methods
+       set active_secret_iv = 'not-canonical-base64'
+       where user_id = $1`,
+      [userId]
+    );
+
+    await expect(
+      verifyTwoFactorCode(userId, generateTotpCode(enabled.secret))
+    ).rejects.toThrow();
+
+    const replayState = await pool.query<{ counter: string | null }>(
+      `select last_accepted_counter as counter
+       from user_2fa_methods
+       where user_id = $1`,
+      [userId]
+    );
+    expect(replayState.rows[0].counter).toBe(before.rows[0].counter);
   });
 });

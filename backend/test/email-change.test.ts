@@ -23,6 +23,7 @@ import { closeDb, createUser, resetDb } from "./fixtures.js";
 
 const app = createApp();
 const PASSWORD = "CurrentPassword1!";
+const TOTP_PERIOD_MS = 30_000;
 
 type Session = {
   cookies: string[];
@@ -445,7 +446,10 @@ describe("secure email change", () => {
 
     await pool.query(`update users set email_verified_at = now() where id = $1`, [account.userId]);
     const setup = await setupTwoFactor(account.userId, account.email);
-    const backupCodes = await confirmTwoFactor(account.userId, generateTotpCode(setup.secret));
+    const backupCodes = await confirmTwoFactor(
+      account.userId,
+      generateTotpCode(setup.secret, Date.now() - TOTP_PERIOD_MS)
+    );
     const currentVersion = await pool.query<{ sessionVersion: number }>(
       `select session_version as "sessionVersion" from users where id = $1`,
       [account.userId]

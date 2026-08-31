@@ -7,6 +7,39 @@ dotenv.config();
 const DEV_TWO_FACTOR_ENCRYPTION_KEY =
   "6465762d74776f2d666163746f722d656e6372797074696f6e2d6b65792d3031";
 
+const previousTwoFactorEncryptionKeysSchema = z
+  .string()
+  .trim()
+  .default("")
+  .transform((value, ctx) => {
+    if (value === "") return [];
+
+    const entries: Array<{ version: number; keyHex: string }> = [];
+    for (const rawEntry of value.split(",")) {
+      const entry = rawEntry.trim();
+      const match = /^([1-9]\d*):([a-fA-F0-9]{64})$/.exec(entry);
+      if (!match) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "TWO_FACTOR_ENCRYPTION_PREVIOUS_KEYS entries must use version:64-hex-key"
+        });
+        continue;
+      }
+
+      const version = Number(match[1]);
+      if (!Number.isSafeInteger(version)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "TWO_FACTOR_ENCRYPTION_PREVIOUS_KEYS versions must be safe positive integers"
+        });
+        continue;
+      }
+      entries.push({ version, keyHex: match[2] });
+    }
+    return entries;
+  });
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(4000),
@@ -26,6 +59,7 @@ const schema = z.object({
     .regex(/^[a-fA-F0-9]{64}$/, "TWO_FACTOR_ENCRYPTION_KEY must be 64 hexadecimal characters")
     .default(DEV_TWO_FACTOR_ENCRYPTION_KEY),
   TWO_FACTOR_ENCRYPTION_KEY_VERSION: z.coerce.number().int().min(1).default(1),
+  TWO_FACTOR_ENCRYPTION_PREVIOUS_KEYS: previousTwoFactorEncryptionKeysSchema,
   ACCESS_TOKEN_TTL_MIN: z.coerce.number().int().min(1).default(15),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).default(90),
   // Reserved for a future opt-in "stay signed in on this device" toggle; until that ships,
@@ -143,6 +177,18 @@ const schema = z.object({
   // NODE_ENV=test, so this flag can never enable mock capture in production/staging.
   ENABLE_TEST_PAYMENTS: strictBooleanEnvSchema.default(false)
 }).superRefine((value, ctx) => {
+  const twoFactorKeyVersions = new Set<number>([value.TWO_FACTOR_ENCRYPTION_KEY_VERSION]);
+  for (const entry of value.TWO_FACTOR_ENCRYPTION_PREVIOUS_KEYS) {
+    if (twoFactorKeyVersions.has(entry.version)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["TWO_FACTOR_ENCRYPTION_PREVIOUS_KEYS"],
+        message: `Duplicate two-factor encryption key version: ${entry.version}`
+      });
+    }
+    twoFactorKeyVersions.add(entry.version);
+  }
+
   if (value.SHUTDOWN_HARD_TIMEOUT_MS <= value.SHUTDOWN_GRACE_MS) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

@@ -15,6 +15,7 @@ import { createPasswordResetToken } from "../src/modules/auth/verification.servi
 import { closeDb, resetDb } from "./fixtures.js";
 
 const app = createApp();
+const TOTP_PERIOD_MS = 30_000;
 
 beforeEach(resetDb);
 afterAll(async () => {
@@ -189,7 +190,10 @@ describe("2FA lifecycle", () => {
     await pool.query(`update users set email_verified_at = now() where id = $1`, [userId]);
 
     const setup = await setupTwoFactor(userId, "sv-test@example.com", {});
-    await confirmTwoFactor(userId, generateTotpCode(setup.secret));
+    await confirmTwoFactor(
+      userId,
+      generateTotpCode(setup.secret, Date.now() - TOTP_PERIOD_MS)
+    );
     expect(await getSessionVersion(userId)).toBe(2);
 
     await disableTwoFactor(userId, { totpCode: generateTotpCode(setup.secret) });
@@ -200,7 +204,10 @@ describe("2FA lifecycle", () => {
     const { email, password, userId } = await registerSession();
     await pool.query(`update users set email_verified_at = now() where id = $1`, [userId]);
     const setup = await setupTwoFactor(userId, email, {});
-    await confirmTwoFactor(userId, generateTotpCode(setup.secret));
+    await confirmTwoFactor(
+      userId,
+      generateTotpCode(setup.secret, Date.now() - TOTP_PERIOD_MS)
+    );
 
     const login = await request(app)
       .post("/auth/login")
@@ -223,7 +230,10 @@ describe("2FA lifecycle", () => {
     const { email, password, userId } = await registerSession();
     await pool.query(`update users set email_verified_at = now() where id = $1`, [userId]);
     const setup = await setupTwoFactor(userId, email, {});
-    await confirmTwoFactor(userId, generateTotpCode(setup.secret));
+    await confirmTwoFactor(
+      userId,
+      generateTotpCode(setup.secret, Date.now() - TOTP_PERIOD_MS)
+    );
 
     const login = await request(app)
       .post("/auth/login")

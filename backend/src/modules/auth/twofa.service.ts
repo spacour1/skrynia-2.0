@@ -1,13 +1,18 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
-import { inTx, pool, type DbClient } from "../../db/pool.js";
+import { inTx, type DbClient } from "../../db/pool.js";
 import { badRequest } from "../../common/errors.js";
-import { buildOtpauthUri, generateTotpSecret, verifyTotpCode } from "./totp.service.js";
+import {
+  buildOtpauthUri,
+  generateTotpSecret,
+  matchTotpCounter
+} from "./totp.service.js";
 import { verifyPassword } from "./password.service.js";
 import { bumpSessionVersion } from "./session.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
 import {
   decryptTwoFactorSecret,
+  decryptTwoFactorSecretForRotation,
   encryptTwoFactorSecret,
   type EncryptedTwoFactorSecret
 } from "./twofa-crypto.service.js";
@@ -23,6 +28,7 @@ type TwoFactorMethodRow = {
   activeSecretIv: string | null;
   activeSecretAuthTag: string | null;
   activeSecretVersion: number | null;
+  lastAcceptedCounter: string | null;
   pendingSecretCiphertext: string | null;
   pendingSecretIv: string | null;
   pendingSecretAuthTag: string | null;
@@ -105,6 +111,7 @@ async function selectMethod(client: DbClient, userId: string, forUpdate = false)
             active_secret_iv as "activeSecretIv",
             active_secret_auth_tag as "activeSecretAuthTag",
             active_secret_version as "activeSecretVersion",
+            last_accepted_counter as "lastAcceptedCounter",
             pending_secret_ciphertext as "pendingSecretCiphertext",
             pending_secret_iv as "pendingSecretIv",
             pending_secret_auth_tag as "pendingSecretAuthTag",
@@ -200,11 +207,108 @@ async function selectUserForSecurityAction(client: DbClient, userId: string) {
   return user;
 }
 
-async function activeTotpMatches(client: DbClient, userId: string, code: string): Promise<boolean> {
-  const method = await selectMethod(client, userId);
-  const encrypted = activeSecretFromRow(method.rows[0]);
+function parseAcceptedCounter(value: string | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  const counter = Number(value);
+  if (!Number.isSafeInteger(counter) || counter < 0) {
+    throw new Error("Stored two-factor replay counter is invalid");
+  }
+  return counter;
+}
+
+async function persistRotatedActiveSecret(
+  client: DbClient,
+  userId: string,
+  secret: string
+) {
+  const encrypted = encryptTwoFactorSecret(secret, userId);
+  await client.query(
+    `update user_2fa_methods
+     set active_secret_ciphertext = $2,
+         active_secret_iv = $3,
+         active_secret_auth_tag = $4,
+         active_secret_version = $5,
+         updated_at = now()
+     where user_id = $1`,
+    [userId, encrypted.ciphertext, encrypted.iv, encrypted.authTag, encrypted.version]
+  );
+}
+
+async function consumeTwoFactorCode(
+  client: DbClient,
+  userId: string,
+  code: string,
+  auditContext: TwoFactorAuditContext = {}
+): Promise<boolean> {
+  const methodResult = await selectMethod(client, userId, true);
+  const method = methodResult.rows[0];
+  const encrypted = activeSecretFromRow(method);
   if (!encrypted) return false;
-  return verifyTotpCode(decryptTwoFactorSecret(encrypted, userId), code);
+
+  const decrypted = decryptTwoFactorSecretForRotation(encrypted, userId);
+  const matchedCounter = matchTotpCounter(decrypted.secret, code);
+  if (matchedCounter !== null) {
+    const lastAcceptedCounter = parseAcceptedCounter(method?.lastAcceptedCounter);
+    if (lastAcceptedCounter !== null && matchedCounter <= lastAcceptedCounter) {
+      return false;
+    }
+
+    const advanced = await client.query(
+      `update user_2fa_methods
+       set last_accepted_counter = $2,
+           updated_at = now()
+       where user_id = $1
+         and (last_accepted_counter is null or last_accepted_counter < $2)
+       returning user_id`,
+      [userId, matchedCounter]
+    );
+    if (advanced.rowCount !== 1) return false;
+    if (decrypted.needsRotation) {
+      await persistRotatedActiveSecret(client, userId, decrypted.secret);
+    }
+    await recordSecurityAudit(client, userId, "two_factor_totp_accepted", auditContext);
+    return true;
+  }
+
+  const normalizedCode = code.trim().toUpperCase();
+  if (!/^[A-F0-9]{4}-[A-F0-9]{4}$/.test(normalizedCode)) return false;
+  const backupCodes = await client.query<{ id: string; codeHash: string }>(
+    `select id, code_hash as "codeHash"
+     from user_2fa_backup_codes
+     where user_id = $1 and used_at is null
+     order by id`,
+    [userId]
+  );
+  for (const row of backupCodes.rows) {
+    if (!(await bcrypt.compare(normalizedCode, row.codeHash))) continue;
+    const consumed = await client.query(
+      `update user_2fa_backup_codes
+       set used_at = now()
+       where id = $1 and user_id = $2 and used_at is null
+       returning id`,
+      [row.id, userId]
+    );
+    if (consumed.rowCount !== 1) return false;
+    if (decrypted.needsRotation) {
+      await persistRotatedActiveSecret(client, userId, decrypted.secret);
+    }
+    await recordSecurityAudit(
+      client,
+      userId,
+      "two_factor_backup_code_consumed",
+      auditContext
+    );
+    return true;
+  }
+  return false;
+}
+
+async function activeTotpMatches(
+  client: DbClient,
+  userId: string,
+  code: string
+): Promise<boolean> {
+  return consumeTwoFactorCode(client, userId, code);
 }
 
 async function requireReauthentication(
@@ -343,16 +447,19 @@ export async function confirmTwoFactor(
     }
 
     const secret = decryptTwoFactorSecret(encrypted, userId);
-    if (!verifyTotpCode(secret, code)) throw badRequest("Invalid code");
+    const matchedCounter = matchTotpCounter(secret, code);
+    if (matchedCounter === null) throw badRequest("Invalid code");
 
     const backupCodes = await createBackupCodes(client, userId);
+    const activeSecret = encryptTwoFactorSecret(secret, userId);
     await client.query(
       `update user_2fa_methods
        set legacy_secret = null,
-           active_secret_ciphertext = pending_secret_ciphertext,
-           active_secret_iv = pending_secret_iv,
-           active_secret_auth_tag = pending_secret_auth_tag,
-           active_secret_version = pending_secret_version,
+           active_secret_ciphertext = $2,
+           active_secret_iv = $3,
+           active_secret_auth_tag = $4,
+           active_secret_version = $5,
+           last_accepted_counter = $6,
            pending_secret_ciphertext = null,
            pending_secret_iv = null,
            pending_secret_auth_tag = null,
@@ -361,7 +468,14 @@ export async function confirmTwoFactor(
            confirmed_at = now(),
            updated_at = now()
        where user_id = $1`,
-      [userId]
+      [
+        userId,
+        activeSecret.ciphertext,
+        activeSecret.iv,
+        activeSecret.authTag,
+        activeSecret.version,
+        matchedCounter
+      ]
     );
     await client.query(
       `update users
@@ -372,6 +486,7 @@ export async function confirmTwoFactor(
     // Enabling or replacing the authenticator invalidates every previously issued
     // session in the same transaction; the route immediately rotates the caller.
     await bumpSessionVersion(client, userId);
+    await recordSecurityAudit(client, userId, "two_factor_totp_accepted", auditContext);
     await recordSecurityAudit(client, userId, "two_factor_enabled", auditContext);
     return { expired: false as const, backupCodes };
   });
@@ -451,29 +566,5 @@ export async function disableTwoFactor(
 /** Used at login: a confirmed TOTP code, or a single-use backup code (consumed on success). */
 export async function verifyTwoFactorCode(userId: string, code: string): Promise<boolean> {
   await migrateLegacyTwoFactorSecrets(userId);
-  const method = await selectMethod(pool, userId);
-  const encrypted = activeSecretFromRow(method.rows[0]);
-  if (!encrypted) return false;
-  const secret = decryptTwoFactorSecret(encrypted, userId);
-  if (verifyTotpCode(secret, code)) return true;
-
-  const trimmedCode = code.trim().toUpperCase();
-  if (!trimmedCode) return false;
-  const backupCodes = await pool.query<{ id: string; codeHash: string }>(
-    `select id, code_hash as "codeHash" from user_2fa_backup_codes where user_id = $1 and used_at is null`,
-    [userId]
-  );
-  for (const row of backupCodes.rows) {
-    if (await bcrypt.compare(trimmedCode, row.codeHash)) {
-      const consumed = await pool.query(
-        `update user_2fa_backup_codes
-         set used_at = now()
-         where id = $1 and user_id = $2 and used_at is null
-         returning id`,
-        [row.id, userId]
-      );
-      return consumed.rowCount === 1;
-    }
-  }
-  return false;
+  return inTx((client) => consumeTwoFactorCode(client, userId, code));
 }

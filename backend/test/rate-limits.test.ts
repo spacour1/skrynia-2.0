@@ -117,6 +117,13 @@ function login(email: string, password: string, ip: string) {
     .send({ email, password });
 }
 
+function verifyTwoFactor(twoFactorToken: string, ip: string) {
+  return request(app)
+    .post("/auth/2fa/verify")
+    .set("X-Forwarded-For", ip)
+    .send({ twoFactorToken, code: "123456" });
+}
+
 function wsTicket(
   session: Awaited<ReturnType<typeof sessionFor>>,
   ip: string
@@ -219,5 +226,20 @@ describe("separated rate limits", () => {
     const keys = await redis.keys("rl:credential:identity:*");
     expect(keys.length).toBeGreaterThan(0);
     expect(keys.join("\n")).not.toContain(credentials.email);
+  });
+
+  it("rate limits a two-factor challenge by a hashed token identity across IPs", async () => {
+    const pendingToken = "invalid-but-stable-two-factor-token";
+
+    expect((await verifyTwoFactor(pendingToken, "198.51.100.71")).status).toBe(400);
+    expect((await verifyTwoFactor(pendingToken, "198.51.100.72")).status).toBe(400);
+
+    const limited = await verifyTwoFactor(pendingToken, "198.51.100.73");
+    expect(limited.status).toBe(429);
+    expect(limited.body.error.code).toBe("rate_limited");
+
+    const keys = await redis.keys("rl:credential:identity:*");
+    expect(keys.length).toBeGreaterThan(0);
+    expect(keys.join("\n")).not.toContain(pendingToken);
   });
 });

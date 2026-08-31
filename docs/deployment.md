@@ -141,6 +141,7 @@ REDIS_URL=redis://host:6379
 JWT_SECRET=<min-24-char-random-secret>
 TWO_FACTOR_ENCRYPTION_KEY=<64-hex-chars — unique 32-byte AES key>
 TWO_FACTOR_ENCRYPTION_KEY_VERSION=1
+TWO_FACTOR_ENCRYPTION_PREVIOUS_KEYS=  # optional: version:64-hex-key,...
 METRICS_USER=metrics
 METRICS_PASSWORD=<strong-password>
 FRONTEND_URL=https://your-domain.example
@@ -153,6 +154,47 @@ refuses to boot in production when it is unset or equals the dev default. Genera
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
+
+### Rotating the 2FA encryption key
+
+Treat every key version as immutable. A rolling or multi-replica deployment requires a
+two-phase rotation so every live replica can decrypt both versions before any replica
+writes the new version. Despite its historical name,
+`TWO_FACTOR_ENCRYPTION_PREVIOUS_KEYS` is the non-current decryption keyring and may
+temporarily contain the staged next version.
+
+Phase 1: keep version 1 current, preload version 2 on every API replica, worker, and
+outbox process, then wait for the rollout to finish and verify that no old configuration
+is still serving:
+
+```text
+TWO_FACTOR_ENCRYPTION_KEY=<old-64-hex-key>
+TWO_FACTOR_ENCRYPTION_KEY_VERSION=1
+TWO_FACTOR_ENCRYPTION_PREVIOUS_KEYS=2:<new-64-hex-key>
+```
+
+Phase 2: only after phase 1 has reached every replica, make version 2 current while
+retaining version 1, and complete a second rollout:
+
+```text
+TWO_FACTOR_ENCRYPTION_KEY=<new-64-hex-key>
+TWO_FACTOR_ENCRYPTION_KEY_VERSION=2
+TWO_FACTOR_ENCRYPTION_PREVIOUS_KEYS=1:<old-64-hex-key>
+```
+
+The API encrypts new secrets with the current version and lazily rewrites successfully
+used non-current rows. During the second rolling rollout, replicas may briefly rewrite a
+row in either direction, but both configurations can decrypt both versions; after all
+replicas use version 2, rows converge to version 2. Multiple non-current entries are
+comma-separated. Startup rejects malformed or duplicate keyring configuration and any
+entry that repeats the current version. A database ciphertext whose version is absent
+from the configured keyring fails closed when that row is decrypted.
+
+Keep version 1 configured until no active or pending 2FA row references it, then remove
+it in a later deployment. For rollback, restore the corresponding key and version
+together; never assign a new key to a version that has already encrypted data. If the
+platform cannot perform both phases, use a verified zero-overlap deployment instead of
+a rolling rotation.
 
 ---
 
@@ -263,6 +305,7 @@ block concurrent writes while that index is built.
 
 - [ ] `JWT_SECRET` is a unique ≥32-char random string
 - [ ] `TWO_FACTOR_ENCRYPTION_KEY` is a unique 64-hex (32-byte) key, not the dev default
+- [ ] Every version in `TWO_FACTOR_ENCRYPTION_PREVIOUS_KEYS` is unique and still required
 - [ ] `METRICS_PASSWORD` is a unique strong password
 - [ ] `DATABASE_URL` points to managed PostgreSQL, not local Docker
 - [ ] `REDIS_URL` is set and reachable

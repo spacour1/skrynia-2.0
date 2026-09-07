@@ -265,14 +265,17 @@ export async function sendMessageIdempotently(
   const body = input.body.trim();
   if (body.length < MIN_MESSAGE_LENGTH || body.length > MAX_MESSAGE_LENGTH) throw badRequest("Invalid message");
 
+  // Idempotency never bypasses the current authorization boundary. A message may have
+  // been accepted before either party blocked the other or before a moderator muted the
+  // sender; retries must observe that new state before returning the stored response.
+  await assertCanSendMessage(input.conversationId, input.senderId);
+
   const replay = await findMessageByClientId(
     pool,
     input.senderId,
     input.clientMessageId
   );
   if (replay) return verifyMessageReplay(replay, input, body);
-
-  await assertCanSendMessage(input.conversationId, input.senderId);
 
   return inTx(async (client) => {
     await client.query(

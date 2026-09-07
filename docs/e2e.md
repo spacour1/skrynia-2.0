@@ -5,7 +5,8 @@ topology:
 
 - clean PostgreSQL and Redis volumes;
 - one-shot migration and strictly test-gated deterministic admin seed jobs;
-- separate API, BullMQ worker, and transactional-outbox processes;
+- two API replicas plus separate BullMQ worker and transactional-outbox
+  processes;
 - a production Next.js build;
 - Chromium Playwright tests with one worker.
 
@@ -13,6 +14,13 @@ Run the complete suite from the repository root:
 
 ```bash
 node e2e/scripts/run.mjs
+```
+
+During a milestone iteration, pass Playwright file names after the runner to
+exercise the same isolated topology without replacing the mandatory full run:
+
+```bash
+node e2e/scripts/run.mjs tests/realtime-replicas.spec.ts
 ```
 
 The runner generates a unique Compose project and `E2E_RUN_ID`, waits for every
@@ -30,10 +38,12 @@ NODE_ENV=test
 ENABLE_TEST_PAYMENTS=true
 ```
 
-The opt-in is set only on the E2E API container. Migration, seed, worker, and
-outbox containers explicitly inherit `ENABLE_TEST_PAYMENTS=false`. The Compose
-network is internal, provider credentials are absent, and containers therefore
-cannot accidentally reach public payment APIs.
+The opt-in remains set only on the primary E2E API container. The second API
+replica inherits the nonfinancial worker environment and explicitly disables
+that worker role; migration, seed, worker, outbox, and the replica retain
+`ENABLE_TEST_PAYMENTS=false`. The Compose network is internal, provider
+credentials are absent, and containers therefore cannot accidentally reach
+public payment APIs.
 
 The production Compose topology keeps the feature disabled. Do not add real
 provider credentials to `docker-compose.e2e.yml`.
@@ -55,6 +65,9 @@ provider credentials to `docker-compose.e2e.yml`.
 - `session-security.spec.ts`: two browser contexts and WebSockets, cross-tab
   refresh fallback, offline logout recovery across reloads, password rotation,
   remote HTTP/refresh/WS revocation, and old/new password behavior.
+- `realtime-replicas.spec.ts`: one-time tickets issued through the primary API
+  connect explicit sockets to both API replicas; a single all-session revocation
+  is then required to close both sockets through the shared Redis event bus.
 - `reliability.spec.ts`: transient auth 500 without logout, aborted data request
   plus UI retry, currency switch preserving an unsaved draft, real category
   filter links, and opening a product link in a new Chromium tab.
@@ -95,5 +108,6 @@ npm run report
 Validate the Compose model without starting it:
 
 ```bash
-docker compose -f docker-compose.e2e.yml config --quiet
+docker compose -f docker-compose.e2e.yml \
+  -f docker-compose.realtime-e2e.yml config --quiet
 ```

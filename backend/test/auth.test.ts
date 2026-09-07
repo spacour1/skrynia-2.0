@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
+import { logger } from "../src/common/logger.js";
 import { pool } from "../src/db/pool.js";
 import { getRedis } from "../src/common/redis.js";
 import { createPasswordResetToken } from "../src/modules/auth/verification.service.js";
@@ -894,20 +895,40 @@ describe("Redis transient outage behavior", () => {
       registered.headers["set-cookie"] as unknown as string[],
       "access_token"
     )!;
+    const identity = jwt.decode(accessToken) as { jti: string; fid: string };
     await auth.post("/auth/logout").expect(204);
 
     const redis = getRedis()!;
-    const multiSpy = vi.spyOn(redis, "multi").mockImplementationOnce(() => {
-      throw new Error("ECONNREFUSED");
+    const redisError = Object.assign(new Error("Redis reply contained command metadata"), {
+      name: "ReplyError",
+      command: {
+        name: "exec",
+        args: [
+          `session:${identity.jti}`,
+          `refresh_family:${identity.fid}`
+        ]
+      }
     });
+    const multiSpy = vi.spyOn(redis, "multi").mockImplementationOnce(() => {
+      throw redisError;
+    });
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
     try {
       const response = await request(app)
         .get("/auth/me")
         .set("Cookie", [`access_token=${accessToken}`])
         .expect(503);
       expect(response.body.error.code).toBe("service_unavailable");
+      const revocationWarning = warnSpy.mock.calls.find(
+        (call) => call[1] === "session_revocation_check_failed_redis_unavailable"
+      );
+      expect(revocationWarning?.[0]).toEqual({ errorCode: "redis_reply_error" });
+      const serializedWarnings = JSON.stringify(warnSpy.mock.calls);
+      expect(serializedWarnings).not.toContain(identity.jti);
+      expect(serializedWarnings).not.toContain(identity.fid);
     } finally {
       multiSpy.mockRestore();
+      warnSpy.mockRestore();
     }
   });
 

@@ -413,7 +413,7 @@ describe("websocket shutdown admission races", () => {
       [[identity.userId]]
     );
     expect(mocks.loggerWarn).toHaveBeenCalledWith(
-      expect.objectContaining({ error: expect.any(Error) }),
+      { errorCode: "unknown_error" },
       "ws_session_security_sweep_failed_redis_unavailable"
     );
   });

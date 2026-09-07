@@ -7,6 +7,7 @@ import { env } from "../../config/env.js";
 import { pool } from "../../db/pool.js";
 import { getRedis } from "../../common/redis.js";
 import { logger } from "../../common/logger.js";
+import { safeErrorCode } from "../../common/safe-error-code.js";
 import { ACCESS_COOKIE } from "../../common/cookies.js";
 import { ApiError } from "../../common/errors.js";
 import {
@@ -247,7 +248,10 @@ async function authenticateSocket(
       if (error instanceof WebSocketShuttingDownError) throw error;
       assertHandshakeActive();
       if (error instanceof Error && error.message === "Session expired") throw error;
-      logger.warn({ error, jti: payload.jti }, "ws_session_revocation_check_failed_redis_unavailable");
+      logger.warn(
+        { errorCode: safeErrorCode(error) },
+        "ws_session_revocation_check_failed_redis_unavailable"
+      );
       throw new Error("Session verification unavailable");
     }
   }
@@ -301,7 +305,10 @@ async function authenticateHandshake(
         if (error instanceof WebSocketShuttingDownError) throw error;
         assertHandshakeActive();
         if (error instanceof Error && error.message === "Session expired") throw error;
-        logger.warn({ error, jti: identity.jti }, "ws_session_revocation_check_failed_redis_unavailable");
+        logger.warn(
+          { errorCode: safeErrorCode(error) },
+          "ws_session_revocation_check_failed_redis_unavailable"
+        );
         throw new Error("Session verification unavailable");
       }
     }
@@ -335,13 +342,16 @@ function allowedOrigins(): Set<string> {
 
 /**
  * Browsers always send Origin on WebSocket handshakes - an unknown Origin means a foreign
- * site is trying to open a socket with the visitor's cookies. Requests without an Origin
- * header (non-browser clients, tests, health probes) are allowed: they carry no ambient
- * browser credentials to hijack.
+ * site is trying to open a socket with the visitor's cookies. Native clients may omit
+ * Origin only when they present a one-time ticket. Cookie fallback always requires an
+ * explicitly allowed Origin, even if a non-browser client manually supplies the cookie.
  */
 function isOriginAllowed(req: http.IncomingMessage): boolean {
   const origin = req.headers.origin;
-  if (!origin) return true;
+  if (!origin) {
+    const url = new URL(req.url ?? "/ws", "http://localhost");
+    return Boolean(url.searchParams.get("ticket"));
+  }
   return allowedOrigins().has(origin);
 }
 
@@ -544,32 +554,36 @@ function realtimeType(payload: unknown, fallback: string) {
 export function notifyOrderEvent(
   userId: string,
   payload: unknown,
-  options: { strict?: boolean } = {}
+  options: { strict?: boolean; eventId?: string } = {}
 ) {
+  const { eventId, ...publishOptions } = options;
   return publishRealtimeEvent(
     {
+      id: eventId,
       type: realtimeType(payload, "user.event"),
       scope: "user",
       targetId: userId,
       payload
     },
-    options
+    publishOptions
   );
 }
 
 export function broadcastConversation(
   conversationId: string,
   payload: unknown,
-  options: { strict?: boolean } = {}
+  options: { strict?: boolean; eventId?: string } = {}
 ) {
+  const { eventId, ...publishOptions } = options;
   return publishRealtimeEvent(
     {
+      id: eventId,
       type: realtimeType(payload, "conversation.event"),
       scope: "conversation",
       targetId: conversationId,
       payload
     },
-    options
+    publishOptions
   );
 }
 
@@ -692,7 +706,7 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
           for (const client of redisSweep.value) revoked.add(client);
         } else {
           logger.warn(
-            { error: redisSweep.reason },
+            { errorCode: safeErrorCode(redisSweep.reason) },
             "ws_session_security_sweep_failed_redis_unavailable"
           );
         }
@@ -703,7 +717,10 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
         }
       })
       .catch((error) => {
-        logger.warn({ error }, "ws_session_security_sweep_failed");
+        logger.warn(
+          { errorCode: safeErrorCode(error) },
+          "ws_session_security_sweep_failed"
+        );
       })
       .finally(() => {
         securitySweepInFlight = null;
@@ -801,6 +818,15 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
 
     client.isAlive = true;
     client.on("pong", () => { client.isAlive = true; });
+    client.on("error", (error) => {
+      logger.warn(
+        {
+          errorName: error.name,
+          errorCode: "code" in error && typeof error.code === "string" ? error.code : undefined
+        },
+        "ws_transport_error"
+      );
+    });
 
     try {
       if (!isOriginAllowed(req)) throw new Error("Origin not allowed");
@@ -839,7 +865,7 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
           throw redisError;
         }
         logger.warn(
-          { error: redisError, jti, familyId },
+          { errorCode: safeErrorCode(redisError) },
           "ws_final_session_check_failed_redis_unavailable"
         );
         throw new Error("Session verification unavailable");
@@ -950,7 +976,7 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
               }
             } catch (redisError) {
               logger.warn(
-                { error: redisError, jti: client.jti, familyId: client.familyId },
+                { errorCode: safeErrorCode(redisError) },
                 "ws_session_revocation_check_failed_redis_unavailable"
               );
               throw new Error("Session verification unavailable");
@@ -968,16 +994,8 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
           if (shuttingDown) return;
 
           if (msg.type === "join_conversation") {
-            if (client.rooms?.has(msg.conversationId)) {
-              // Idempotent re-join: no membership change, no DB access re-check, and
-              // it does not consume the join budget.
-              sendJson(client, {
-                type: "joined_conversation",
-                conversationId: msg.conversationId
-              });
-              return;
-            }
-            if (overJoinBudget(client)) {
+            const alreadyJoined = client.rooms?.has(msg.conversationId) ?? false;
+            if (!alreadyJoined && overJoinBudget(client)) {
               wsFramesRejectedTotal.labels("join_flood").inc();
               sendJson(client, {
                 type: "error",
@@ -992,10 +1010,22 @@ export function attachWebSocketServer(server: http.Server): WebSocketRuntime {
             );
             if (shuttingDown) return;
             if (!canAccess) {
+              // A duplicate join is also an authorization boundary. If access changed
+              // after the original join, immediately evict the stale room membership.
+              if (alreadyJoined) leaveConversation(client, msg.conversationId);
               sendJson(client, {
                 type: "error",
                 code: "conversation_forbidden",
                 message: "Cannot join conversation"
+              });
+              return;
+            }
+            if (alreadyJoined) {
+              // Keep duplicate joins idempotent, but only after current access has been
+              // re-authorized above. They do not consume the join-flood budget.
+              sendJson(client, {
+                type: "joined_conversation",
+                conversationId: msg.conversationId
               });
               return;
             }

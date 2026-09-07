@@ -7,6 +7,10 @@ import { spawnSync } from "node:child_process";
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDir, "../..");
 const composeFile = resolve(repositoryRoot, "docker-compose.e2e.yml");
+const realtimeComposeFile = resolve(
+  repositoryRoot,
+  "docker-compose.realtime-e2e.yml"
+);
 const resultsDir = resolve(repositoryRoot, "e2e/test-results");
 const reportDir = resolve(repositoryRoot, "e2e/playwright-report");
 mkdirSync(resultsDir, { recursive: true });
@@ -18,8 +22,17 @@ const runId = (process.env.E2E_RUN_ID || generatedRunId)
   .replace(/[^a-z0-9-]+/g, "-")
   .slice(0, 40);
 const projectName = `skrynia-e2e-${runId}`;
-const composeArgs = ["compose", "-p", projectName, "-f", composeFile];
+const composeArgs = [
+  "compose",
+  "-p",
+  projectName,
+  "-f",
+  composeFile,
+  "-f",
+  realtimeComposeFile
+];
 const environment = { ...process.env, E2E_RUN_ID: runId };
+const playwrightArgs = process.argv.slice(2);
 console.log(`[e2e] run=${runId} project=${projectName}`);
 
 function docker(args, options = {}) {
@@ -49,6 +62,7 @@ try {
       "--wait-timeout",
       "240",
       "api",
+      "api-replica",
       "worker",
       "outbox",
       "frontend"
@@ -56,12 +70,19 @@ try {
     if ((stack.status ?? 1) !== 0) {
       exitCode = stack.status ?? 1;
     } else {
-      console.log("[e2e] running Chromium specs with workers=1");
+      console.log(
+        playwrightArgs.length
+          ? `[e2e] running targeted Chromium specs: ${playwrightArgs.join(" ")}`
+          : "[e2e] running Chromium specs with workers=1"
+      );
       const result = docker([
         "run",
         "--rm",
         "--no-deps",
-        "playwright"
+        "playwright",
+        ...(playwrightArgs.length
+          ? ["npx", "playwright", "test", ...playwrightArgs]
+          : [])
       ]);
       exitCode = result.status ?? 1;
     }
@@ -69,7 +90,7 @@ try {
   if (exitCode !== 0) {
     console.error(`[e2e] failed with exit code ${exitCode}; collecting stack logs`);
     const logs = docker(
-      ["logs", "--no-color", "postgres", "redis", "migrate", "seed", "api", "worker", "outbox", "frontend"],
+      ["logs", "--no-color", "postgres", "redis", "migrate", "seed", "api", "api-replica", "worker", "outbox", "frontend"],
       { capture: true }
     );
     writeFileSync(

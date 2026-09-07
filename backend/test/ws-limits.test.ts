@@ -164,6 +164,18 @@ describe("websocket control-frame limits", () => {
     expect(client.events.some((event) => event.code === "frame_rate_limited")).toBe(true);
   });
 
+  it("closes the connection before handling a frame larger than maxPayload", async () => {
+    const client = await connectedSocket();
+    const closed = new Promise<number>((resolve) => {
+      client.socket.once("close", resolve);
+    });
+
+    client.socket.send("x".repeat(64 * 1024 + 1));
+
+    await expect(closed).resolves.toBe(1009);
+    expect(client.events).toEqual([{ type: "connected" }]);
+  });
+
   it("duplicate join is idempotent and leaves fully remove membership", async () => {
     const client = await connectedSocket();
     const other = await createUser("user");
@@ -183,6 +195,29 @@ describe("websocket control-frame limits", () => {
     await broadcastConversation(conversationId, { type: "test_broadcast", conversationId });
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(client.events.some((event) => event.type === "test_broadcast")).toBe(false);
+  });
+
+  it("reauthorizes a duplicate join and evicts revoked room membership", async () => {
+    const client = await connectedSocket();
+    const other = await createUser("user");
+    const conversationId = await createConversation(client.userId, other);
+
+    client.send({ type: "join_conversation", conversationId });
+    await client.waitFor((event) => event.type === "joined_conversation");
+
+    const replacementBuyer = await createUser("user");
+    await pool.query(`update conversations set buyer_id = $2 where id = $1`, [
+      conversationId,
+      replacementBuyer
+    ]);
+    client.send({ type: "join_conversation", conversationId });
+    await client.waitFor(
+      (event) => event.type === "error" && event.code === "conversation_forbidden"
+    );
+
+    await broadcastConversation(conversationId, { type: "revoked_room_broadcast" });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(client.events.some((event) => event.type === "revoked_room_broadcast")).toBe(false);
   });
 
   it("a normal reconnect can rejoin its room", async () => {

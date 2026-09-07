@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
   assertCanSendMessage,
@@ -7,7 +8,8 @@ import {
   getOrCreateProductConversation,
   getUserConversations,
   markConversationRead,
-  sendMessage
+  sendMessage,
+  sendMessageIdempotently
 } from "../src/modules/chat/chat.service.js";
 import { blockUser, closeDb, createConversation, createOrder, createProduct, createUser, muteUser, resetDb } from "./fixtures.js";
 
@@ -35,6 +37,31 @@ describe("sendMessage", () => {
     await expect(sendMessage({ conversationId, senderId: buyer, body: "Hello!" })).rejects.toMatchObject({
       code: "messaging_blocked"
     });
+  });
+
+  it("rechecks current authorization before replaying an idempotent message", async () => {
+    const seller = await createUser();
+    const buyer = await createUser();
+    const conversationId = await createConversation(buyer, seller);
+    const clientMessageId = randomUUID();
+
+    const first = await sendMessageIdempotently({
+      conversationId,
+      senderId: buyer,
+      clientMessageId,
+      body: "Retry-safe hello"
+    });
+    expect(first.created).toBe(true);
+
+    await blockUser(seller, buyer);
+    await expect(
+      sendMessageIdempotently({
+        conversationId,
+        senderId: buyer,
+        clientMessageId,
+        body: "Retry-safe hello"
+      })
+    ).rejects.toMatchObject({ code: "messaging_blocked" });
   });
 
   it("rejects an empty or oversized body", async () => {

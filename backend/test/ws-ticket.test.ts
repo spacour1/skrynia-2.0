@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import request from "supertest";
 import { WebSocket, type RawData } from "ws";
 import { createApp } from "../src/app.js";
+import { logger } from "../src/common/logger.js";
 import { getRedis } from "../src/common/redis.js";
 import { env } from "../src/config/env.js";
 import { pool } from "../src/db/pool.js";
@@ -223,6 +224,16 @@ describe("ws tickets", () => {
     expect(result.code).toBe(1008);
   });
 
+  it("rejects a ticket when the account was banned after it was issued", async () => {
+    const session = await sessionFor();
+    const ticket = await getTicket(session);
+    await pool.query(`update users set is_banned = true where id = $1`, [session.userId]);
+
+    const result = await connect(`${wsUrl}?ticket=${encodeURIComponent(ticket)}`);
+    expect(result.outcome).toBe("closed");
+    expect(result.code).toBe(1008);
+  });
+
   it("rejects a browser Origin outside the allowlist even with a valid ticket", async () => {
     const session = await sessionFor();
     const ticket = await getTicket(session);
@@ -240,8 +251,58 @@ describe("ws tickets", () => {
 
   it("still authenticates same-origin connections via the httpOnly cookie", async () => {
     const session = await sessionFor();
-    const result = await connect(wsUrl, { Cookie: session.cookie });
+    const result = await connect(wsUrl, {
+      Cookie: session.cookie,
+      Origin: env.FRONTEND_URL
+    });
     expect(result.outcome).toBe("connected");
+  });
+
+  it("rejects originless cookie fallback", async () => {
+    const session = await sessionFor();
+    const result = await connect(wsUrl, { Cookie: session.cookie });
+
+    expect(result.outcome).toBe("closed");
+    expect(result.code).toBe(1008);
+  });
+
+  it("does not serialize session identifiers from Redis authentication errors", async () => {
+    const session = await sessionFor();
+    const leakedSessionKey = `session:${session.jti}`;
+    const leakedFamilyKey = `refresh_family:${session.familyId}`;
+    const redisError = Object.assign(new Error("Redis reply contained command metadata"), {
+      name: "ReplyError",
+      command: {
+        name: "exists",
+        args: [leakedSessionKey, leakedFamilyKey]
+      }
+    });
+    const existsSpy = vi
+      .spyOn(getRedis()!, "exists")
+      .mockRejectedValueOnce(redisError);
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    try {
+      const result = await connect(wsUrl, {
+        Cookie: session.cookie,
+        Origin: env.FRONTEND_URL
+      });
+
+      expect(result.outcome).toBe("closed");
+      expect(result.code).toBe(1008);
+      const authWarning = warnSpy.mock.calls.find(
+        (call) => call[1] === "ws_session_revocation_check_failed_redis_unavailable"
+      );
+      expect(authWarning?.[0]).toEqual({ errorCode: "redis_reply_error" });
+      const serializedWarnings = JSON.stringify(warnSpy.mock.calls);
+      expect(serializedWarnings).not.toContain(session.jti);
+      expect(serializedWarnings).not.toContain(session.familyId);
+      expect(serializedWarnings).not.toContain(leakedSessionKey);
+      expect(serializedWarnings).not.toContain(leakedFamilyKey);
+    } finally {
+      existsSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
   });
 
   it("rejects a cookie token issued before the database session epoch changed", async () => {
@@ -250,7 +311,10 @@ describe("ws tickets", () => {
       session.userId
     ]);
 
-    const result = await connect(wsUrl, { Cookie: session.cookie });
+    const result = await connect(wsUrl, {
+      Cookie: session.cookie,
+      Origin: env.FRONTEND_URL
+    });
     expect(result.outcome).toBe("closed");
     expect(result.code).toBe(1008);
   });
@@ -298,7 +362,8 @@ describe("realtime delivery and connection limits", () => {
     // handshake runs, otherwise admission correctly learns and caches the family.
     await redis.del(`session_family:${session.jti}`);
     const socket = await connectLive(wsUrl, {
-      Cookie: `access_token=${legacyAccess}`
+      Cookie: `access_token=${legacyAccess}`,
+      Origin: env.FRONTEND_URL
     });
     await redis.del(`session:${session.jti}`);
 

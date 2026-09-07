@@ -77,32 +77,36 @@ onRealtimeEvent((event) => {
 
 export function publishSessionSecurityEvent(
   event: SessionSecurityEvent,
-  options: { strict?: boolean } = {}
+  options: { strict?: boolean; eventId?: string } = {}
 ) {
+  const { eventId, ...publishOptions } = options;
   if (event.type === "session.revoked") {
     return publishRealtimeEvent(
       {
+        id: eventId,
         type: event.type,
         scope: "session",
         targetId: event.sessionId,
         payload: {}
       },
-      options
+      publishOptions
     );
   }
   if (event.type === "session.family.revoked") {
     return publishRealtimeEvent(
       {
+        id: eventId,
         type: event.type,
         scope: "session",
         targetId: event.familyId,
         payload: {}
       },
-      options
+      publishOptions
     );
   }
   return publishRealtimeEvent(
     {
+      id: eventId,
       type: event.type,
       scope: "user",
       targetId: event.userId,
@@ -111,7 +115,7 @@ export function publishSessionSecurityEvent(
           ? { exceptSessionId: event.exceptSessionId }
           : {}
     },
-    options
+    publishOptions
   );
 }
 

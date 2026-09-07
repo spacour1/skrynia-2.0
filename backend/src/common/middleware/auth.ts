@@ -6,6 +6,7 @@ import { env } from "../../config/env.js";
 import { logger } from "../logger.js";
 import { ApiError, serviceUnavailable } from "../errors.js";
 import { getRedis } from "../redis.js";
+import { safeErrorCode } from "../safe-error-code.js";
 import { ACCESS_COOKIE } from "../cookies.js";
 import type { AuthUser, AuthedRequest } from "../types.js";
 
@@ -60,7 +61,10 @@ async function isSessionRevoked(jti: string, familyId: string | undefined, userI
       : true;
     return !sessionExists || exactTombstoneExists || !familyActive;
   } catch (error) {
-    logger.warn({ error, jti, familyId }, "session_revocation_check_failed_redis_unavailable");
+    logger.warn(
+      { errorCode: safeErrorCode(error) },
+      "session_revocation_check_failed_redis_unavailable"
+    );
     throw serviceUnavailable("Session verification is temporarily unavailable");
   }
 }

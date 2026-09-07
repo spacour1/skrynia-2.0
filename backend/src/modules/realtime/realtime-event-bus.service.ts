@@ -1,7 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Redis } from "ioredis";
 import { z } from "zod";
 import { logger } from "../../common/logger.js";
+import { safeErrorCode } from "../../common/safe-error-code.js";
 
 const realtimeEventSchema = z.object({
   id: z.string().uuid(),
@@ -15,6 +16,18 @@ const realtimeEventSchema = z.object({
   message: "payload is required",
   path: ["payload"]
 });
+
+const REMOTE_EVENT_DEDUP_TTL_MS = 5 * 60 * 1_000;
+const REMOTE_EVENT_DEDUP_MAX_ENTRIES = 10_000;
+function createSubscriberConnectionName(instanceId: string, channel: string) {
+  const digest = createHash("sha256")
+    .update(instanceId)
+    .update("\0")
+    .update(channel)
+    .digest("hex")
+    .slice(0, 24);
+  return `keepgame-realtime-sub-${digest}`;
+}
 
 export type RealtimeEvent = {
   id: string;
@@ -47,6 +60,8 @@ type PublishInput = Pick<
 
 export class RealtimeEventBus {
   private readonly handlers = new Set<RealtimeEventHandler>();
+  private readonly seenRemoteEventIds = new Map<string, number>();
+  private readonly subscriberConnectionName: string;
   private subscriber: Redis | null = null;
   private subscribePromise: Promise<void> | null = null;
   private started = false;
@@ -61,10 +76,19 @@ export class RealtimeEventBus {
       channel: string;
       onStatusChange?: () => void;
     }
-  ) {}
+  ) {
+    this.subscriberConnectionName = createSubscriberConnectionName(
+      options.instanceId,
+      options.channel
+    );
+  }
 
   get instanceId() {
     return this.options.instanceId;
+  }
+
+  getSubscriberConnectionName() {
+    return this.subscriberConnectionName;
   }
 
   getStatus(): RealtimeBusStatus {
@@ -106,14 +130,39 @@ export class RealtimeEventBus {
         await handler(event);
       } catch (error) {
         logger.error(
-          { error, realtimeEventId: event.id, realtimeEventType: event.type },
+          {
+            errorCode: safeErrorCode(error),
+            realtimeEventId: event.id,
+            realtimeEventType: event.type
+          },
           "realtime_event_handler_failed"
         );
       }
     }
   }
 
+  private rememberRemoteEvent(eventId: string) {
+    const now = Date.now();
+    for (const [seenId, expiresAt] of this.seenRemoteEventIds) {
+      if (expiresAt > now) break;
+      this.seenRemoteEventIds.delete(seenId);
+    }
+
+    const existingExpiry = this.seenRemoteEventIds.get(eventId);
+    if (existingExpiry !== undefined && existingExpiry > now) return false;
+    if (existingExpiry !== undefined) this.seenRemoteEventIds.delete(eventId);
+
+    while (this.seenRemoteEventIds.size >= REMOTE_EVENT_DEDUP_MAX_ENTRIES) {
+      const oldestId = this.seenRemoteEventIds.keys().next().value;
+      if (oldestId === undefined) break;
+      this.seenRemoteEventIds.delete(oldestId);
+    }
+    this.seenRemoteEventIds.set(eventId, now + REMOTE_EVENT_DEDUP_TTL_MS);
+    return true;
+  }
+
   private consume(raw: string) {
+    if (!this.started) return;
     let candidate: unknown;
     try {
       candidate = JSON.parse(raw);
@@ -132,6 +181,7 @@ export class RealtimeEventBus {
     }
     const event = parsed.data as RealtimeEvent;
     if (event.sourceInstanceId === this.options.instanceId) return;
+    if (!this.rememberRemoteEvent(event.id)) return;
     void this.dispatchLocal(event);
   }
 
@@ -146,10 +196,14 @@ export class RealtimeEventBus {
         this.setStatus({ subscriberReady: true, lastError: null });
       })
       .catch((error: unknown) => {
-        const message =
-          error instanceof Error ? error.message : "Redis subscribe failed";
-        this.setStatus({ subscriberReady: false, lastError: message });
-        logger.warn({ error }, "realtime_subscribe_failed");
+        this.setStatus({
+          subscriberReady: false,
+          lastError: "Redis subscribe failed"
+        });
+        logger.warn(
+          { errorCode: safeErrorCode(error) },
+          "realtime_subscribe_failed"
+        );
       })
       .finally(() => {
         this.subscribePromise = null;
@@ -170,6 +224,7 @@ export class RealtimeEventBus {
     }
 
     this.subscriber = this.options.publisher.duplicate({
+      connectionName: this.subscriberConnectionName,
       lazyConnect: true,
       maxRetriesPerRequest: 1
     });
@@ -185,8 +240,12 @@ export class RealtimeEventBus {
     this.subscriber.on("error", (error) => {
       this.setStatus({
         subscriberReady: false,
-        lastError: error.message
+        lastError: "Redis subscriber unavailable"
       });
+      logger.warn(
+        { errorCode: safeErrorCode(error) },
+        "realtime_subscriber_unavailable"
+      );
     });
 
     await this.ensureSubscribed();
@@ -194,10 +253,14 @@ export class RealtimeEventBus {
       await this.options.publisher.ping();
       this.setStatus({ publisherReady: true, lastError: null });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Redis ping failed";
-      this.setStatus({ publisherReady: false, lastError: message });
-      logger.warn({ error }, "realtime_publisher_unavailable");
+      this.setStatus({
+        publisherReady: false,
+        lastError: "Redis ping failed"
+      });
+      logger.warn(
+        { errorCode: safeErrorCode(error) },
+        "realtime_publisher_unavailable"
+      );
     }
   }
 
@@ -231,11 +294,15 @@ export class RealtimeEventBus {
       this.setStatus({ publisherReady: true, lastError: null });
       return { event, published: true };
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Redis publish failed";
-      this.setStatus({ publisherReady: false, lastError: message });
+      this.setStatus({
+        publisherReady: false,
+        lastError: "Redis publish failed"
+      });
       logger.warn(
-        { error, realtimeEventId: event.id },
+        {
+          errorCode: safeErrorCode(error),
+          realtimeEventId: event.id
+        },
         "realtime_publish_failed_local_delivery_only"
       );
       if (options.strict) throw error;
@@ -247,6 +314,7 @@ export class RealtimeEventBus {
     this.started = false;
     this.subscriberReady = false;
     this.publisherReady = false;
+    this.seenRemoteEventIds.clear();
     const subscriber = this.subscriber;
     this.subscriber = null;
     if (subscriber && subscriber.status !== "end") {

@@ -126,7 +126,10 @@ export async function createNotification(
     await notifyOrderEvent(
       input.userId,
       { type: "notification", notification },
-      { strict: options.requireRealtimeDelivery }
+      {
+        strict: options.requireRealtimeDelivery,
+        eventId: notification.id
+      }
     );
   }
   // Email/Telegram delivery renders the keys in the recipient's preferred_locale

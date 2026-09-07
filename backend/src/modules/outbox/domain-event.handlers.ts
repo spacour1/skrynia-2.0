@@ -494,7 +494,7 @@ async function handleMessageCreated(event: DomainOutboxEvent) {
   await broadcastConversation(
     message.conversationId,
     { type: "message", message },
-    { strict: true }
+    { strict: true, eventId: message.id }
   );
 }
 
@@ -511,7 +511,7 @@ async function handleUserBanned(event: DomainOutboxEvent) {
   });
   await publishSessionSecurityEvent(
     { type: "user.banned", userId: payload.userId },
-    { strict: true }
+    { strict: true, eventId: event.id }
   );
   const products = await loadSellerProductCacheContexts(payload.userId);
   await invalidateProductCacheBatch(

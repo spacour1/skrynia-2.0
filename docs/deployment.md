@@ -264,7 +264,11 @@ S3_ACCESS_KEY_ID=<r2-access-key>
 S3_SECRET_ACCESS_KEY=<r2-secret-key>
 ```
 
-4. In R2 bucket settings, set **Public Access** → Custom Domain → `media.your-domain.example` so uploaded URLs are served from your domain (optional but recommended for CDN caching).
+4. For a new deployment, keep **Public Access disabled** and do not attach a public R2
+   development URL or custom domain. The API reads objects with its service credential
+   and serves new public assets and authorized private attachments through opaque UUID
+   proxy routes. Existing deployments must complete the legacy-URL transition below
+   before disabling an already-public bucket.
 
 ### AWS S3 setup
 
@@ -280,8 +284,69 @@ S3_SECRET_ACCESS_KEY=<iam-secret>
 ### Security notes
 
 - The backend validates image magic bytes before accepting any upload (rejects forged Content-Type headers).
-- Object scanning (virus/malware scan) is a future hardening item. Do not assume uploaded content is safe.
-- Never make the S3 bucket public-write from the browser. All uploads go through the authenticated `/storage/upload` endpoint.
+- `avatar`, `product_media`, and `catalog_asset` are the only public purposes. They are
+  served from `/api/storage/public/:storageObjectId` only after attachment. The legacy
+  `/uploads/:purpose/:ownerId/:fileName` route is database-backed and accepts only those
+  attached public purposes; it never exposes a filesystem directory.
+- `chat_attachment` is private. `/api/storage/private/:storageObjectId` authenticates every
+  request, then rechecks the conversation/dispute membership and hidden-message state.
+  Temporary previews are owner-only. Private responses use `no-store`, and API payloads
+  contain neither the provider object key nor the bucket name.
+- Keep every S3/R2 bucket private, including read access. All browser uploads and reads
+  for newly owned objects go through the API; `MEDIA_PUBLIC_BASE_URL` is retained only
+  as a legacy deployment setting and is not used to construct new media URLs.
+- Successful reads are capped by `STORAGE_MAX_STORED_IMAGE_BYTES` (16 MiB by default),
+  `STORAGE_MAX_CONCURRENT_READS` (8), `STORAGE_READ_QUEUE_LIMIT` (32), and
+  `STORAGE_READ_TIMEOUT_MS` (10 seconds). `HEAD` is explicitly handled without loading
+  the provider body and shares the public read rate-limit bucket with `GET`.
+- A `catalog_asset` is not publicly readable merely because upload attachment completed.
+  The public proxy rechecks that an active catalog group references it, or that both the
+  referencing catalog item and its parent group are active. Draft/hidden references stay
+  private but protect the asset from cleanup; truly abandoned attached catalog uploads
+  return 404 and enter durable cleanup after the temporary TTL.
+  The attach response keeps the canonical public URL for the catalog form and supplies a
+  separate owner-admin-only private preview URL; the preview URL must never be persisted
+  in a catalog row.
+
+### Existing public URL transition
+
+Do not turn off an existing CDN/custom-domain endpoint in the same release that first
+introduces the proxy. Older `product_media.url`, `users.avatar_url`, seller settings, and
+catalog image fields may still contain absolute CDN URLs or `/uploads/...` object-key
+paths. Use this staged rollout:
+
+1. Inventory those fields and classify every referenced object as public or private.
+   Private chat/dispute rows without a valid `attachment_storage_object_id` already fail
+   closed and must be mapped or deliberately retired; never preserve their raw URL.
+2. Before deploying the proxy cutover, backfill public rows that have an owned storage FK
+   to `/api/storage/public/:storageObjectId`. Legacy local `/uploads/...` rows without a
+   matching `storage_objects` record must be imported and linked first; the database-backed
+   legacy route intentionally returns 404 for unmanaged files. This repository contains no
+   automatic backfill or compatibility feature flag. If the pre-deploy inventory is not at
+   zero, keep the proxy cutover disabled behind an operator-supplied feature flag and retain
+   the previous read-only legacy handler until the backfill is complete. Do not silently
+   fall back to serving the upload directory.
+3. Verify in a non-production copy that no active database row, rendered API payload,
+   cache entry, email, or frontend page still references the public bucket/custom domain
+   or an object-key URL. Migration and verification against an external S3/R2 provider are
+   **BLOCKED / NOT RUN** because no non-production provider environment is available.
+4. Only after the inventory reaches zero, disable bucket public access, purge CDN/API
+   caches, and verify representative avatar, product, and catalog reads through the API.
+   Roll back by restoring the read-only legacy endpoint, not by making uploads public.
+
+### Malware and quarantine boundary
+
+The current pipeline validates declared MIME against decoded image bytes, enforces byte,
+dimension, pixel, quota, queue, and concurrency limits, then decodes and re-encodes the
+image as WebP. This reduces parser and metadata risk but is **not** malware scanning.
+
+No ClamAV or managed scanning provider is available in this repository or its local test
+environment, so malware-provider verification is **BLOCKED / NOT RUN**. Real S3/R2
+authorization is likewise **NOT RUN** until a non-production provider environment is
+supplied. Until a scanner is integrated, `quarantined` objects are fail-closed and are
+never downloadable. A future scanner must keep new objects unavailable while pending,
+promote only a clean result to `temporary`, leave infected/error results quarantined,
+and enqueue durable deletion with retry rather than silently dropping provider failures.
 
 ### Durable storage-state migration rollout
 

@@ -140,7 +140,13 @@ async function loadMessage(messageId: string) {
     `select m.id, m.conversation_id as "conversationId", m.sender_id as "senderId",
             m.client_message_id as "clientMessageId",
             coalesce(u.display_name, $2) as "senderDisplayName",
-            m.body, m.attachment_url as "attachmentUrl", m.created_at as "createdAt",
+            m.body,
+            case
+              when m.attachment_storage_object_id is not null
+                then '/api/storage/private/' || m.attachment_storage_object_id::text
+              else null
+            end as "attachmentUrl",
+            m.created_at as "createdAt",
             m.kind, m.system_type as "systemType", m.metadata,
             c.buyer_id as "buyerId", c.seller_id as "sellerId",
             c.product_id as "productId", c.order_id as "orderId",

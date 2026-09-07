@@ -250,12 +250,13 @@ function subjectLimiter(
   });
 }
 
-// Mounted only on public marketplace GET routes.
+// Mounted on public read routes. Express dispatches HEAD through GET handlers when a
+// route has no explicit HEAD handler, so both methods must share the same IP bucket.
 export const publicReadRateLimit = rateLimit({
   ...commonOptions("rl:public-read:"),
   windowMs: 60 * 1000,
   limit: env.PUBLIC_READ_RATE_LIMIT_PER_MIN,
-  skip: (req) => req.method !== "GET",
+  skip: (req) => req.method !== "GET" && req.method !== "HEAD",
   keyGenerator: (req) => `ip:${requestIp(req)}`
 });
 

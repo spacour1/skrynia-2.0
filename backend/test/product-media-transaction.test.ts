@@ -5,7 +5,7 @@ import { createApp } from "../src/app.js";
 import { pool } from "../src/db/pool.js";
 import { getRedis } from "../src/common/redis.js";
 import { issueSession } from "../src/modules/auth/session.service.js";
-import { buildMediaUrl } from "../src/modules/storage/storage.service.js";
+import { buildPublicMediaUrl } from "../src/modules/storage/storage.service.js";
 import { closeDb, createProduct, createUser, resetDb } from "./fixtures.js";
 
 /**
@@ -48,7 +48,10 @@ async function temporaryProductUpload(ownerId: string) {
      returning id`,
     [ownerId, objectKey]
   );
-  return { id: result.rows[0].id, url: buildMediaUrl(objectKey) };
+  return {
+    id: result.rows[0].id,
+    url: buildPublicMediaUrl(result.rows[0].id)
+  };
 }
 
 describe("product/media atomicity", () => {

@@ -90,6 +90,10 @@ const schema = z.object({
   STORAGE_MAX_OBJECTS_PER_PURPOSE: z.coerce.number().int().min(1).default(500),
   STORAGE_MAX_CONCURRENT_PROCESSING: z.coerce.number().int().min(1).default(4),
   STORAGE_PROCESSING_QUEUE_LIMIT: z.coerce.number().int().min(1).default(16),
+  STORAGE_MAX_STORED_IMAGE_BYTES: z.coerce.number().int().min(1).default(16_777_216),
+  STORAGE_MAX_CONCURRENT_READS: z.coerce.number().int().min(1).default(8),
+  STORAGE_READ_QUEUE_LIMIT: z.coerce.number().int().min(1).default(32),
+  STORAGE_READ_TIMEOUT_MS: z.coerce.number().int().min(100).default(10_000),
   UPLOAD_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(20),
   UPLOAD_RATE_LIMIT_PER_IP: z.coerce.number().int().min(1).default(60),
   // Per-connection WebSocket control-frame ceilings (message frames additionally have
@@ -249,13 +253,6 @@ const schema = z.object({
         code: z.ZodIssueCode.custom,
         path: ["S3_BUCKET"],
         message: "S3_BUCKET is required when STORAGE_DRIVER=s3"
-      });
-    }
-    if (!value.MEDIA_PUBLIC_BASE_URL) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["MEDIA_PUBLIC_BASE_URL"],
-        message: "MEDIA_PUBLIC_BASE_URL is required when STORAGE_DRIVER=s3"
       });
     }
   }

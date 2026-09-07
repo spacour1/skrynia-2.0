@@ -9,6 +9,7 @@ export type StoragePurpose =
 export type StorageUpload = {
   id: string;
   url: string;
+  previewUrl?: string;
   mimeType: string;
   width: number;
   height: number;

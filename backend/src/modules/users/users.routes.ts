@@ -41,7 +41,7 @@ import {
 } from "../auth/twofa.service.js";
 import {
   attachStorageObject,
-  buildMediaUrl,
+  buildPublicMediaUrl,
   enqueueStorageDeletion
 } from "../storage/storage.service.js";
 import { locales } from "../../i18n/config.js";
@@ -221,7 +221,7 @@ router.patch(
         : { ...current.settings };
       const currentBannerUrl = current.settings.sellerBannerUrl;
       if (banner) {
-        settings.sellerBannerUrl = buildMediaUrl(banner.objectKey);
+        settings.sellerBannerUrl = buildPublicMediaUrl(banner.id);
       } else if (input.clearSellerBanner) {
         delete settings.sellerBannerUrl;
       } else if (currentBannerUrl !== undefined) {
@@ -261,7 +261,7 @@ router.patch(
           req.user.id,
           input.displayName,
           Boolean(input.clearAvatar),
-          avatar ? buildMediaUrl(avatar.objectKey) : null,
+          avatar ? buildPublicMediaUrl(avatar.id) : null,
           avatar?.id ?? null,
           Boolean(input.clearSellerBanner),
           banner?.id ?? null,

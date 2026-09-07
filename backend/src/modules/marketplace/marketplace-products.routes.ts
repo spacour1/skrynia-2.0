@@ -26,7 +26,7 @@ import {
 } from "./marketplace-cache.service.js";
 import {
   attachStorageObject,
-  buildMediaUrl,
+  buildPublicMediaUrl,
   enqueueStorageDeletion
 } from "../storage/storage.service.js";
 import { mapSellerProductDto } from "./product.dto.js";
@@ -138,7 +138,7 @@ async function replaceProductMedia(
   if (objects.length) {
     const values: unknown[] = [productId];
     const rows = objects.map((object, index) => {
-      values.push(buildMediaUrl(object.objectKey), index, object.id);
+      values.push(buildPublicMediaUrl(object.id), index, object.id);
       return `($1, $${values.length - 2}, $${values.length - 1}, $${values.length})`;
     });
     await client.query(

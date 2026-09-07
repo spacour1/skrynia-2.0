@@ -7,7 +7,7 @@ import { broadcastConversation, isUserOnline } from "./ws.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
 import {
   attachStorageObject,
-  buildMediaUrl
+  buildPrivateMediaUrl
 } from "../storage/storage.service.js";
 import {
   createSystemMessage,
@@ -314,7 +314,7 @@ export async function sendMessageIdempotently(
         input.senderId,
         input.clientMessageId,
         body,
-        attachment ? buildMediaUrl(attachment.objectKey) : null,
+        attachment ? buildPrivateMediaUrl(attachment.id) : null,
         attachment?.id ?? null
       ]
     );
@@ -380,7 +380,15 @@ export async function getMessagePage(
             m.client_message_id as "clientMessageId",
             coalesce(u.display_name, '${SYSTEM_SENDER_DISPLAY_NAME}') as "senderDisplayName",
             case when m.hidden_at is not null and not $${adminParamIndex} then '${HIDDEN_BODY_PLACEHOLDER}' else m.body end as body,
-            m.attachment_url as "attachmentUrl", m.created_at as "createdAt",
+            case
+              when m.hidden_at is not null and not $${adminParamIndex} then null
+              else m.attachment_url
+            end as "attachmentUrl",
+            case
+              when m.hidden_at is not null and not $${adminParamIndex} then null
+              else m.attachment_storage_object_id
+            end as "attachmentStorageObjectId",
+            m.created_at as "createdAt",
             (m.hidden_at is not null) as hidden,
             m.kind, m.system_type as "systemType", m.metadata
      from messages m

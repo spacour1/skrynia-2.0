@@ -1,7 +1,7 @@
 import type { AuthUser } from "../../common/types.js";
 import {
   attachStorageObject,
-  buildMediaUrl
+  buildPrivateMediaUrl
 } from "../storage/storage.service.js";
 import { badRequest, forbidden, notFound } from "../../common/errors.js";
 import { inTx, pool, type DbClient } from "../../db/pool.js";
@@ -65,6 +65,13 @@ async function getDisputeAccess(
   return dispute;
 }
 
+export async function assertDisputeAttachmentAccess(
+  disputeId: string,
+  user: AuthUser
+): Promise<void> {
+  await getDisputeAccess(pool, disputeId, user);
+}
+
 async function getDisputeAccessByOrder(orderId: string, user: AuthUser) {
   const result = await pool.query<DisputeAdminRow>(
     `select d.id,
@@ -109,6 +116,7 @@ async function selectMessage(messageId: string) {
             u.role as "authorRole",
             dm.body,
             dm.attachment_url as "attachmentUrl",
+            dm.attachment_storage_object_id as "attachmentStorageObjectId",
             dm.hidden_at as "hiddenAt",
             dm.hidden_by as "hiddenBy",
             dm.moderation_reason as "moderationReason",
@@ -145,6 +153,7 @@ export async function listDisputeMessagePage(
             u.role as "authorRole",
             dm.body,
             dm.attachment_url as "attachmentUrl",
+            dm.attachment_storage_object_id as "attachmentStorageObjectId",
             dm.hidden_at as "hiddenAt",
             dm.hidden_by as "hiddenBy",
             dm.moderation_reason as "moderationReason",
@@ -208,7 +217,7 @@ export async function createDisputeMessage(input: {
         input.disputeId,
         input.user.id,
         input.body.trim(),
-        attachment ? buildMediaUrl(attachment.objectKey) : null,
+        attachment ? buildPrivateMediaUrl(attachment.id) : null,
         attachment?.id ?? null
       ]
     );

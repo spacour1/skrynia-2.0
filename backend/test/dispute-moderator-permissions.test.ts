@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
+import sharp from "sharp";
 import { createApp } from "../src/app.js";
 import { getRedis } from "../src/common/redis.js";
 import { pool } from "../src/db/pool.js";
 import { issueSession } from "../src/modules/auth/session.service.js";
+import { sendMessage } from "../src/modules/chat/chat.service.js";
 import {
   closeDb,
+  createConversation,
   createOrder,
   createProduct,
   createUser,
@@ -50,6 +53,12 @@ async function seedDispute() {
   const orderId = await createOrder(buyerId, sellerId, productId, {
     status: "disputed"
   });
+  const conversationId = await createConversation(
+    buyerId,
+    sellerId,
+    productId,
+    orderId
+  );
   const inserted = await pool.query<{ id: string }>(
     `insert into disputes(order_id, opened_by, reason)
      values ($1, $2, 'The delivered credentials do not work')
@@ -80,6 +89,7 @@ async function seedDispute() {
     adminId,
     outsiderId,
     orderId,
+    conversationId,
     disputeId,
     operationId,
     resolvingStartedAt
@@ -90,6 +100,24 @@ function expectNoModerationFields(message: Record<string, unknown>) {
   expect(message).not.toHaveProperty("hiddenAt");
   expect(message).not.toHaveProperty("hiddenBy");
   expect(message).not.toHaveProperty("moderationReason");
+}
+
+async function png() {
+  return sharp({
+    create: {
+      width: 16,
+      height: 12,
+      channels: 3,
+      background: { r: 30, g: 90, b: 170 }
+    }
+  })
+    .png()
+    .toBuffer();
+}
+
+function backendPath(url: string): string {
+  if (!url.startsWith("/api/")) throw new Error("Expected a same-origin API media URL");
+  return url.slice(4);
 }
 
 describe("dispute moderator permissions", () => {
@@ -249,6 +277,111 @@ describe("dispute moderator permissions", () => {
     );
     expect(afterHide.status).toBe(200);
     expect(afterHide.body.messages).toEqual([]);
+  });
+
+  it("rechecks dispute membership and hidden state for every attachment download", async () => {
+    const fixture = await seedDispute();
+    const buyer = await agentFor(fixture.buyerId, "user");
+    const seller = await agentFor(fixture.sellerId, "user");
+    const moderator = await agentFor(fixture.moderatorId, "moderator");
+    const admin = await agentFor(fixture.adminId, "admin");
+    const outsider = await agentFor(fixture.outsiderId, "user");
+
+    const uploaded = await buyer
+      .post("/storage/upload")
+      .field("purpose", "chat_attachment")
+      .attach("file", await png(), {
+        filename: "evidence.png",
+        contentType: "image/png"
+      });
+    expect(uploaded.status).toBe(201);
+
+    const posted = await buyer
+      .post(`/disputes/${fixture.disputeId}/messages`)
+      .send({
+        body: "Private screenshot evidence",
+        attachmentUploadId: uploaded.body.upload.id
+      });
+    expect(posted.status).toBe(201);
+    const privateUrl = posted.body.message.attachmentUrl as string;
+    const privatePath = backendPath(privateUrl);
+    expect(privateUrl).toBe(`/api/storage/private/${uploaded.body.upload.id}`);
+
+    for (const allowed of [buyer, seller, moderator, admin]) {
+      const response = await allowed.get(privatePath);
+      expect(response.status).toBe(200);
+      expect(response.headers["content-type"]).toMatch(/^image\/webp/);
+    }
+    expect((await outsider.get(privatePath)).status).toBe(404);
+    expect((await request(app).get(privatePath)).status).toBe(401);
+
+    const stored = await pool.query<{ objectKey: string }>(
+      `select object_key as "objectKey" from storage_objects where id = $1`,
+      [uploaded.body.upload.id]
+    );
+    expect(privateUrl).not.toContain(stored.rows[0].objectKey);
+    expect((await request(app).get(`/uploads/${stored.rows[0].objectKey}`)).status).toBe(404);
+
+    const hidden = await admin
+      .post(
+        `/disputes/${fixture.disputeId}/messages/${posted.body.message.id}/hide`
+      )
+      .send({ reason: "Sensitive evidence removed from participant view" });
+    expect(hidden.status).toBe(200);
+    expect((await buyer.get(privatePath)).status).toBe(404);
+    expect((await moderator.get(privatePath)).status).toBe(404);
+    expect((await admin.get(privatePath)).status).toBe(200);
+
+    const chatUpload = await buyer
+      .post("/storage/upload")
+      .field("purpose", "chat_attachment")
+      .attach("file", await png(), {
+        filename: "order-chat-evidence.png",
+        contentType: "image/png"
+      });
+    expect(chatUpload.status).toBe(201);
+    const chatMessage = await sendMessage({
+      conversationId: fixture.conversationId,
+      senderId: fixture.buyerId,
+      body: "Evidence originally shared in the order chat",
+      attachmentUploadId: chatUpload.body.upload.id
+    });
+    const chatPath = backendPath(chatMessage.attachmentUrl!);
+    const moderatorDetail = await moderator.get(`/disputes/${fixture.disputeId}`);
+    expect(moderatorDetail.status).toBe(200);
+    expect(moderatorDetail.body.messages[0].attachmentUrl).toBe(
+      chatMessage.attachmentUrl
+    );
+    expect((await moderator.get(chatPath)).status).toBe(200);
+    expect((await outsider.get(chatPath)).status).toBe(404);
+
+    const unrelatedConversationId = await createConversation(
+      fixture.buyerId,
+      fixture.sellerId
+    );
+    const unrelatedUpload = await buyer
+      .post("/storage/upload")
+      .field("purpose", "chat_attachment")
+      .attach("file", await png(), {
+        filename: "unrelated-chat.png",
+        contentType: "image/png"
+      });
+    const unrelatedMessage = await sendMessage({
+      conversationId: unrelatedConversationId,
+      senderId: fixture.buyerId,
+      body: "Unrelated direct-chat attachment",
+      attachmentUploadId: unrelatedUpload.body.upload.id
+    });
+    expect(
+      (await moderator.get(backendPath(unrelatedMessage.attachmentUrl!))).status
+    ).toBe(404);
+
+    await pool.query(`update messages set hidden_at = now() where id = $1`, [
+      chatMessage.id
+    ]);
+    expect((await buyer.get(chatPath)).status).toBe(404);
+    expect((await moderator.get(chatPath)).status).toBe(404);
+    expect((await admin.get(chatPath)).status).toBe(200);
   });
 
   it("keeps unrelated users outside the dispute", async () => {

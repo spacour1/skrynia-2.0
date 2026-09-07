@@ -1,6 +1,16 @@
 import type { MessageKind, Role } from "../../domain/enums.js";
 import { toIsoDate, toNullableIsoDate, type DbDate } from "../../common/dto.js";
 
+const storageObjectIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+function buildOwnedPrivateMediaUrl(
+  storageObjectId: string | null | undefined
+): string | null {
+  if (!storageObjectId || !storageObjectIdPattern.test(storageObjectId)) return null;
+  return `/api/storage/private/${storageObjectId}`;
+}
+
 export type MessageRow = {
   id: string;
   conversationId: string;
@@ -58,7 +68,9 @@ export function mapMessageDto(row: MessageRow) {
     clientMessageId: row.clientMessageId ?? null,
     senderDisplayName: row.senderDisplayName,
     body: row.body,
-    attachmentUrl: row.attachmentUrl ?? null,
+    // Private media is addressable only through an owned storage row. Historical
+    // free-form URLs without that binding fail closed instead of bypassing auth.
+    attachmentUrl: buildOwnedPrivateMediaUrl(row.attachmentStorageObjectId),
     createdAt: toIsoDate(row.createdAt),
     hidden: row.hidden ?? false,
     kind: row.kind ?? "user",
@@ -75,7 +87,7 @@ function mapDisputeMessageBase(row: DisputeMessageRow) {
     authorDisplayName: row.authorDisplayName,
     authorRole: row.authorRole,
     body: row.body,
-    attachmentUrl: row.attachmentUrl ?? null,
+    attachmentUrl: buildOwnedPrivateMediaUrl(row.attachmentStorageObjectId),
     createdAt: toIsoDate(row.createdAt)
   };
 }

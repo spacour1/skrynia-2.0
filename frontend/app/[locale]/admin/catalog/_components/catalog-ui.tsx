@@ -73,8 +73,8 @@ export function Toggle({ label, hint, checked, onChange }: { label: string; hint
 
 /**
  * Single admin image slot: drag-and-drop or click to pick, uploads through the shared
- * owned storage flow (JPEG/PNG/WEBP, decoded and re-encoded server-side), then attaches
- * the catalog asset before exposing its hosted URL to the form.
+ * owned storage flow (JPEG/PNG/WEBP, decoded and re-encoded server-side). The form
+ * keeps the canonical public URL while the owner-only URL previews it until save binds it.
  */
 export function ImageSlot({
   label,
@@ -94,6 +94,12 @@ export function ImageSlot({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [pendingPreview, setPendingPreview] = useState<{
+    canonicalUrl: string;
+    previewUrl: string;
+  } | null>(null);
+  const imageSource =
+    pendingPreview?.canonicalUrl === value ? pendingPreview.previewUrl : value;
 
   async function upload(file: File | undefined) {
     if (!file) return;
@@ -108,8 +114,13 @@ export function ImageSlot({
     }
     setUploading(true);
     try {
-      const { url } = await catalogApi.uploadImage(file);
-      onChange(url);
+      const uploaded = await catalogApi.uploadImage(file);
+      setPendingPreview(
+        uploaded.previewUrl
+          ? { canonicalUrl: uploaded.url, previewUrl: uploaded.previewUrl }
+          : null
+      );
+      onChange(uploaded.url);
     } catch (uploadError) {
       setError(uploadError instanceof ApiError ? uploadError.message : t("adminCatalog.genericError"));
     } finally {
@@ -138,8 +149,8 @@ export function ImageSlot({
       >
         {uploading ? (
           <Loader2 className="h-6 w-6 animate-spin text-brand" />
-        ) : value ? (
-          <img className="h-full w-full object-cover" src={value} alt="" />
+        ) : imageSource ? (
+          <img className="h-full w-full object-cover" src={imageSource} alt="" />
         ) : (
           <span className="grid place-items-center gap-1 p-2 text-center text-muted">
             <ImagePlus className="mx-auto h-5 w-5" />
@@ -150,7 +161,14 @@ export function ImageSlot({
       <div className="mt-1 flex items-start justify-between gap-2">
         <p className="text-[10px] leading-4 text-muted">{hint}</p>
         {value ? (
-          <button type="button" className="inline-flex shrink-0 items-center gap-0.5 text-[10px] font-bold text-rose-400 hover:underline" onClick={() => onChange("")}>
+          <button
+            type="button"
+            className="inline-flex shrink-0 items-center gap-0.5 text-[10px] font-bold text-rose-400 hover:underline"
+            onClick={() => {
+              setPendingPreview(null);
+              onChange("");
+            }}
+          >
             <X className="h-3 w-3" />
             {t("adminCatalog.images.remove")}
           </button>

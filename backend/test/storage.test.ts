@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { S3Client } from "@aws-sdk/client-s3";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import sharp from "sharp";
 import { createApp } from "../src/app.js";
@@ -10,11 +11,19 @@ import { issueSession } from "../src/modules/auth/session.service.js";
 import { sendMessage } from "../src/modules/chat/chat.service.js";
 import { processOutboxBatch } from "../src/modules/outbox/outbox.worker.js";
 import {
-  buildMediaUrl,
+  assertStorageObjectAvailable,
+  buildPrivateMediaUrl,
+  buildPublicMediaUrl,
   cleanupTemporaryStorageObjects,
-  enqueueStorageDeletion
+  enqueueStorageDeletion,
+  isPrivateStoragePurpose,
+  isPublicStoragePurpose,
+  readStorageObjectBody,
+  StorageReadSemaphore,
+  type StorageObject
 } from "../src/modules/storage/storage.service.js";
 import { getRedis } from "../src/common/redis.js";
+import { logger } from "../src/common/logger.js";
 import {
   closeDb,
   createConversation,
@@ -31,15 +40,13 @@ afterAll(async () => {
   await closeDb();
 });
 
-async function authedClient(role: "user" | "admin" = "user") {
-  const userId = await createUser(role);
+async function clientFor(userId: string, role: "user" | "admin" = "user") {
   const session = await issueSession(userId, role);
   const cookie = [
     `access_token=${session.accessToken}`,
     `csrf_token=${session.csrfToken}`
   ];
   return {
-    userId,
     upload: (
       purpose: "avatar" | "product_media" | "chat_attachment" | "catalog_asset",
       buffer: Buffer,
@@ -51,12 +58,34 @@ async function authedClient(role: "user" | "admin" = "user") {
         .set("X-CSRF-Token", session.csrfToken)
         .field("purpose", purpose)
         .attach("file", buffer, { filename: "image", contentType: mimeType }),
+    uploadRequest: () =>
+      request(app)
+        .post("/storage/upload")
+        .set("Cookie", cookie)
+        .set("X-CSRF-Token", session.csrfToken),
     patch: (url: string) =>
       request(app)
         .patch(url)
         .set("Cookie", cookie)
-        .set("X-CSRF-Token", session.csrfToken)
+        .set("X-CSRF-Token", session.csrfToken),
+    post: (url: string) =>
+      request(app)
+        .post(url)
+        .set("Cookie", cookie)
+        .set("X-CSRF-Token", session.csrfToken),
+    get: (url: string) => request(app).get(url).set("Cookie", cookie),
+    head: (url: string) => request(app).head(url).set("Cookie", cookie)
   };
+}
+
+async function authedClient(role: "user" | "admin" = "user") {
+  const userId = await createUser(role);
+  return { userId, ...(await clientFor(userId, role)) };
+}
+
+function backendPath(url: string): string {
+  if (!url.startsWith("/api/")) throw new Error("Expected a same-origin API media URL");
+  return url.slice(4);
 }
 
 async function png(width = 20, height = 12) {
@@ -81,7 +110,7 @@ describe("owned processed storage", () => {
     expect(uploaded.status).toBe(201);
     expect(uploaded.body.upload).toMatchObject({
       id: expect.any(String),
-      url: expect.stringMatching(/\.webp$/),
+      url: expect.stringMatching(/^\/api\/storage\/private\/[0-9a-f-]+$/),
       mimeType: "image/webp",
       width: 20,
       height: 12
@@ -170,6 +199,40 @@ describe("owned processed storage", () => {
     expect(objects.rows[0].count).toBe("0");
   });
 
+  it("bounds multipart fields and creates no storage rows or files on rejection", async () => {
+    const owner = await authedClient();
+    const image = await png();
+
+    const excessFields = await owner
+      .uploadRequest()
+      .field("purpose", "avatar")
+      .field("unexpected", "extra")
+      .attach("file", image, { filename: "image", contentType: "image/png" });
+    expect(excessFields.status).toBe(400);
+
+    const oversizedPurpose = await owner
+      .uploadRequest()
+      .field("purpose", "a".repeat(65))
+      .attach("file", image, { filename: "image", contentType: "image/png" });
+    expect(oversizedPurpose.status).toBe(413);
+    expect(oversizedPurpose.body.error.code).toBe("payload_too_large");
+
+    const oversizedFieldName = await owner
+      .uploadRequest()
+      .field("x".repeat(33), "avatar")
+      .attach("file", image, { filename: "image", contentType: "image/png" });
+    expect(oversizedFieldName.status).toBe(400);
+
+    const objects = await pool.query<{ count: string }>(
+      `select count(*)::text as count from storage_objects where owner_id = $1`,
+      [owner.userId]
+    );
+    expect(objects.rows[0].count).toBe("0");
+    await expect(
+      fs.stat(path.resolve(env.LOCAL_UPLOAD_DIR, "avatar", owner.userId))
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("auto-rotates, re-encodes, and strips EXIF metadata", async () => {
     const owner = await authedClient();
     const jpeg = await sharp({
@@ -245,18 +308,33 @@ describe("owned processed storage", () => {
 
   it("records a durable deletion intent when the physical provider write fails", async () => {
     const owner = await authedClient();
-    const originalUploadDir = env.LOCAL_UPLOAD_DIR;
-    const blockedUploadDir = path.resolve(
-      originalUploadDir,
-      `provider-write-blocker-${owner.userId}`
+    const originalDriver = env.STORAGE_DRIVER;
+    const originalBucket = env.S3_BUCKET;
+    const sentinelBucket = "STAGE5_SECRET_BUCKET_SENTINEL";
+    const sentinelObjectKey = "STAGE5_SECRET_OBJECT_KEY_SENTINEL";
+    const sentinelPath = "STAGE5_SECRET_PROVIDER_PATH_SENTINEL";
+    const send = vi.spyOn(S3Client.prototype, "send").mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          `bucket=${sentinelBucket} key=${sentinelObjectKey} path=${sentinelPath}`
+        ),
+        { code: "AccessDenied", name: "AccessDenied" }
+      ) as never
     );
-    await fs.mkdir(path.dirname(blockedUploadDir), { recursive: true });
-    await fs.writeFile(blockedUploadDir, "not a directory");
-    env.LOCAL_UPLOAD_DIR = blockedUploadDir;
+    const errorLog = vi.spyOn(logger, "error").mockImplementation(() => logger);
+    env.STORAGE_DRIVER = "s3";
+    env.S3_BUCKET = sentinelBucket;
 
     try {
       const response = await owner.upload("avatar", await png());
-      expect(response.status).toBe(500);
+      expect(response.status).toBe(503);
+      expect(response.body.error).toMatchObject({
+        code: "service_unavailable",
+        message: "Storage provider is temporarily unavailable"
+      });
+      for (const sentinel of [sentinelBucket, sentinelObjectKey, sentinelPath]) {
+        expect(JSON.stringify(response.body)).not.toContain(sentinel);
+      }
 
       const stored = await pool.query<{
         id: string;
@@ -279,9 +357,23 @@ describe("owned processed storage", () => {
           eventStatus: "pending"
         }
       ]);
+      expect(errorLog).toHaveBeenCalledTimes(1);
+      expect(errorLog).toHaveBeenCalledWith(
+        {
+          storageObjectId: stored.rows[0].id,
+          storageDriver: "s3",
+          errorCode: "access_denied"
+        },
+        "storage_provider_write_failed"
+      );
+      for (const sentinel of [sentinelBucket, sentinelObjectKey, sentinelPath]) {
+        expect(JSON.stringify(errorLog.mock.calls)).not.toContain(sentinel);
+      }
     } finally {
-      env.LOCAL_UPLOAD_DIR = originalUploadDir;
-      await fs.unlink(blockedUploadDir);
+      errorLog.mockRestore();
+      send.mockRestore();
+      env.STORAGE_DRIVER = originalDriver;
+      env.S3_BUCKET = originalBucket;
     }
   });
 
@@ -323,15 +415,163 @@ describe("owned processed storage", () => {
     }
   });
 
-  it("builds public S3/CDN URLs without using S3_ENDPOINT", () => {
-    expect(
-      buildMediaUrl(
-        "product_media/user/object.webp",
-        "https://media.example.test/assets/"
-      )
-    ).toBe(
-      "https://media.example.test/assets/product_media/user/object.webp"
+  it("classifies every storage purpose and builds opaque same-origin URLs", () => {
+    const objectId = "3a0d79fa-bbb5-4d9d-8a5f-428994b391cc";
+    expect(isPublicStoragePurpose("avatar")).toBe(true);
+    expect(isPublicStoragePurpose("product_media")).toBe(true);
+    expect(isPublicStoragePurpose("catalog_asset")).toBe(true);
+    expect(isPublicStoragePurpose("chat_attachment")).toBe(false);
+    expect(isPrivateStoragePurpose("chat_attachment")).toBe(true);
+    expect(isPrivateStoragePurpose("avatar")).toBe(false);
+    expect(buildPublicMediaUrl(objectId)).toBe(`/api/storage/public/${objectId}`);
+    expect(buildPrivateMediaUrl(objectId)).toBe(`/api/storage/private/${objectId}`);
+  });
+
+  it("bounds concurrent storage reads", async () => {
+    const semaphore = new StorageReadSemaphore(1, 1);
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let cancelledReadStarted = false;
+    let replacementReadStarted = false;
+    const queuedController = new AbortController();
+
+    const first = semaphore.run(async () => {
+      await firstGate;
+      return "first";
+    });
+    const cancelled = semaphore.run(
+      async () => {
+        cancelledReadStarted = true;
+        return "cancelled";
+      },
+      queuedController.signal
     );
+
+    await Promise.resolve();
+    expect(cancelledReadStarted).toBe(false);
+    await expect(semaphore.run(async () => "overflow")).rejects.toMatchObject({
+      status: 503
+    });
+    queuedController.abort();
+    await expect(cancelled).rejects.toMatchObject({ status: 503 });
+    const replacement = semaphore.run(async () => {
+      replacementReadStarted = true;
+      return "replacement";
+    });
+    expect(replacementReadStarted).toBe(false);
+    releaseFirst();
+    await expect(Promise.all([first, replacement])).resolves.toEqual([
+      "first",
+      "replacement"
+    ]);
+    expect(cancelledReadStarted).toBe(false);
+  });
+
+  it("bounds S3 streams and sanitizes provider failures and timeouts", async () => {
+    const originalBucket = env.S3_BUCKET;
+    const originalTimeout = env.STORAGE_READ_TIMEOUT_MS;
+    const send = vi.spyOn(S3Client.prototype, "send");
+    const bytes = Buffer.from("webp");
+    const object: StorageObject = {
+      id: "3a0d79fa-bbb5-4d9d-8a5f-428994b391cc",
+      ownerId: "8c802f3e-b0a3-4d07-a642-f0ba149a38b8",
+      objectKey: "chat_attachment/private/test-object.webp",
+      storageDriver: "s3",
+      purpose: "chat_attachment",
+      mimeType: "image/webp",
+      sizeBytes: bytes.length,
+      width: 1,
+      height: 1,
+      status: "temporary",
+      createdAt: new Date(),
+      attachedAt: null,
+      deletedAt: null
+    };
+    const streamBody = (...chunks: Buffer[]) => ({
+      async *[Symbol.asyncIterator]() {
+        for (const chunk of chunks) yield chunk;
+      }
+    });
+
+    try {
+      env.S3_BUCKET = "stage5-private-test-bucket";
+      send.mockResolvedValueOnce({
+        ContentLength: bytes.length,
+        ContentType: "image/webp",
+        Body: streamBody(bytes)
+      } as never);
+      await expect(readStorageObjectBody(object)).resolves.toEqual(bytes);
+
+      send.mockResolvedValueOnce({
+        ContentLength: bytes.length,
+        ContentType: "image/webp"
+      } as never);
+      await expect(assertStorageObjectAvailable(object)).resolves.toBeUndefined();
+
+      send.mockResolvedValueOnce({ ContentLength: bytes.length + 1 } as never);
+      await expect(assertStorageObjectAvailable(object)).rejects.toMatchObject({
+        status: 503,
+        message: "Media is temporarily unavailable"
+      });
+
+      let missingLengthBodyRead = false;
+      send.mockResolvedValueOnce({
+        Body: {
+          async *[Symbol.asyncIterator]() {
+            missingLengthBodyRead = true;
+            yield bytes;
+          }
+        }
+      } as never);
+      await expect(readStorageObjectBody(object)).rejects.toMatchObject({
+        status: 503,
+        message: "Media is temporarily unavailable"
+      });
+      expect(missingLengthBodyRead).toBe(false);
+
+      send.mockResolvedValueOnce({
+        ContentLength: bytes.length,
+        ContentType: "image/webp",
+        Body: streamBody(bytes, Buffer.from("unexpected-extra-bytes"))
+      } as never);
+      await expect(readStorageObjectBody(object)).rejects.toMatchObject({
+        status: 503,
+        message: "Media is temporarily unavailable"
+      });
+
+      const providerError = Object.assign(new Error("internal provider detail"), {
+        name: "NoSuchKey"
+      });
+      send.mockRejectedValueOnce(providerError as never);
+      await expect(readStorageObjectBody(object)).rejects.toMatchObject({
+        status: 503,
+        message: "Media is temporarily unavailable"
+      });
+
+      env.STORAGE_READ_TIMEOUT_MS = 20;
+      let timedOutSignal: AbortSignal | undefined;
+      send.mockImplementationOnce(((_command: unknown, options?: {
+        abortSignal?: AbortSignal;
+      }) => {
+        timedOutSignal = options?.abortSignal;
+        return new Promise((_resolve, reject) => {
+          timedOutSignal?.addEventListener("abort", () => reject(new Error("aborted")), {
+            once: true
+          });
+        });
+      }) as never);
+      await expect(assertStorageObjectAvailable(object)).rejects.toMatchObject({
+        status: 503,
+        message: "Media is temporarily unavailable"
+      });
+      expect(timedOutSignal?.aborted).toBe(true);
+    } finally {
+      send.mockRestore();
+      env.S3_BUCKET = originalBucket;
+      env.STORAGE_READ_TIMEOUT_MS = originalTimeout;
+    }
   });
 
   it("physically deletes expired temporary objects and marks them deleted", async () => {
@@ -453,7 +693,18 @@ describe("owned processed storage", () => {
       [response.body.upload.id, env.STORAGE_TOTAL_QUOTA_BYTES_PER_USER]
     );
     const object = stored.rows[0];
+    const originalFile = path.resolve(
+      env.LOCAL_UPLOAD_DIR,
+      ...object.objectKey.split("/")
+    );
+    const sentinel = "STAGE5_SECRET_DELETE_PATH_AND_KEY_SENTINEL";
+    object.objectKey = `avatar/${owner.userId}/${sentinel}.webp`;
     const file = path.resolve(env.LOCAL_UPLOAD_DIR, ...object.objectKey.split("/"));
+    await fs.rename(originalFile, file);
+    await pool.query(`update storage_objects set object_key = $2 where id = $1`, [
+      object.id,
+      object.objectKey
+    ]);
     await inTx((client) => enqueueStorageDeletion(client, object.id));
 
     await fs.unlink(file);
@@ -466,8 +717,14 @@ describe("owned processed storage", () => {
       })
     ).resolves.toMatchObject({ processed: 0, failed: 1 });
 
-    const failed = await pool.query<{ objectStatus: string; eventStatus: string; attempts: number }>(
-      `select s.status as "objectStatus", o.status as "eventStatus", o.attempts
+    const failed = await pool.query<{
+      objectStatus: string;
+      eventStatus: string;
+      attempts: number;
+      lastError: string;
+    }>(
+      `select s.status as "objectStatus", o.status as "eventStatus", o.attempts,
+              o.last_error as "lastError"
        from storage_objects s
        join domain_outbox o on o.event_key = 'storage.delete:' || s.id::text
        where s.id = $1`,
@@ -476,8 +733,10 @@ describe("owned processed storage", () => {
     expect(failed.rows[0]).toEqual({
       objectStatus: "deleting",
       eventStatus: "failed",
-      attempts: 1
+      attempts: 1,
+      lastError: "Storage provider delete failed"
     });
+    expect(failed.rows[0].lastError).not.toContain(sentinel);
     const stillCharged = await owner.upload("avatar", await png());
     expect(stillCharged.status).toBe(400);
     expect(stillCharged.body.error.code).toBe("storage_quota_exceeded");
@@ -755,14 +1014,23 @@ describe("owned processed storage", () => {
     });
   });
 
-  it("attaches chat images by ID instead of accepting a client URL", async () => {
+  it("authorizes every private chat download without exposing the object key", async () => {
     const sender = await authedClient();
-    const recipientId = await createUser();
+    const recipient = await authedClient();
+    const outsider = await authedClient();
     const conversationId = await createConversation(
       sender.userId,
-      recipientId
+      recipient.userId
     );
     const response = await sender.upload("chat_attachment", await png());
+    const privateUrl = response.body.upload.url as string;
+    const privatePath = backendPath(privateUrl);
+
+    expect(privateUrl).toBe(buildPrivateMediaUrl(response.body.upload.id));
+    expect(privateUrl).not.toContain(sender.userId);
+    expect((await sender.get(privatePath)).status).toBe(200);
+    expect((await recipient.get(privatePath)).status).toBe(404);
+    expect((await request(app).get(`/storage/public/${response.body.upload.id}`)).status).toBe(404);
 
     const message = await sendMessage({
       conversationId,
@@ -770,13 +1038,97 @@ describe("owned processed storage", () => {
       body: "Processed attachment",
       attachmentUploadId: response.body.upload.id
     });
-    expect(message.attachmentUrl).toBe(response.body.upload.url);
+    expect(message.attachmentUrl).toBe(privateUrl);
 
-    const object = await pool.query<{ status: string }>(
-      `select status from storage_objects where id = $1`,
+    const object = await pool.query<{ status: string; objectKey: string }>(
+      `select status, object_key as "objectKey" from storage_objects where id = $1`,
       [response.body.upload.id]
     );
     expect(object.rows[0].status).toBe("attached");
+    expect(privateUrl).not.toContain(object.rows[0].objectKey);
+
+    const senderRead = await sender.get(privatePath);
+    expect(senderRead.status).toBe(200);
+    expect(senderRead.headers["content-type"]).toMatch(/^image\/webp/);
+    expect(senderRead.headers["cache-control"]).toBe("private, no-store");
+    expect(senderRead.headers["cross-origin-resource-policy"]).toBe("same-origin");
+    const recipientHead = await recipient.head(privatePath);
+    expect(recipientHead.status).toBe(200);
+    expect(Number(recipientHead.headers["content-length"])).toBeGreaterThan(0);
+    expect((await recipient.get(privatePath)).status).toBe(200);
+    const outsiderRead = await outsider.get(privatePath);
+    expect(outsiderRead.status).toBe(404);
+    expect(outsiderRead.headers["cache-control"]).toBe("private, no-store");
+    expect((await outsider.head(privatePath)).status).toBe(404);
+    expect((await outsider.get("/storage/private/not-a-uuid")).status).toBe(404);
+    const anonymousRead = await request(app).get(privatePath);
+    expect(anonymousRead.status).toBe(401);
+    expect(anonymousRead.headers["cache-control"]).toBe("private, no-store");
+    expect((await request(app).get(`/uploads/${object.rows[0].objectKey}`)).status).toBe(404);
+
+    await pool.query(
+      `update messages set attachment_url = $2 where id = $1`,
+      [message.id, `/uploads/${object.rows[0].objectKey}`]
+    );
+    const page = await recipient.get(`/chat/conversations/${conversationId}/messages`);
+    expect(page.status).toBe(200);
+    expect(page.body.messages[0].attachmentUrl).toBe(privateUrl);
+
+    await pool.query(
+      `update messages set attachment_storage_object_id = null where id = $1`,
+      [message.id]
+    );
+    const unmanagedLegacyPage = await recipient.get(
+      `/chat/conversations/${conversationId}/messages`
+    );
+    expect(unmanagedLegacyPage.status).toBe(200);
+    expect(unmanagedLegacyPage.body.messages[0].attachmentUrl).toBeNull();
+    expect((await recipient.get(privatePath)).status).toBe(404);
+  });
+
+  it("bounds local reads and returns sanitized no-store provider failures", async () => {
+    const owner = await authedClient();
+    const uploaded = await owner.upload("chat_attachment", await png());
+    const stored = await pool.query<{ objectKey: string }>(
+      `select object_key as "objectKey" from storage_objects where id = $1`,
+      [uploaded.body.upload.id]
+    );
+    const objectKey = stored.rows[0].objectKey;
+    const file = path.resolve(env.LOCAL_UPLOAD_DIR, ...objectKey.split("/"));
+
+    await fs.appendFile(file, Buffer.from([0]));
+    const oversized = await owner.get(backendPath(uploaded.body.upload.url));
+    expect(oversized.status).toBe(503);
+    expect(oversized.headers["cache-control"]).toBe("private, no-store");
+    expect(JSON.stringify(oversized.body)).not.toContain(objectKey);
+
+    await fs.unlink(file);
+
+    const response = await owner.get(backendPath(uploaded.body.upload.url));
+    expect(response.status).toBe(503);
+    expect(response.headers["cache-control"]).toBe("private, no-store");
+    expect(response.body.error.message).toBe("Media is temporarily unavailable");
+    expect(JSON.stringify(response.body)).not.toContain(objectKey);
+
+    const head = await owner.head(backendPath(uploaded.body.upload.url));
+    expect(head.status).toBe(503);
+    expect(head.headers["cache-control"]).toBe("private, no-store");
+  });
+
+  it("never serves quarantined storage objects", async () => {
+    const owner = await authedClient();
+    const uploaded = await owner.upload("chat_attachment", await png());
+    const privatePath = backendPath(uploaded.body.upload.url);
+
+    await pool.query(
+      `update storage_objects set status = 'quarantined' where id = $1`,
+      [uploaded.body.upload.id]
+    );
+
+    expect((await owner.get(privatePath)).status).toBe(404);
+    expect(
+      (await request(app).get(`/storage/public/${uploaded.body.upload.id}`)).status
+    ).toBe(404);
   });
 
   it("attaches avatar replacement transactionally and deletes the old object through outbox", async () => {
@@ -786,14 +1138,34 @@ describe("owned processed storage", () => {
       .patch("/users/me")
       .send({ avatarUploadId: first.body.upload.id });
     expect(firstAttach.status).toBe(200);
-    expect(firstAttach.body.user.avatarUrl).toBe(first.body.upload.url);
+    expect(first.body.upload.url).toBe(buildPrivateMediaUrl(first.body.upload.id));
+    expect(firstAttach.body.user.avatarUrl).toBe(buildPublicMediaUrl(first.body.upload.id));
+    const firstPublicRead = await request(app).get(
+      backendPath(firstAttach.body.user.avatarUrl)
+    );
+    expect(firstPublicRead.status).toBe(200);
+    expect(firstPublicRead.headers["cache-control"]).toBe("public, max-age=300");
+    const firstPublicHead = await request(app).head(
+      backendPath(firstAttach.body.user.avatarUrl)
+    );
+    expect(firstPublicHead.status).toBe(200);
+    expect(firstPublicHead.headers["content-length"]).toBe(
+      firstPublicRead.headers["content-length"]
+    );
+    const firstObject = await pool.query<{ objectKey: string }>(
+      `select object_key as "objectKey" from storage_objects where id = $1`,
+      [first.body.upload.id]
+    );
+    const legacyPublicPath = `/uploads/${firstObject.rows[0].objectKey}`;
+    expect((await request(app).get(legacyPublicPath)).status).toBe(200);
+    expect((await request(app).head(legacyPublicPath)).status).toBe(200);
 
     const second = await owner.upload("avatar", await png(24, 24));
     const secondAttach = await owner
       .patch("/users/me")
       .send({ avatarUploadId: second.body.upload.id });
     expect(secondAttach.status).toBe(200);
-    expect(secondAttach.body.user.avatarUrl).toBe(second.body.upload.url);
+    expect(secondAttach.body.user.avatarUrl).toBe(buildPublicMediaUrl(second.body.upload.id));
 
     const queued = await pool.query<{ status: string }>(
       `select status from domain_outbox
@@ -816,6 +1188,148 @@ describe("owned processed storage", () => {
       [first.body.upload.id]: "deleted",
       [second.body.upload.id]: "attached"
     });
+  });
+
+  it("publishes only active catalog references and cleans only unbound assets", async () => {
+    const admin = await authedClient("admin");
+    const otherAdmin = await authedClient("admin");
+    const outsider = await authedClient();
+    const uploaded = await admin.upload("catalog_asset", await png());
+    const attached = await admin
+      .post(`/storage/catalog-assets/${uploaded.body.upload.id}/attach`)
+      .send({});
+    expect(attached.status).toBe(200);
+    const publicPath = backendPath(attached.body.upload.url);
+    const previewPath = backendPath(attached.body.upload.previewUrl);
+    expect(attached.body.upload.url).toBe(
+      buildPublicMediaUrl(uploaded.body.upload.id)
+    );
+    expect(attached.body.upload.previewUrl).toBe(
+      buildPrivateMediaUrl(uploaded.body.upload.id)
+    );
+    expect((await request(app).get(publicPath)).status).toBe(404);
+    expect((await admin.get(previewPath)).status).toBe(200);
+    expect((await otherAdmin.get(previewPath)).status).toBe(404);
+    expect((await outsider.get(previewPath)).status).toBe(404);
+    expect((await request(app).get(previewPath)).status).toBe(401);
+
+    const group = await pool.query<{ id: string; icon: string }>(
+      `insert into catalog_groups(slug, name, icon, status)
+       values ($1, 'Stage 5 bound asset', $2, 'draft')
+       returning id, icon`,
+      [`stage5-${uploaded.body.upload.id}`, attached.body.upload.url]
+    );
+    expect(group.rows[0].icon).toBe(attached.body.upload.url);
+    expect(group.rows[0].icon).not.toContain("/private/");
+    expect((await request(app).get(publicPath)).status).toBe(404);
+    expect((await admin.get(previewPath)).status).toBe(200);
+
+    await pool.query(
+      `update storage_objects set created_at = now() - interval '2 hours' where id = $1`,
+      [uploaded.body.upload.id]
+    );
+    await expect(
+      cleanupTemporaryStorageObjects({ olderThanHours: 1, batchSize: 10 })
+    ).resolves.toMatchObject({ claimed: 0, queued: 0, failed: 0 });
+
+    await pool.query(`update catalog_groups set status = 'active' where id = $1`, [
+      group.rows[0].id
+    ]);
+    expect((await request(app).get(publicPath)).status).toBe(200);
+
+    const itemUpload = await admin.upload("catalog_asset", await png(18, 18));
+    const itemAttached = await admin
+      .post(`/storage/catalog-assets/${itemUpload.body.upload.id}/attach`)
+      .send({});
+    expect(itemAttached.status).toBe(200);
+    const itemPublicPath = backendPath(itemAttached.body.upload.url);
+    const itemPreviewPath = backendPath(itemAttached.body.upload.previewUrl);
+    const item = await pool.query<{ id: string }>(
+      `insert into games(group_id, slug, name, icon_url, status)
+       values ($1, $2, 'Stage 5 catalog item', $3, 'draft')
+       returning id`,
+      [
+        group.rows[0].id,
+        `stage5-item-${itemUpload.body.upload.id}`,
+        itemAttached.body.upload.url
+      ]
+    );
+    expect((await request(app).get(itemPublicPath)).status).toBe(404);
+    expect((await admin.get(itemPreviewPath)).status).toBe(200);
+
+    await pool.query(`update games set status = 'active' where id = $1`, [
+      item.rows[0].id
+    ]);
+    expect((await request(app).get(itemPublicPath)).status).toBe(200);
+    await pool.query(`update catalog_groups set status = 'hidden' where id = $1`, [
+      group.rows[0].id
+    ]);
+    expect((await request(app).get(itemPublicPath)).status).toBe(404);
+    await pool.query(`update catalog_groups set status = 'active' where id = $1`, [
+      group.rows[0].id
+    ]);
+    expect((await request(app).get(itemPublicPath)).status).toBe(200);
+
+    await pool.query(`update catalog_groups set icon = null where id = $1`, [
+      group.rows[0].id
+    ]);
+    await expect(
+      cleanupTemporaryStorageObjects({ olderThanHours: 1, batchSize: 10 })
+    ).resolves.toMatchObject({ claimed: 1, queued: 1, failed: 0 });
+    await expect(
+      processOutboxBatch({ workerId: "catalog-orphan-cleanup" })
+    ).resolves.toMatchObject({ processed: 1, failed: 0 });
+    const cleaned = await pool.query<{ status: string }>(
+      `select status from storage_objects where id = $1`,
+      [uploaded.body.upload.id]
+    );
+    expect(cleaned.rows[0].status).toBe("deleted");
+  });
+
+  it("rolls a chat attachment back to temporary when message insertion fails", async () => {
+    const sender = await authedClient();
+    const recipient = await authedClient();
+    const conversationId = await createConversation(
+      sender.userId,
+      recipient.userId
+    );
+    const uploaded = await sender.upload("chat_attachment", await png());
+
+    await pool.query(`
+      create or replace function test_fail_chat_attachment_insert()
+      returns trigger as $$
+      begin
+        raise exception 'chat attachment insert failure';
+      end;
+      $$ language plpgsql;
+      create trigger test_fail_chat_attachment_insert_trigger
+      before insert on messages
+      for each row execute function test_fail_chat_attachment_insert();
+    `);
+    try {
+      await expect(
+        sendMessage({
+          conversationId,
+          senderId: sender.userId,
+          body: "This insert must roll back",
+          attachmentUploadId: uploaded.body.upload.id
+        })
+      ).rejects.toThrow("chat attachment insert failure");
+    } finally {
+      await pool.query(`
+        drop trigger if exists test_fail_chat_attachment_insert_trigger on messages;
+        drop function if exists test_fail_chat_attachment_insert();
+      `);
+    }
+
+    const object = await pool.query<{ status: string }>(
+      `select status from storage_objects where id = $1`,
+      [uploaded.body.upload.id]
+    );
+    expect(object.rows[0].status).toBe("temporary");
+    expect(
+      (await recipient.get(backendPath(uploaded.body.upload.url))).status
+    ).toBe(404);
   });
 
   it("rolls back attachment state when a product media write fails", async () => {

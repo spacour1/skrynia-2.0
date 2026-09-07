@@ -3,7 +3,6 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import * as Sentry from "@sentry/node";
-import path from "node:path";
 import { env } from "./config/env.js";
 import {
   anonymousWriteRateLimit,
@@ -28,7 +27,9 @@ import chatRoutes from "./modules/chat/chat.routes.js";
 import disputeRoutes from "./modules/disputes/disputes.routes.js";
 import reportRoutes from "./modules/reports/reports.routes.js";
 import adminRoutes from "./modules/admin/admin.routes.js";
-import storageRoutes from "./modules/storage/storage.routes.js";
+import storageRoutes, {
+  legacyPublicStorageRouter
+} from "./modules/storage/storage.routes.js";
 import supportRoutes from "./modules/support/support.routes.js";
 import notificationRoutes from "./modules/notifications/notifications.routes.js";
 import telegramWebhookRoutes from "./modules/notifications/telegram-webhook.routes.js";
@@ -76,7 +77,7 @@ export function createApp(
   app.use(anonymousWriteRateLimit);
   app.use(authenticatedWriteRateLimit);
   app.use(csrfProtection);
-  app.use("/uploads", express.static(path.resolve(env.LOCAL_UPLOAD_DIR)));
+  app.use("/uploads", legacyPublicStorageRouter);
 
   app.get("/metrics", metricsAuth, async (_req, res) => {
     res.setHeader("content-type", "text/plain; version=0.0.4");

@@ -5,7 +5,7 @@ audit gate. The gate still reports moderate findings and fails on any new high/c
 advisory, a severity escalation, an expired exception, a malformed/tool-error response, or
 an exception that is no longer used.
 
-Current review date: **2026-08-27**. There are no active high/critical exceptions. All three
+Current review date: **2026-09-11**. There are no active high/critical exceptions. All three
 project arrays in `.github/npm-audit-allowlist.json` are empty. Any future exception must be
 short-lived and requires a new review, updated evidence, and an explicit documentation
 change. Package-name-wide exceptions are prohibited; CI matches the exact project, package,
@@ -144,6 +144,72 @@ The remaining frontend moderate aggregate consists of concrete DOMPurify
 affected Next.js aggregate through PostCSS. The remaining backend low finding is
 `body-parser`. They stay visible and are not allowlisted. A dedicated weekly workflow now
 runs the fail-closed audit policy even when no application commit occurs.
+
+## Resolved security release drift on 2026-09-11
+
+The production-dependency policy rejected newly reported advisories in the existing
+lockfiles. Before remediation the backend raw audit reported `3 moderate / 1 high`
+package findings; the frontend reported `4 moderate / 2 high / 1 critical`. The change
+uses only the nearest compatible security releases, without adding audit exceptions:
+
+- Backend Sharp and the frontend Sharp override move from `0.35.3` to exact `0.35.4`.
+  This resolves
+  [`GHSA-rgj7-g3m4-5g8c`](https://github.com/lovell/sharp/security/advisories/GHSA-rgj7-g3m4-5g8c)
+  through the patched bundled libheif `1.23.2`. The lockfiles contain matching
+  `@img/sharp-* 0.35.4` and `@img/sharp-libvips-* 1.3.3` packages for each supported
+  platform. The WASM package requires its own `@emnapi/runtime@1.11.3`; the pre-existing
+  top-level `1.11.1` version remains unchanged.
+- Next.js and its ESLint configuration move together from `15.5.23` to exact
+  `15.5.25`. The security floor `15.5.24` fixes
+  [`GHSA-p293-qw3h-jr36`](https://github.com/vercel/next.js/security/advisories/GHSA-p293-qw3h-jr36)
+  (Windows-hosted server RCE) and
+  [`GHSA-2xp9-vwfh-vxw4`](https://github.com/vercel/next.js/security/advisories/GHSA-2xp9-vwfh-vxw4)
+  (AVIF image-optimization RCE). The narrow
+  [`15.5.25` follow-up](https://github.com/vercel/next.js/releases/tag/v15.5.25)
+  safely restores AVIF optimization when patched Sharp is installed. The explicit
+  Sharp override remains because Next's optional range also permits older `0.34.x`.
+- Frontend Browserslist moves from `4.28.4` to the exact patched floor `4.28.7`, fixing
+  [`GHSA-c83g-rgw3-j3cx`](https://github.com/browserslist/browserslist/security/advisories/GHSA-c83g-rgw3-j3cx)
+  and
+  [`GHSA-73wf-gq98-2v4g`](https://github.com/browserslist/browserslist/security/advisories/GHSA-73wf-gq98-2v4g).
+  Its required browser-data dependencies also update: `baseline-browser-mapping`,
+  `caniuse-lite`, `electron-to-chromium`, and `node-releases`.
+
+The declared engines remain compatible with the pinned Node.js `20.20.2`: Sharp
+requires `>=20.9.0`, Next.js permits `>=20.0.0`, and Browserslist permits this runtime.
+The lock diff contains only these dependency families and their required children,
+plus npm's recomputed development/optional metadata. Unrelated package versions,
+including Express, PostgreSQL, Redis, validation, and provider dependencies, are unchanged.
+Financial implementation and the financial-freeze configuration are untouched.
+
+Evidence for the updated lockfiles, based on `cc1ec8b31ee481beb6c420ea12c4b5bd8a80b729`
+plus this dependency patch, using Node.js `20.20.2` / npm `10.8.2`:
+
+| Command | Status | Exit | Duration | Production findings |
+| --- | --- | ---: | ---: | --- |
+| `npm install --package-lock-only --ignore-scripts --no-fund` in backend | PASS | 0 | 3.79s | Lockfile resolution only |
+| Same command in frontend | PASS | 0 | 8.39s | Lockfile resolution only |
+| `node .github/scripts/check-npm-audit.mjs backend` | PASS | 0 | 1.64s | 3 moderate, 0 high, 0 critical |
+| `node .github/scripts/check-npm-audit.mjs frontend` | PASS | 0 | 2.52s | 4 moderate, 0 high, 0 critical |
+
+Remaining moderate roots are backend `qs` (`GHSA-4mjr-xmp4-gh2g`,
+`GHSA-x5fp-wj9c-mxmx`) and frontend DOMPurify, fflate, and PostCSS. They are reported,
+not suppressed; the Next.js moderate aggregate comes from PostCSS. Existing
+`node_modules` were deliberately not modified while the first backend suite was running.
+The coordinator subsequently completed clean installs on the new lockfiles:
+
+| Runtime check, 2026-09-11 | Status | Evidence |
+| --- | --- | --- |
+| `node scripts/verify-all.mjs --only backend` | PASS | Exit 0; 62 files/649 tests, 231.7s; isolated migrations twice, schema contract, lint, typecheck and build; total 349.1s. |
+| `node scripts/verify-all.mjs --only frontend` | PASS | Exit 0; 27 files/203 tests, 38.3s; Next 15.5.25 production build 121.9s; total 311.3s. |
+| `node scripts/verify-all.mjs --only policy` | PASS | Exit 0; 45 freeze tests, 10 audit-policy tests; backend 3 moderate/frontend 4 moderate/E2E 0 production findings, no high/critical; total 221.7s. |
+| Stage 8 accumulated release/E2E/exact-SHA CI | NOT RUN | Recorded in the Stage 8 milestone evidence before publication. |
+
+These checks used the accumulated Stage 7/8 working tree on the parent SHA above;
+this dependency-only commit is not a claim that its isolated tree received those
+feature tests. The production audit excludes development-only dependencies; raw
+clean-install reports still contain high development findings. Runtime tests are
+not exploit reproductions or real-provider evidence.
 
 ## Operating rules
 

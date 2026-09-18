@@ -174,3 +174,25 @@ common query is consequently the slowest. This final run was cache-warm
 current planner behaviour, not a production latency SLO or a claim of unbounded
 scalability. Production-like data distribution and hardware must be measured before
 rollout.
+
+## Stage 7 synthetic benchmark refresh
+
+A fresh non-production run was completed on 2026-09-08 with PostgreSQL 16.14
+against the isolated local database `skrynia_stage7_search_bench`. The safety
+guard accepted the database, the harness created 20,000 synthetic active
+products, 20,000 search documents and 429,991 normalized terms, and the fixture
+was removed after the plans were captured.
+
+| Profile | Query | Planning | Execution | Scan rows* | Shared reads |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Short | `cs2` | 2.915 ms | 85.303 ms | 124,978 | 0 |
+| Typo | `valroant` | 0.681 ms | 94.885 ms | 105,005 | 0 |
+| Common | `account` | 0.771 ms | 156.214 ms | 159,978 | 0 |
+
+All seven search-specific index families listed in the earlier evidence were
+used by every plan. PostgreSQL again selected sequential scans for the broad
+document/product join; the fixture deliberately makes each query match a large
+share of the corpus. The plans therefore do not prove that another index would
+improve this workload, so Stage 7 adds no speculative search index or migration.
+The benchmark must be rerun after the Stage 7 commit to associate the same gate
+with its exact SHA.

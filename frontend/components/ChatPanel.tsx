@@ -74,6 +74,7 @@ export function ChatPanel({
   const formRef = useRef<HTMLFormElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const hiddenMessageIdsRef = useRef(new Set<string>());
 
   const history = useQuery({
     queryKey: ["messages", activeConversationId],
@@ -95,7 +96,10 @@ export function ChatPanel({
           message.conversationId === activeConversationId &&
           Boolean(message.deliveryStatus)
       );
-      const serverMessages = history.data.messages.map((serverMessage) => {
+      const visibleServerMessages = history.data.messages.filter(
+        (serverMessage) => !hiddenMessageIdsRef.current.has(serverMessage.id)
+      );
+      const serverMessages = visibleServerMessages.map((serverMessage) => {
         const localMessage = current.find((candidate) =>
           messagesMatch(candidate, serverMessage)
         );
@@ -107,7 +111,7 @@ export function ChatPanel({
         ...serverMessages,
         ...localDeliveries.filter(
           (localMessage) =>
-            !history.data.messages.some((serverMessage) =>
+            !visibleServerMessages.some((serverMessage) =>
               messagesMatch(localMessage, serverMessage)
             )
         )
@@ -116,6 +120,7 @@ export function ChatPanel({
   }, [activeConversationId, history.data]);
 
   useEffect(() => {
+    hiddenMessageIdsRef.current.clear();
     setMessages((current) =>
       current.filter((message) => message.conversationId === activeConversationId)
     );
@@ -135,6 +140,7 @@ export function ChatPanel({
       if (payload.type === "message") {
         const message = payload.message as Message | undefined;
         if (!message || message.conversationId !== activeConversationId) return;
+        if (hiddenMessageIdsRef.current.has(message.id)) return;
         setMessages((current) => {
           const existingIndex = current.findIndex((item) =>
             messagesMatch(item, message)
@@ -144,6 +150,33 @@ export function ChatPanel({
           next[existingIndex] = mergeServerMessage(message, current[existingIndex]);
           return next;
         });
+        queryClient.invalidateQueries({ queryKey: ["chat-conversations"] });
+        queryClient.invalidateQueries({ queryKey: ["chat-conversations-grouped"] });
+      }
+      if (payload.type === "message.moderated") {
+        const messageId = typeof payload.messageId === "string" ? payload.messageId : null;
+        const moderatedConversationId =
+          typeof payload.conversationId === "string" ? payload.conversationId : null;
+        if (
+          !messageId ||
+          !moderatedConversationId ||
+          moderatedConversationId !== activeConversationId ||
+          typeof payload.hidden !== "boolean"
+        ) {
+          return;
+        }
+
+        if (payload.hidden) {
+          // Drop the already-rendered body and attachment synchronously. The committed
+          // REST refetch may then replace it with the role-appropriate hidden-message
+          // representation without leaving sensitive content on screen in the meantime.
+          hiddenMessageIdsRef.current.add(messageId);
+          setMessages((current) => current.filter((message) => message.id !== messageId));
+          setReportMessageId((current) => (current === messageId ? null : current));
+        } else {
+          hiddenMessageIdsRef.current.delete(messageId);
+        }
+        queryClient.invalidateQueries({ queryKey: ["messages", moderatedConversationId] });
         queryClient.invalidateQueries({ queryKey: ["chat-conversations"] });
         queryClient.invalidateQueries({ queryKey: ["chat-conversations-grouped"] });
       }

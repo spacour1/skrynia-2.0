@@ -1,5 +1,8 @@
 import { pool } from "../../db/pool.js";
-import { notFound } from "../../common/errors.js";
+import { notFound, serviceUnavailable } from "../../common/errors.js";
+
+const MAX_DIRECT_CHILDREN = 500;
+const MAX_CATALOG_TREE_ROWS = 10_000;
 
 export async function getPublicGroupBySlug(slug: string) {
   const group = await pool.query(
@@ -10,18 +13,25 @@ export async function getPublicGroupBySlug(slug: string) {
 
   const items = await pool.query(
     `select id, slug, name, icon_url as "icon", banner
-     from games where group_id = $1 and status = 'active' order by sort_order, name`,
+     from games where group_id = $1 and status = 'active'
+     order by sort_order, name, id
+     limit ${MAX_DIRECT_CHILDREN + 1}`,
     [group.rows[0].id]
   );
+  if (items.rows.length > MAX_DIRECT_CHILDREN) {
+    throw serviceUnavailable("Catalog group exceeds its child safety limit");
+  }
   return { ...group.rows[0], items: items.rows };
 }
 
 export async function getPublicItemBySlug(slug: string) {
   const item = await pool.query(
-    `select id, group_id as "groupId", slug, name, icon_url as "icon", banner,
-            description, short_description as "shortDescription", logo_image as "logoImage",
-            background_image as "backgroundImage", seo_title as "seoTitle", seo_description as "seoDescription"
-     from games where slug = $1 and status = 'active'`,
+    `select i.id, i.group_id as "groupId", i.slug, i.name, i.icon_url as "icon", i.banner,
+            i.description, i.short_description as "shortDescription", i.logo_image as "logoImage",
+            i.background_image as "backgroundImage", i.seo_title as "seoTitle", i.seo_description as "seoDescription"
+     from games i
+     join catalog_groups g on g.id = i.group_id and g.status = 'active'
+     where i.slug = $1 and i.status = 'active'`,
     [slug]
   );
   if (!item.rows[0]) throw notFound("Item not found");
@@ -32,9 +42,13 @@ export async function getPublicItemBySlug(slug: string) {
      from game_sections gs
      left join categories c on c.id = gs.category_id
      where gs.game_id = $1 and gs.status = 'active'
-     order by gs.sort_order, gs.name`,
+     order by gs.sort_order, gs.name, gs.id
+     limit ${MAX_DIRECT_CHILDREN + 1}`,
     [item.rows[0].id]
   );
+  if (sections.rows.length > MAX_DIRECT_CHILDREN) {
+    throw serviceUnavailable("Catalog item exceeds its section safety limit");
+  }
   return { ...item.rows[0], sections: sections.rows };
 }
 
@@ -50,8 +64,12 @@ export async function getPublicCatalogTree() {
     join game_sections s on s.game_id = i.id and s.status = 'active'
     left join categories c on c.id = s.category_id
     where g.status = 'active'
-    order by g.sort_order, i.sort_order, s.sort_order
+    order by g.sort_order, g.id, i.sort_order, i.id, s.sort_order, s.id
+    limit ${MAX_CATALOG_TREE_ROWS + 1}
   `);
+  if (result.rows.length > MAX_CATALOG_TREE_ROWS) {
+    throw serviceUnavailable("Public catalog tree exceeds its safety limit");
+  }
   return buildTree(result.rows);
 }
 
@@ -76,8 +94,13 @@ export async function getAdminCatalogTree() {
     from catalog_groups g
     left join games i on i.group_id = g.id
     left join game_sections s on s.game_id = i.id
-    order by g.sort_order, i.sort_order nulls last, s.sort_order nulls last
+    order by g.sort_order, g.id, i.sort_order nulls last, i.id,
+             s.sort_order nulls last, s.id
+    limit ${MAX_CATALOG_TREE_ROWS + 1}
   `);
+  if (result.rows.length > MAX_CATALOG_TREE_ROWS) {
+    throw serviceUnavailable("Admin catalog tree exceeds its safety limit");
+  }
   return buildTree(result.rows, { includeStatus: true });
 }
 

@@ -12,6 +12,7 @@ export const domainEventTypes = [
   "dispute.opened",
   "dispute.resolved",
   "message.created",
+  "message.moderated",
   "product.blocked",
   "user.banned",
   "user.warned",

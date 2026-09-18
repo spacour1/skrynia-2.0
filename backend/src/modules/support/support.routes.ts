@@ -5,6 +5,11 @@ import { asyncHandler, notFound } from "../../common/errors.js";
 import { authenticate } from "../../common/middleware/auth.js";
 import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
+import {
+  buildLookaheadNextCursor,
+  keysetWhereClause,
+  parseCursorPage
+} from "../../common/pagination.js";
 
 const router = Router();
 
@@ -34,15 +39,29 @@ router.get(
   "/tickets/me",
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
+    const { limit, cursor } = parseCursorPage(req.query, { defaultLimit: 100 });
+    const values: unknown[] = [req.user.id];
+    const cursorWhere = keysetWhereClause(values, cursor, "st.created_at", "st.id");
+    values.push(limit + 1);
     const result = await pool.query(
-      `select id, subject, body, status, priority, created_at as "createdAt", updated_at as "updatedAt"
-       from support_tickets
-       where user_id = $1
-       order by created_at desc
-       limit 100`,
-      [req.user.id]
+      `select st.id, st.subject, st.body, st.status, st.priority,
+              st.created_at as "createdAt", st.created_at::text as "cursorCreatedAt",
+              st.updated_at as "updatedAt"
+       from support_tickets st
+       where st.user_id = $1
+         ${cursorWhere ? `and ${cursorWhere}` : ""}
+       order by st.created_at desc, st.id desc
+       limit $${values.length}`,
+      values
     );
-    res.json({ tickets: result.rows });
+    const nextCursor = buildLookaheadNextCursor(
+      result.rows.map((row) => ({ id: row.id, createdAt: row.cursorCreatedAt })),
+      limit
+    );
+    const tickets = result.rows
+      .slice(0, limit)
+      .map(({ cursorCreatedAt: _cursor, ...row }) => row);
+    res.json({ tickets, nextCursor });
   })
 );
 
@@ -50,16 +69,30 @@ router.get(
   "/admin/tickets",
   authenticate,
   requireRole("admin"),
-  asyncHandler(async (_req: AuthedRequest, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { limit, cursor } = parseCursorPage(req.query, { defaultLimit: 300, maxLimit: 300 });
+    const values: unknown[] = [];
+    const cursorWhere = keysetWhereClause(values, cursor, "st.created_at", "st.id");
+    values.push(limit + 1);
     const result = await pool.query(
       `select st.id, st.email, st.subject, st.body, st.status, st.priority,
-              st.created_at as "createdAt", u.display_name as "userDisplayName"
+              st.created_at as "createdAt", st.created_at::text as "cursorCreatedAt",
+              u.display_name as "userDisplayName"
        from support_tickets st
        left join users u on u.id = st.user_id
-       order by st.created_at desc
-       limit 300`
+       ${cursorWhere ? `where ${cursorWhere}` : ""}
+       order by st.created_at desc, st.id desc
+       limit $${values.length}`,
+      values
     );
-    res.json({ tickets: result.rows });
+    const nextCursor = buildLookaheadNextCursor(
+      result.rows.map((row) => ({ id: row.id, createdAt: row.cursorCreatedAt })),
+      limit
+    );
+    const tickets = result.rows
+      .slice(0, limit)
+      .map(({ cursorCreatedAt: _cursor, ...row }) => row);
+    res.json({ tickets, nextCursor });
   })
 );
 

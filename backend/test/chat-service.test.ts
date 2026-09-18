@@ -3,14 +3,18 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
   assertCanSendMessage,
   getGroupedUserConversations,
+  getMessagePage,
   getOrCreateDirectConversation,
   getOrCreateOrderConversation,
   getOrCreateProductConversation,
+  getUserConversationPage,
   getUserConversations,
   markConversationRead,
   sendMessage,
   sendMessageIdempotently
 } from "../src/modules/chat/chat.service.js";
+import { decodeCursor } from "../src/common/pagination.js";
+import { pool } from "../src/db/pool.js";
 import { blockUser, closeDb, createConversation, createOrder, createProduct, createUser, muteUser, resetDb } from "./fixtures.js";
 
 beforeEach(resetDb);
@@ -201,5 +205,55 @@ describe("getUserConversations", () => {
     const conversation = conversations.find((c) => c.id === conversationId);
     expect(conversation?.blocked).toBe(true);
     expect(conversation?.canSendMessage).toBe(false);
+  });
+
+  it("preserves PostgreSQL sub-millisecond precision in message and activity cursors", async () => {
+    const buyer = await createUser();
+    const firstSeller = await createUser();
+    const secondSeller = await createUser();
+    const firstConversation = await createConversation(buyer, firstSeller);
+    const secondConversation = await createConversation(buyer, secondSeller);
+    await pool.query(`update conversations set created_at = $2 where id = $1`, [
+      firstConversation,
+      "2026-03-02T00:00:00.000500Z"
+    ]);
+    await pool.query(`update conversations set created_at = $2 where id = $1`, [
+      secondConversation,
+      "2026-03-02T00:00:00.000900Z"
+    ]);
+
+    const firstConversationPage = await getUserConversationPage(buyer, "user", { limit: 1 });
+    expect(firstConversationPage.nextCursor).not.toBeNull();
+    expect(decodeCursor(firstConversationPage.nextCursor!).createdAt).toContain(".0009");
+    const secondConversationPage = await getUserConversationPage(buyer, "user", {
+      limit: 1,
+      cursor: decodeCursor(firstConversationPage.nextCursor!)
+    });
+    expect(secondConversationPage.conversations.map((row) => row.id)).toContain(firstConversation);
+    expect(secondConversationPage.nextCursor).toBeNull();
+    expect(secondConversationPage.conversations[0]).not.toHaveProperty("cursorActivityAt");
+
+    const newer = await pool.query<{ id: string }>(
+      `insert into messages(conversation_id, sender_id, body, created_at)
+       values ($1, $2, 'newer microsecond', $3)
+       returning id`,
+      [firstConversation, buyer, "2026-03-03T00:00:00.000900Z"]
+    );
+    const older = await pool.query<{ id: string }>(
+      `insert into messages(conversation_id, sender_id, body, created_at)
+       values ($1, $2, 'older microsecond', $3)
+       returning id`,
+      [firstConversation, buyer, "2026-03-03T00:00:00.000500Z"]
+    );
+    const firstMessagePage = await getMessagePage(firstConversation, { limit: 1 });
+    expect(firstMessagePage.messages.map((row) => row.id)).toEqual([newer.rows[0].id]);
+    expect(decodeCursor(firstMessagePage.nextCursor!).createdAt).toContain(".0009");
+    const secondMessagePage = await getMessagePage(firstConversation, {
+      limit: 1,
+      cursor: decodeCursor(firstMessagePage.nextCursor!)
+    });
+    expect(secondMessagePage.messages.map((row) => row.id)).toEqual([older.rows[0].id]);
+    expect(secondMessagePage.nextCursor).toBeNull();
+    expect(secondMessagePage.messages[0]).not.toHaveProperty("cursorCreatedAt");
   });
 });

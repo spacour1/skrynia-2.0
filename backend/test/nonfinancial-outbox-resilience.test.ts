@@ -240,4 +240,131 @@ describe("nonfinancial outbox lease recovery", () => {
       await observer.stop();
     }
   });
+
+  it("does not deliver a delayed message.created event after the message was hidden", async () => {
+    const redis = getRedis()!;
+    const observer = new RealtimeEventBus({
+      publisher: redis,
+      instanceId: `stage7-hidden-message-observer:${randomUUID()}`,
+      channel: env.REALTIME_CHANNEL
+    });
+    const delivered: unknown[] = [];
+    observer.onEvent((event) => {
+      if (event.type === "message") delivered.push(event.payload);
+    });
+    await observer.start();
+
+    try {
+      const senderId = await createUser();
+      const recipientId = await createUser();
+      const conversationId = await createConversation(senderId, recipientId);
+      const messageId = randomUUID();
+      await pool.query(
+        `insert into messages(id, conversation_id, sender_id, body, hidden_at)
+         values ($1, $2, $3, 'moderated secret body', now())`,
+        [messageId, conversationId, senderId]
+      );
+      await inTx((client) =>
+        enqueueDomainEvent(client, {
+          eventKey: `message.created:stage7-hidden:${messageId}`,
+          eventType: "message.created",
+          aggregateType: "message",
+          aggregateId: messageId,
+          payload: { messageId }
+        })
+      );
+
+      expect(await processOutboxBatch({ workerId: "stage7-hidden-message" })).toEqual({
+        claimed: 1,
+        processed: 1,
+        failed: 0
+      });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      expect(delivered).toEqual([]);
+      const notifications = await pool.query<{ count: number }>(
+        `select count(*)::int as count
+         from notifications
+         where conversation_id = $1 and type = 'message'`,
+        [conversationId]
+      );
+      expect(notifications.rows[0].count).toBe(0);
+    } finally {
+      await observer.stop();
+    }
+  });
+
+  it("broadcasts canonical message state when stale moderation events are replayed", async () => {
+    const redis = getRedis()!;
+    const observer = new RealtimeEventBus({
+      publisher: redis,
+      instanceId: `stage7-moderation-observer:${randomUUID()}`,
+      channel: env.REALTIME_CHANNEL
+    });
+    const delivered: Array<{ hidden: boolean; conversationId: string; messageId: string }> = [];
+    observer.onEvent((event) => {
+      if (event.type === "message.moderated") {
+        delivered.push(event.payload as { hidden: boolean; conversationId: string; messageId: string });
+      }
+    });
+    await observer.start();
+
+    try {
+      const senderId = await createUser();
+      const recipientId = await createUser();
+      const conversationId = await createConversation(senderId, recipientId);
+      const messageId = randomUUID();
+      await pool.query(
+        `insert into messages(id, conversation_id, sender_id, body)
+         values ($1, $2, $3, 'canonical moderation state')`,
+        [messageId, conversationId, senderId]
+      );
+      await inTx((client) =>
+        enqueueDomainEvent(client, {
+          eventKey: `message.moderated:stage7-stale-hide:${messageId}`,
+          eventType: "message.moderated",
+          aggregateType: "message",
+          aggregateId: messageId,
+          payload: { messageId, conversationId, hidden: true }
+        })
+      );
+      expect(await processOutboxBatch({ workerId: "stage7-stale-hide" })).toEqual({
+        claimed: 1,
+        processed: 1,
+        failed: 0
+      });
+      await vi.waitFor(() => expect(delivered).toHaveLength(1), { timeout: 2_000, interval: 25 });
+      expect(delivered[0]).toEqual({
+        type: "message.moderated",
+        messageId,
+        conversationId,
+        hidden: false
+      });
+
+      await pool.query(`update messages set hidden_at = now() where id = $1`, [messageId]);
+      await inTx((client) =>
+        enqueueDomainEvent(client, {
+          eventKey: `message.moderated:stage7-stale-restore:${messageId}`,
+          eventType: "message.moderated",
+          aggregateType: "message",
+          aggregateId: messageId,
+          payload: { messageId, conversationId, hidden: false }
+        })
+      );
+      expect(await processOutboxBatch({ workerId: "stage7-stale-restore" })).toEqual({
+        claimed: 1,
+        processed: 1,
+        failed: 0
+      });
+      await vi.waitFor(() => expect(delivered).toHaveLength(2), { timeout: 2_000, interval: 25 });
+      expect(delivered[1]).toEqual({
+        type: "message.moderated",
+        messageId,
+        conversationId,
+        hidden: true
+      });
+    } finally {
+      await observer.stop();
+    }
+  });
 });

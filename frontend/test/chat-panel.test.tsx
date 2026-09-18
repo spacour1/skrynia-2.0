@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatPanel } from "@/components/ChatPanel";
@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   getSnapshot: vi.fn(),
   joinConversation: vi.fn(() => () => undefined),
   sendMessage: vi.fn(),
-  subscribe: vi.fn(() => () => undefined)
+  subscribe: vi.fn((_listener: (payload: { type: string; [key: string]: unknown }) => void) => () => undefined)
 }));
 
 vi.mock("@sentry/nextjs", () => ({ setUser: vi.fn() }));
@@ -282,5 +282,62 @@ describe("ChatPanel", () => {
 
     expect(draft).toHaveValue("Unsent chat draft");
     expect(screen.getByPlaceholderText("Write a message")).toBe(draft);
+  });
+
+  it("removes hidden message content immediately and refetches it on restore", async () => {
+    const originalMessage = {
+      id: "moderated-message-id",
+      conversationId: "existing-conversation-id",
+      senderId: "seller-id",
+      senderDisplayName: "Seller",
+      body: "Sensitive message body",
+      attachmentUrl: "/api/storage/private-attachment",
+      createdAt: "2026-07-24T12:00:00.000Z"
+    };
+    mocks.apiFetch
+      .mockResolvedValueOnce({ messages: [originalMessage] })
+      // A read that started before the moderation commit can still resolve with stale
+      // content. The local hidden-id guard must not let it put the body back on screen.
+      .mockResolvedValueOnce({ messages: [originalMessage] })
+      .mockResolvedValueOnce({ messages: [{ ...originalMessage, hidden: false }] });
+
+    const { container } = renderWithProviders(
+      <ChatPanel conversationId="existing-conversation-id" mode="compact" />,
+      { locale: "en" }
+    );
+
+    expect(await screen.findByText(originalMessage.body)).toBeVisible();
+    expect(container.querySelector(`a[href="${originalMessage.attachmentUrl}"]`)).not.toBeNull();
+    const listener = mocks.subscribe.mock.calls[0][0];
+
+    act(() => {
+      listener({
+        type: "message.moderated",
+        messageId: originalMessage.id,
+        conversationId: originalMessage.conversationId,
+        hidden: true
+      });
+    });
+
+    expect(screen.queryByText(originalMessage.body)).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText(originalMessage.body)).not.toBeInTheDocument();
+      expect(container.querySelector(`a[href="${originalMessage.attachmentUrl}"]`)).toBeNull();
+      expect(mocks.apiFetch).toHaveBeenCalledTimes(2);
+    });
+
+    act(() => {
+      listener({
+        type: "message.moderated",
+        messageId: originalMessage.id,
+        conversationId: originalMessage.conversationId,
+        hidden: false
+      });
+    });
+
+    await waitFor(() => {
+      expect(mocks.apiFetch).toHaveBeenCalledTimes(3);
+      expect(screen.getByText(originalMessage.body)).toBeVisible();
+    });
   });
 });

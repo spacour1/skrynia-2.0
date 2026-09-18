@@ -4,13 +4,16 @@ import { fetchServerSide } from "@/lib/server-api";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { defaultLocale, isLocale, locales } from "@/i18n/config";
 import { getT } from "@/i18n/dictionaries";
+import { serializeJsonLd } from "@/lib/json-ld";
 import { ProductPageClient } from "./ProductPageClient";
 import { moneyCentsToMajorUnits } from "@/lib/money";
 
 type ProductResponse = { product: Product };
 
 async function loadProduct(id: string) {
-  const data = await fetchServerSide<ProductResponse>(`/marketplace/products/${id}`);
+  // Moderation visibility is authoritative at the backend. Do not keep a second,
+  // independently expiring Next cache that can retain a hidden product's metadata.
+  const data = await fetchServerSide<ProductResponse>(`/marketplace/products/${id}`, 0);
   return data?.product ?? null;
 }
 
@@ -91,7 +94,7 @@ export default async function ProductPage({
       {product ? (
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(buildProductJsonLd(product)) }}
+          dangerouslySetInnerHTML={{ __html: serializeJsonLd(buildProductJsonLd(product)) }}
         />
       ) : null}
       <ProductPageClient id={id} />

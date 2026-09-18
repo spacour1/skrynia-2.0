@@ -129,6 +129,29 @@ export async function getActiveSchemaForSection(sectionId: string): Promise<Cata
 }
 
 /**
+ * Public schema reads must obey the same complete catalog lifecycle gate as public
+ * item/section discovery. The administrative helper above intentionally remains able
+ * to inspect an active schema while an ancestor is hidden.
+ */
+export async function getPublicActiveSchemaForSection(
+  sectionId: string
+): Promise<CatalogSchema | null> {
+  const result = await pool.query(
+    `select cs.schema
+     from game_sections gs
+     join games g on g.id = gs.game_id and g.status = 'active'
+     join catalog_groups cg on cg.id = g.group_id and cg.status = 'active'
+     join catalog_section_schemas cs
+       on cs.section_id = gs.id
+      and cs.version = gs.current_schema_version
+      and cs.status = 'active'
+     where gs.id = $1 and gs.status = 'active'`,
+    [sectionId]
+  );
+  return (result.rows[0]?.schema as CatalogSchema | undefined) ?? null;
+}
+
+/**
  * Validates + filters a lot's metadata against its section's active schema, and returns
  * the schema_version to stamp onto the product row so a later schema edit never changes
  * how an already-created lot displays or re-validates (see the products migration).

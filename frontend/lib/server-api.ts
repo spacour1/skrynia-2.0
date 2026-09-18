@@ -5,7 +5,10 @@ const SERVER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000
 
 export async function fetchServerSide<T>(path: string, revalidateSeconds = 60): Promise<T | null> {
   try {
-    const response = await fetch(`${SERVER_API_URL}${path}`, { next: { revalidate: revalidateSeconds } });
+    const cacheOptions = revalidateSeconds <= 0
+      ? { cache: "no-store" as const }
+      : { next: { revalidate: revalidateSeconds } };
+    const response = await fetch(`${SERVER_API_URL}${path}`, cacheOptions);
     if (!response.ok) return null;
     return (await response.json()) as T;
   } catch {

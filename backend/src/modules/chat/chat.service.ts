@@ -16,7 +16,7 @@ import {
 } from "./system-messages.service.js";
 import { bigintToMoneyCents, type MoneyCents } from "../../domain/money.js";
 import {
-  buildNextCursor,
+  buildLookaheadNextCursor,
   keysetWhereClause,
   type DecodedCursor
 } from "../../common/pagination.js";
@@ -24,6 +24,7 @@ import {
   mapMessageDto,
   type MessageRow
 } from "./message.dto.js";
+import { publicProductEligibilitySql } from "../marketplace/marketplace.sql.js";
 
 export { createSystemMessage, getConversationIdForOrder };
 
@@ -156,21 +157,38 @@ async function getOrCreateConversation(
   return { id: reread.rows[0].id as string, existing: true };
 }
 
-export function getOrCreateProductConversation(
+export async function getOrCreateProductConversation(
   input: { buyerId: string; sellerId: string; productId: string },
   client: DbClient = pool
 ) {
+  const eligible = await client.query(
+    `select 1
+     from products p
+     join users u on u.id = p.seller_id
+     where p.id = $1
+       and p.seller_id = $2
+       and p.status = 'active'
+       and u.is_banned = false
+       and ${publicProductEligibilitySql("p")}`,
+    [input.productId, input.sellerId]
+  );
+  if (!eligible.rows[0]) throw notFound("Product is unavailable");
   return getOrCreateConversation({ buyerId: input.buyerId, sellerId: input.sellerId, productId: input.productId }, client);
 }
 
 export async function getExistingProductConversation(input: { buyerId: string; sellerId: string; productId: string }) {
   const result = await pool.query<{ id: string }>(
-    `select id
-     from conversations
-     where buyer_id = $1
-       and seller_id = $2
-       and product_id = $3
-       and order_id is null`,
+    `select c.id
+     from conversations c
+     join products p on p.id = c.product_id
+     join users u on u.id = p.seller_id
+     where c.buyer_id = $1
+       and c.seller_id = $2
+       and c.product_id = $3
+       and c.order_id is null
+       and p.status = 'active'
+       and u.is_banned = false
+       and ${publicProductEligibilitySql("p")}`,
     [input.buyerId, input.sellerId, input.productId]
   );
   return result.rows[0]?.id ?? null;
@@ -373,7 +391,7 @@ export async function getMessagePage(
     params.push(opts.before);
     beforeClause = `and m.created_at < $${params.length}`;
   }
-  params.push(limit);
+  params.push(limit + 1);
   const limitParamIndex = params.length;
   params.push(Boolean(opts.viewerIsAdmin));
   const adminParamIndex = params.length;
@@ -391,7 +409,7 @@ export async function getMessagePage(
               when m.hidden_at is not null and not $${adminParamIndex} then null
               else m.attachment_storage_object_id
             end as "attachmentStorageObjectId",
-            m.created_at as "createdAt",
+            m.created_at as "createdAt", m.created_at::text as "cursorCreatedAt",
             (m.hidden_at is not null) as hidden,
             m.kind, m.system_type as "systemType", m.metadata
      from messages m
@@ -401,9 +419,15 @@ export async function getMessagePage(
      limit $${limitParamIndex}`,
     params
   );
-  const nextCursor = buildNextCursor(result.rows, limit);
+  const nextCursor = buildLookaheadNextCursor(
+    result.rows.map((row) => ({ id: row.id, createdAt: row.cursorCreatedAt })),
+    limit
+  );
   return {
-    messages: result.rows.reverse().map((row) => mapMessageDto(row as MessageRow)),
+    messages: result.rows
+      .slice(0, limit)
+      .reverse()
+      .map((row) => mapMessageDto(row as MessageRow)),
     nextCursor
   };
 }
@@ -458,7 +482,7 @@ export async function getUserConversationPage(
     `coalesce(lm."lastMessageAt", c.created_at)`,
     "c.id"
   );
-  values.push(limit);
+  values.push(limit + 1);
   const result = await pool.query(
     `select c.id, c.product_id as "productId", c.order_id as "orderId", c.created_at as "createdAt",
             p.title as "productTitle",
@@ -467,6 +491,7 @@ export async function getUserConversationPage(
             o.status as "orderStatus", o.amount_cents as "amountCents", o.currency,
             lm."lastMessageBody", lm."lastMessageAt",
             coalesce(lm."lastMessageAt", c.created_at) as "activityAt",
+            coalesce(lm."lastMessageAt", c.created_at)::text as "cursorActivityAt",
             coalesce(unread.count, 0)::int as "unreadCount",
             exists(
               select 1 from user_blocks ub
@@ -500,11 +525,11 @@ export async function getUserConversationPage(
      limit $${values.length}`,
     values
   );
-  const nextCursor = buildNextCursor(
-    result.rows.map((row) => ({ id: row.id, createdAt: row.activityAt })),
+  const nextCursor = buildLookaheadNextCursor(
+    result.rows.map((row) => ({ id: row.id, createdAt: row.cursorActivityAt })),
     limit
   );
-  const conversations = result.rows.map(({ activityAt: _activityAt, ...row }) => ({
+  const conversations = result.rows.slice(0, limit).map(({ activityAt: _activityAt, cursorActivityAt: _cursorActivityAt, ...row }) => ({
     ...row,
     canSendMessage: !row.blocked
   }));

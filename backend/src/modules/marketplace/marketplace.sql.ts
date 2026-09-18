@@ -12,6 +12,38 @@ export const mediaAggWithStatus = `coalesce(
   '[]'::jsonb
 ) as media`;
 
+/**
+ * Canonical public catalog visibility for a product. Legacy category-only products
+ * remain visible, while every product attached to the catalog must still belong to an
+ * active item and group; section-bound products additionally require the same active
+ * section under that item. The alias is code-owned, never request data.
+ */
+export function publicProductEligibilitySql(productAlias = "p") {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(productAlias)) {
+    throw new Error("Invalid product SQL alias");
+  }
+
+  return `(
+    (${productAlias}.game_id is null and ${productAlias}.section_id is null)
+    or exists (
+      select 1
+      from games public_catalog_item
+      join catalog_groups public_catalog_group
+        on public_catalog_group.id = public_catalog_item.group_id
+      left join game_sections public_catalog_section
+        on public_catalog_section.id = ${productAlias}.section_id
+       and public_catalog_section.game_id = public_catalog_item.id
+      where public_catalog_item.id = ${productAlias}.game_id
+        and public_catalog_item.status = 'active'
+        and public_catalog_group.status = 'active'
+        and (
+          ${productAlias}.section_id is null
+          or public_catalog_section.status = 'active'
+        )
+    )
+  )`;
+}
+
 export const productSelect = `
   select p.id, p.title, p.description, p.price_cents as "priceCents", p.currency, p.stock,
          p.delivery_type as "deliveryType", p.server, p.platform, p.metadata,

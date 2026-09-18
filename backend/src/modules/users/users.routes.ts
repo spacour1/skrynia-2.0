@@ -49,7 +49,7 @@ import { getRequestLocale } from "../../i18n/t.js";
 import {
   attachCardMetadata
 } from "../marketplace/marketplace.helpers.js";
-import { mediaAgg } from "../marketplace/marketplace.sql.js";
+import { mediaAgg, publicProductEligibilitySql } from "../marketplace/marketplace.sql.js";
 import { mapProductCardDto } from "../marketplace/product.dto.js";
 import { normalizedRequestEndpoint, requestPath } from "../../common/request-url.js";
 import { bigintToMoneyCents, parseMoneyCents } from "../../domain/money.js";
@@ -648,7 +648,10 @@ router.get(
       `select u.id, u.display_name as "displayName", u.avatar_url as "avatarUrl",
               coalesce(avg(r.rating), 0)::float as "ratingAverage",
               count(distinct r.id)::int as "reviewCount",
-              count(distinct p.id) filter (where p.status = 'active')::int as "activeListings",
+              count(distinct p.id) filter (
+                where p.status = 'active'
+                  and ${publicProductEligibilitySql("p")}
+              )::int as "activeListings",
               sf.created_at as "createdAt", sf.created_at::text as "cursorCreatedAt"
        from seller_favorites sf
        join users u on u.id = sf.seller_id
@@ -706,7 +709,10 @@ router.get(
     const overview = await pool.query<PublicSellerOverviewRow>(
       `with product_stats as (
          select
-           count(*) filter (where status = 'active')::int as active_listings,
+           count(*) filter (
+             where status = 'active'
+               and ${publicProductEligibilitySql("products")}
+           )::int as active_listings,
            coalesce(sum(sales_count) filter (where status != 'deleted'), 0)::int as total_sales
          from products
          where seller_id = $1
@@ -784,8 +790,9 @@ router.get(
        left join product_favorites pf on pf.product_id = p.id
        left join product_media pm on pm.product_id = p.id and pm.status = 'approved'
        where p.seller_id = $1 and p.status = 'active'
+         and ${publicProductEligibilitySql("p")}
        group by p.id, c.id, g.id, gs.id
-       order by p.created_at desc limit 24`,
+       order by p.created_at desc, p.id desc limit 24`,
       [id]
     );
 
@@ -798,7 +805,7 @@ router.get(
        join orders o on o.id = r.order_id
        join products p on p.id = o.product_id
        where r.seller_id = $1
-       order by r.created_at desc limit 20`,
+       order by r.created_at desc, r.id desc limit 20`,
       [id]
     );
 

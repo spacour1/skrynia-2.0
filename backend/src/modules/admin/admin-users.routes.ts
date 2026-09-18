@@ -12,7 +12,11 @@ import {
   loadSellerProductCacheContexts
 } from "../marketplace/marketplace-cache.service.js";
 import { enqueueDomainEvent } from "../outbox/outbox.service.js";
-import { buildNextCursor, keysetWhereClause, parseCursorPage } from "../../common/pagination.js";
+import {
+  buildLookaheadNextCursor,
+  keysetWhereClause,
+  parseCursorPage
+} from "../../common/pagination.js";
 
 const router = Router();
 const adminOnly = requireRole("admin");
@@ -43,17 +47,25 @@ router.get(
     const { limit, cursor } = parseCursorPage(req.query, { defaultLimit: 100 });
     const values: unknown[] = [];
     const where = keysetWhereClause(values, cursor, "created_at", "id");
-    values.push(limit);
+    values.push(limit + 1);
     const result = await pool.query(
       `select id, email, display_name as "displayName", role, is_banned as "isBanned",
-              muted_until as "mutedUntil", created_at as "createdAt"
+              muted_until as "mutedUntil", created_at as "createdAt",
+              created_at::text as "cursorCreatedAt"
        from users
        ${where ? `where ${where}` : ""}
        order by created_at desc, id desc
        limit $${values.length}`,
       values
     );
-    res.json({ users: result.rows, nextCursor: buildNextCursor(result.rows, limit) });
+    const users = result.rows
+      .slice(0, limit)
+      .map(({ cursorCreatedAt: _cursorCreatedAt, ...row }) => row);
+    const nextCursor = buildLookaheadNextCursor(
+      result.rows.map((row) => ({ id: row.id, createdAt: row.cursorCreatedAt })),
+      limit
+    );
+    res.json({ users, nextCursor });
   })
 );
 
@@ -68,7 +80,7 @@ router.patch(
         isBanned: z.boolean().optional()
       })
       .parse(req.body);
-    const { user, bannedTransition } = await inTx(async (client) => {
+    const { user, cacheContexts } = await inTx(async (client) => {
       const existing = await client.query<{ isBanned: boolean; role: string }>(
         `select is_banned as "isBanned", role from users where id = $1 for update`,
         [id]
@@ -101,18 +113,21 @@ router.patch(
           payload: { userId: id }
         });
       }
-      return { user: result.rows[0], bannedTransition: becameBanned };
+      const cacheContexts = body.isBanned !== undefined
+        ? await loadSellerProductCacheContexts(id, client)
+        : [];
+      return { user: result.rows[0], cacheContexts };
     });
+    if (body.isBanned !== undefined) {
+      // This runs only after the user update commits. The durable user.banned outbox
+      // handler retries the same sweep, but public reads must stop serving warmed seller
+      // data immediately rather than waiting for worker delivery.
+      await invalidateProductCacheBatch(cacheContexts, { sellerIds: [id] });
+    }
     if (body.role !== undefined) {
       // Privilege changes invalidate every existing token immediately. The local
       // event closes this process's sockets; Stage 11 distributes it across replicas.
       await revokeAllUserSessions(id);
-    }
-    if (body.isBanned !== undefined && !bannedTransition) {
-      // Fetch every affected product dimension in one query, then invalidate all detail
-      // keys in batches and sweep shared namespaces once for the entire seller.
-      const contexts = await loadSellerProductCacheContexts(id);
-      await invalidateProductCacheBatch(contexts, { sellerIds: [id] });
     }
     res.json({ user });
   })

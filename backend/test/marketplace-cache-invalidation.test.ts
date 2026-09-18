@@ -8,6 +8,11 @@ import { issueSession } from "../src/modules/auth/session.service.js";
 import { lockEscrow, releaseEscrow } from "../src/modules/orders/ledger.service.js";
 import { processOutboxBatch } from "../src/modules/outbox/outbox.worker.js";
 import {
+  invalidateProductCaches,
+  readMarketplaceCache,
+  setMarketplaceCacheIfCurrent
+} from "../src/modules/marketplace/marketplace-cache.service.js";
+import {
   closeDb,
   createOrder,
   createUser,
@@ -105,10 +110,9 @@ describe("marketplace cache invalidation", () => {
 
     const blocked = await admin.patch(`/admin/listings/${productId}`).send({ status: "blocked" });
     expect(blocked.status).toBe(200);
-    await drainOutbox();
     expect(await cacheGet(`marketplace:product:${productId}`)).toBeNull();
-
     expect((await request(app).get(`/marketplace/products/${productId}`)).status).toBe(404);
+    await drainOutbox();
     const ownerPreview = await seller.get(`/marketplace/products/${productId}`);
     expect(ownerPreview.status).toBe(200);
     expect(ownerPreview.body.product.status).toBe("blocked");
@@ -128,10 +132,10 @@ describe("marketplace cache invalidation", () => {
 
     const banned = await admin.patch(`/admin/users/${seller.userId}`).send({ isBanned: true });
     expect(banned.status).toBe(200);
-    await drainOutbox();
     expect((await request(app).get(`/marketplace/products/${productId}`)).status).toBe(404);
     expect((await request(app).get(listPath)).body.products).toHaveLength(0);
     expect(categoryCount(await request(app).get("/marketplace/categories"), categoryId)).toBe(0);
+    await drainOutbox();
 
     const unbanned = await admin.patch(`/admin/users/${seller.userId}`).send({ isBanned: false });
     expect(unbanned.status).toBe(200);
@@ -155,8 +159,99 @@ describe("marketplace cache invalidation", () => {
     expect(categoryCount(await request(app).get("/marketplace/categories"), categoryId)).toBe(1);
 
     expect((await admin.patch(`/admin/listings/${firstId}`).send({ status: "blocked" })).status).toBe(200);
-    await drainOutbox();
     expect(categoryCount(await request(app).get("/marketplace/categories"), categoryId)).toBe(0);
+    await drainOutbox();
+  });
+
+  it("rejects a stale cache refill after a committed invalidation advances the generation", async () => {
+    const cacheKey = `marketplace:product:${randomUUID()}`;
+    const before = await readMarketplaceCache(cacheKey);
+    expect(before.snapshot.generation).toEqual(expect.any(String));
+
+    await invalidateProductCaches({ productId: randomUUID() });
+
+    await expect(
+      setMarketplaceCacheIfCurrent(
+        cacheKey,
+        { product: { id: "stale" } },
+        60,
+        before.snapshot
+      )
+    ).resolves.toBe(false);
+    expect(await cacheGet(cacheKey)).toBeNull();
+  });
+
+  it.each(["product", "seller", "media"] as const)(
+    "rechecks %s visibility when Redis retains a pre-moderation cache entry",
+    async (target) => {
+      const seller = await verifiedSellerClient();
+      const productId = await createListing(seller, await anyCategoryId());
+      await pool.query(
+        `insert into product_media(product_id, url, sort_order) values ($1, $2, 0)`,
+        [productId, `https://cdn.test/${randomUUID()}.webp`]
+      );
+      const detailPath = `/marketplace/products/${productId}`;
+      const listPath = "/marketplace/products";
+      expect((await request(app).get(detailPath)).status).toBe(200);
+      expect((await request(app).get(listPath)).body.products).toHaveLength(1);
+
+      // Commit without touching Redis: models a process crash or failed invalidation.
+      if (target === "product") {
+        await pool.query(`update products set status = 'blocked' where id = $1`, [productId]);
+      } else if (target === "seller") {
+        await pool.query(`update users set is_banned = true where id = $1`, [seller.userId]);
+      } else {
+        await pool.query(`update product_media set status = 'rejected' where product_id = $1`, [productId]);
+      }
+      expect(await cacheGet(`marketplace:product:${productId}`)).not.toBeNull();
+      const detail = await request(app).get(detailPath);
+      const list = await request(app).get(listPath);
+      if (target === "media") {
+        expect(detail.status).toBe(200);
+        expect(detail.body.product.media).toHaveLength(0);
+        expect(list.body.products[0].media).toHaveLength(0);
+      } else {
+        expect(detail.status).toBe(404);
+        expect(list.body.products).toHaveLength(0);
+      }
+    }
+  );
+
+  it("lets moderators change listing status but reserves merchandising flags for admins", async () => {
+    const seller = await verifiedSellerClient();
+    const moderator = await clientFor(await createUser("moderator"), "moderator");
+    const admin = await adminClient();
+    const productId = await createListing(seller, await anyCategoryId());
+
+    const forbiddenPromotion = await moderator
+      .patch(`/admin/listings/${productId}`)
+      .send({ isHot: true, isRecommended: true });
+    expect(forbiddenPromotion.status).toBe(403);
+
+    const moderated = await moderator
+      .patch(`/admin/listings/${productId}`)
+      .send({ status: "blocked" });
+    expect(moderated.status).toBe(200);
+
+    const promoted = await admin
+      .patch(`/admin/listings/${productId}`)
+      .send({ isHot: true, isRecommended: true });
+    expect(promoted.status).toBe(200);
+
+    const row = await pool.query<{
+      status: string;
+      isHot: boolean;
+      isRecommended: boolean;
+    }>(
+      `select status, is_hot as "isHot", is_recommended as "isRecommended"
+       from products where id = $1`,
+      [productId]
+    );
+    expect(row.rows[0]).toEqual({
+      status: "blocked",
+      isHot: true,
+      isRecommended: true
+    });
   });
 
   it("removes rejected media from an already cached product detail", async () => {

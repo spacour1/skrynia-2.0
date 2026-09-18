@@ -344,6 +344,29 @@ describe("admin catalog RBAC", () => {
     expect(response.status).toBe(200);
     expect(Array.isArray(response.body.groups)).toBe(true);
   });
+
+  it.each(["group", "item", "section"] as const)(
+    "hides a public section schema when its %s is inactive",
+    async (level) => {
+      const admin = await createUser("admin");
+      const { group, item, section } = await activeSectionWithSchema(admin, [cityField]);
+      expect(
+        (await request(app).get(`/marketplace/catalog/sections/${section.id}/schema`)).status
+      ).toBe(200);
+
+      if (level === "group") {
+        await updateCatalogGroup(group.id, { status: "hidden" }, admin);
+      } else if (level === "item") {
+        await updateCatalogItem(item.id, { status: "hidden" }, admin);
+      } else {
+        await updateCatalogSection(section.id, { status: "hidden" }, admin);
+      }
+
+      expect(
+        (await request(app).get(`/marketplace/catalog/sections/${section.id}/schema`)).status
+      ).toBe(404);
+    }
+  );
 });
 
 // ---------------------------------------------------------------------------

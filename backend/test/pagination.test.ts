@@ -36,6 +36,16 @@ describe("cursor helper", () => {
     expect(decoded.id).toBe("11111111-1111-1111-1111-111111111111");
   });
 
+  it("preserves PostgreSQL sub-millisecond precision in string cursors", () => {
+    const createdAt = "2026-01-05 10:00:00.000900+00";
+    const cursor = encodeCursor(createdAt, "11111111-1111-1111-1111-111111111111");
+
+    expect(decodeCursor(cursor)).toEqual({
+      createdAt,
+      id: "11111111-1111-1111-1111-111111111111"
+    });
+  });
+
   it("rejects a malformed cursor", () => {
     expect(() => decodeCursor("not-base64!!!")).toThrow();
     expect(() => decodeCursor(Buffer.from("no-separator-here").toString("base64url"))).toThrow();
@@ -193,6 +203,52 @@ describe("dispute message pagination", () => {
 });
 
 describe("admin list bounds", () => {
+  it("preserves microseconds and ends exact full pages for nonfinancial lists", async () => {
+    const admin = await adminAgent();
+    const seller = await createUser();
+    const timestamps = ["2026-03-04T00:00:00.000900Z", "2026-03-04T00:00:00.000500Z"];
+    const productIds: string[] = [];
+    const mediaIds: string[] = [];
+    const auditIds: string[] = [];
+    for (const [index, userId] of [admin.userId, seller].entries()) {
+      await pool.query(`update users set created_at = $2 where id = $1`, [userId, timestamps[index]]);
+      const productId = await createProduct(seller);
+      productIds.push(productId);
+      await pool.query(`update products set created_at = $2 where id = $1`, [productId, timestamps[index]]);
+      const media = await pool.query<{ id: string }>(
+        `insert into product_media(product_id, url, sort_order, created_at)
+         values ($1, '/test-pagination.png', $2, $3) returning id`,
+        [productId, index, timestamps[index]]
+      );
+      mediaIds.push(media.rows[0].id);
+      const audit = await pool.query<{ id: string }>(
+        `insert into audit_logs(trace_id, method, path, endpoint, status_code, action, metadata, created_at)
+         values ($1, 'GET', '/test', '/test', 200, 'pagination_test', '{}'::jsonb, $2) returning id`,
+        [randomUUID(), timestamps[index]]
+      );
+      auditIds.push(audit.rows[0].id);
+    }
+
+    for (const { path, key, ids } of [
+      { path: "/admin/users", key: "users", ids: [admin.userId, seller] },
+      { path: "/admin/media", key: "media", ids: mediaIds },
+      { path: "/admin/listings", key: "listings", ids: productIds },
+      { path: "/admin/audit", key: "auditLogs", ids: auditIds }
+    ]) {
+      const first = await admin.get(`${path}?limit=1`);
+      expect(first.status, `${path}: ${first.text}`).toBe(200);
+      expect(first.body[key].map((row: { id: string }) => row.id), path).toEqual([ids[0]]);
+      expect(decodeCursor(first.body.nextCursor).createdAt, path).toContain(".0009");
+      expect(first.body[key][0], path).not.toHaveProperty("cursorCreatedAt");
+
+      const last = await admin.get(`${path}?limit=1&cursor=${encodeURIComponent(first.body.nextCursor)}`);
+      expect(last.status, `${path}: ${last.text}`).toBe(200);
+      expect(last.body[key].map((row: { id: string }) => row.id), path).toEqual([ids[1]]);
+      expect(last.body.nextCursor, path).toBeNull();
+      expect(last.body[key][0], path).not.toHaveProperty("cursorCreatedAt");
+    }
+  });
+
   it("enforces maximums across the paginated admin list contracts", async () => {
     const admin = await adminAgent();
     const paths = [
@@ -277,10 +333,14 @@ describe("admin list bounds", () => {
     }
 
     const seen: string[] = [];
-    for (let page = 1; page <= 3; page += 1) {
-      const response = await admin.get(`/admin/reports?limit=2&page=${page}`);
+    let cursor: string | null = null;
+    for (let page = 0; page < 10; page += 1) {
+      const suffix = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
+      const response = await admin.get(`/admin/reports?limit=2${suffix}`);
       expect(response.status).toBe(200);
       seen.push(...response.body.reports.map((report: { id: string }) => report.id));
+      cursor = response.body.nextCursor;
+      if (!cursor) break;
     }
     expect(seen[0]).toBe(highPriorityId);
     expect(new Set(seen).size).toBe(reportIds.length);

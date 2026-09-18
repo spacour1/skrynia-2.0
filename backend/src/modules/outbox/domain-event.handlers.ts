@@ -69,6 +69,12 @@ const messageCreatedPayload = z.object({
   messageId: z.string().uuid()
 });
 
+const messageModeratedPayload = z.object({
+  messageId: z.string().uuid(),
+  conversationId: z.string().uuid(),
+  hidden: z.boolean()
+});
+
 const productBlockedPayload = z.object({
   productId: z.string().uuid(),
   sellerId: z.string().uuid(),
@@ -155,8 +161,19 @@ async function loadMessage(messageId: string) {
      join conversations c on c.id = m.conversation_id
      left join users u on u.id = m.sender_id
      left join products p on p.id = c.product_id
-     where m.id = $1`,
+     where m.id = $1
+       and m.hidden_at is null`,
     [messageId, SYSTEM_SENDER_DISPLAY_NAME]
+  );
+  return result.rows[0] ?? null;
+}
+
+async function loadMessageModerationState(messageId: string) {
+  const result = await pool.query<{ conversationId: string; hidden: boolean }>(
+    `select conversation_id as "conversationId", hidden_at is not null as hidden
+     from messages
+     where id = $1`,
+    [messageId]
   );
   return result.rows[0] ?? null;
 }
@@ -498,6 +515,22 @@ async function handleMessageCreated(event: DomainOutboxEvent) {
   );
 }
 
+async function handleMessageModerated(event: DomainOutboxEvent) {
+  const payload = messageModeratedPayload.parse(event.payload);
+  const current = await loadMessageModerationState(payload.messageId);
+  if (!current) return;
+  await broadcastConversation(
+    current.conversationId,
+    {
+      type: "message.moderated",
+      messageId: payload.messageId,
+      conversationId: current.conversationId,
+      hidden: current.hidden
+    },
+    { strict: true, eventId: event.id }
+  );
+}
+
 async function handleProductBlocked(event: DomainOutboxEvent) {
   const payload = productBlockedPayload.parse(event.payload);
   await invalidateProductCaches(payload, { strict: true });
@@ -581,6 +614,8 @@ export async function handleDomainEvent(event: DomainOutboxEvent): Promise<void>
       return handleDisputeResolved(event);
     case "message.created":
       return handleMessageCreated(event);
+    case "message.moderated":
+      return handleMessageModerated(event);
     case "product.blocked":
       return handleProductBlocked(event);
     case "user.banned":

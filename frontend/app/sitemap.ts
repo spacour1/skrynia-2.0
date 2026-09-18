@@ -6,15 +6,15 @@ import { defaultLocale, locales } from "@/i18n/config";
 type GamesResponse = { games: { slug: string }[] };
 type ProductsResponse = {
   products: { id: string; createdAt?: string }[];
-  page: number;
-  limit: number;
-  total: number;
+  nextCursor: string | null;
 };
 
 const MAX_PRODUCTS = 2000;
 const PAGE_SIZE = 100;
 
-export const revalidate = 3600;
+// Product visibility may change through moderation at any time. A cached sitemap would
+// continue advertising hidden product IDs after the backend cache has been invalidated.
+export const revalidate = 0;
 
 // hreflang alternates for every entry: /ua is the default, /ru and /en are variants.
 function withAlternates(path: string) {
@@ -44,16 +44,18 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     });
   }
 
-  let page = 1;
-  let total = Infinity;
-  while (entries.length < MAX_PRODUCTS && (page - 1) * PAGE_SIZE < total) {
+  let cursor: string | null = null;
+  const seenCursors = new Set<string>();
+  while (entries.length < MAX_PRODUCTS) {
+    const query = new URLSearchParams({ sort: "newest", limit: String(PAGE_SIZE) });
+    if (cursor) query.set("cursor", cursor);
     const data = await fetchServerSide<ProductsResponse>(
-      `/marketplace/products?page=${page}&limit=${PAGE_SIZE}`,
+      `/marketplace/products?${query.toString()}`,
       revalidate
     );
     if (!data || !data.products.length) break;
-    total = data.total;
     for (const product of data.products) {
+      if (entries.length >= MAX_PRODUCTS) break;
       entries.push({
         url: localizedUrl(`/products/${product.id}`),
         lastModified: product.createdAt ? new Date(product.createdAt) : undefined,
@@ -62,7 +64,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         alternates: withAlternates(`/products/${product.id}`)
       });
     }
-    page += 1;
+    if (!data.nextCursor || seenCursors.has(data.nextCursor)) break;
+    seenCursors.add(data.nextCursor);
+    cursor = data.nextCursor;
   }
 
   return entries;

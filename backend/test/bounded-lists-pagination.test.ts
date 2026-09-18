@@ -20,8 +20,8 @@ afterAll(async () => {
   await closeDb();
 });
 
-async function userAgent(userId: string) {
-  const session = await issueSession(userId, "user");
+async function userAgent(userId: string, role: "user" | "admin" = "user") {
+  const session = await issueSession(userId, role);
   const cookie = [`access_token=${session.accessToken}`, `csrf_token=${session.csrfToken}`];
   return { get: (path: string) => request(app).get(path).set("Cookie", cookie) };
 }
@@ -66,11 +66,29 @@ async function seedOwnedLists(ownerId: string, count: number, createdAt?: string
      returning id`,
     [ownerId, targetIds, createdAt ?? null]
   );
+  const notifications = await pool.query<{ id: string }>(
+    `insert into notifications(user_id, type, title, body, created_at)
+     select $1, 'pagination_test', 'Notification ' || n, 'Body ' || n,
+            coalesce($3::timestamptz, now())
+     from generate_series(1, $2::int) as n
+     returning id`,
+    [ownerId, count, createdAt ?? null]
+  );
+  const tickets = await pool.query<{ id: string }>(
+    `insert into support_tickets(user_id, subject, body, created_at)
+     select $1, 'Support ticket ' || n, 'Support ticket body ' || n,
+            coalesce($3::timestamptz, now())
+     from generate_series(1, $2::int) as n
+     returning id`,
+    [ownerId, count, createdAt ?? null]
+  );
 
   return {
     targetIds,
     productIds,
-    reportIds: reports.rows.map((row) => row.id)
+    reportIds: reports.rows.map((row) => row.id),
+    notificationIds: notifications.rows.map((row) => row.id),
+    ticketIds: tickets.rows.map((row) => row.id)
   };
 }
 
@@ -98,17 +116,25 @@ const boundedLists = [
   {
     path: "/reports/my",
     key: "reports"
+  },
+  {
+    path: "/notifications",
+    key: "notifications"
+  },
+  {
+    path: "/support/tickets/me",
+    key: "tickets"
   }
 ] as const;
 
 describe("previously unbounded authenticated lists", () => {
-  it("enforces default/max limits and rejects malformed cursors on every contract", async () => {
+  it("enforces max limits and rejects malformed cursors on every contract", async () => {
     const ownerId = await createUser();
     await seedOwnedLists(ownerId, 26);
     const agent = await userAgent(ownerId);
 
     for (const list of boundedLists) {
-      const response = await agent.get(list.path);
+      const response = await agent.get(`${list.path}?limit=25`);
       expect(response.status, `${list.path}: ${response.text}`).toBe(200);
       expect(response.body[list.key], list.path).toHaveLength(25);
       expect(response.body.nextCursor, list.path).toEqual(expect.any(String));
@@ -119,6 +145,15 @@ describe("previously unbounded authenticated lists", () => {
       const malformed = await agent.get(`${list.path}?cursor=not-a-real-cursor`);
       expect(malformed.status, list.path).toBe(400);
     }
+
+    const adminId = await createUser("admin");
+    const admin = await userAgent(adminId, "admin");
+    const adminTickets = await admin.get("/support/admin/tickets?limit=25");
+    expect(adminTickets.status, adminTickets.text).toBe(200);
+    expect(adminTickets.body.tickets).toHaveLength(25);
+    expect(adminTickets.body.nextCursor).toEqual(expect.any(String));
+    expect((await admin.get("/support/admin/tickets?limit=301")).status).toBe(400);
+    expect((await admin.get("/support/admin/tickets?cursor=not-a-real-cursor")).status).toBe(400);
 
     const first = await agent.get("/marketplace/favorites/ids?limit=25");
     const second = await agent.get(
@@ -175,6 +210,18 @@ describe("previously unbounded authenticated lists", () => {
        returning id`,
       [outsiderId, outsiderTargetId, sharedCreatedAt]
     );
+    const outsiderNotification = await pool.query<{ id: string }>(
+      `insert into notifications(user_id, type, title, created_at)
+       values ($1, 'pagination_test', 'Foreign notification', $2)
+       returning id`,
+      [outsiderId, sharedCreatedAt]
+    );
+    const outsiderTicket = await pool.query<{ id: string }>(
+      `insert into support_tickets(user_id, subject, body, created_at)
+       values ($1, 'Foreign ticket', 'Foreign ticket body', $2)
+       returning id`,
+      [outsiderId, sharedCreatedAt]
+    );
 
     const expectedByPath: Record<string, string[]> = {
       "/marketplace/favorites/ids": own.productIds,
@@ -182,7 +229,9 @@ describe("previously unbounded authenticated lists", () => {
       "/marketplace/seller/products": own.productIds,
       "/users/me/seller-favorites": own.targetIds,
       "/users/me/blocked": own.targetIds,
-      "/reports/my": own.reportIds
+      "/reports/my": own.reportIds,
+      "/notifications": own.notificationIds,
+      "/support/tickets/me": own.ticketIds
     };
     const foreignByPath: Record<string, string> = {
       "/marketplace/favorites/ids": outsiderProductId,
@@ -190,7 +239,9 @@ describe("previously unbounded authenticated lists", () => {
       "/marketplace/seller/products": outsiderProductId,
       "/users/me/seller-favorites": outsiderTargetId,
       "/users/me/blocked": outsiderTargetId,
-      "/reports/my": outsiderReport.rows[0].id
+      "/reports/my": outsiderReport.rows[0].id,
+      "/notifications": outsiderNotification.rows[0].id,
+      "/support/tickets/me": outsiderTicket.rows[0].id
     };
     const agent = await userAgent(ownerId);
 
@@ -210,5 +261,136 @@ describe("previously unbounded authenticated lists", () => {
       expect([...seen].sort(), list.path).toEqual([...expectedByPath[list.path]].sort());
       expect(seen, list.path).not.toContain(foreignByPath[list.path]);
     }
+  });
+
+  it("preserves sub-millisecond PostgreSQL cursors without gaps or duplicates", async () => {
+    const ownerId = await createUser();
+    const firstTimestamp = "2026-06-01T12:00:00.000900Z";
+    const secondTimestamp = "2026-06-01T12:00:00.000800Z";
+    const inserted = await pool.query<{ id: string }>(
+      `insert into notifications(user_id, type, title, created_at)
+       values
+         ($1, 'pagination_test', 'First A', $2),
+         ($1, 'pagination_test', 'First B', $2),
+         ($1, 'pagination_test', 'Second A', $3),
+         ($1, 'pagination_test', 'Second B', $3)
+       returning id`,
+      [ownerId, firstTimestamp, secondTimestamp]
+    );
+    const agent = await userAgent(ownerId);
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const suffix = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
+      const response = await agent.get(`/notifications?limit=1${suffix}`);
+      expect(response.status, response.text).toBe(200);
+      expect(response.body.notifications[0]).not.toHaveProperty("cursorCreatedAt");
+      seen.push(...response.body.notifications.map((row: { id: string }) => row.id));
+      cursor = response.body.nextCursor;
+    } while (cursor);
+
+    expect(new Set(seen).size).toBe(inserted.rows.length);
+    expect([...seen].sort()).toEqual(inserted.rows.map((row) => row.id).sort());
+  });
+});
+
+describe("public seller bounded snapshots", () => {
+  it("uses a UUID tie-breaker for the 24-product snapshot", async () => {
+    const sellerId = await createUser();
+    const productIds: string[] = [];
+    for (let index = 0; index < 25; index += 1) {
+      productIds.push(await createProduct(sellerId));
+    }
+    await pool.query(
+      `update products set created_at = '2026-06-02T12:00:00Z' where id = any($1::uuid[])`,
+      [productIds]
+    );
+
+    const response = await request(app).get(`/users/${sellerId}`);
+
+    expect(response.status, response.text).toBe(200);
+    expect(response.body.products.map((row: { id: string }) => row.id)).toEqual(
+      [...productIds].sort().reverse().slice(0, 24)
+    );
+  });
+
+  it("hides catalog-bound products when any catalog ancestor is inactive", async () => {
+    const sellerId = await createUser();
+    const followerId = await createUser();
+    await pool.query(`insert into seller_favorites(user_id, seller_id) values ($1, $2)`, [followerId, sellerId]);
+    const follower = await userAgent(followerId);
+    const expectFavoriteListingCount = async (expected: number) => {
+      const response = await follower.get("/users/me/seller-favorites");
+      expect(response.status, response.text).toBe(200);
+      expect(response.body.sellers.find((row: { id: string }) => row.id === sellerId)?.activeListings).toBe(expected);
+    };
+    const productId = await createProduct(sellerId);
+    const category = await pool.query<{ id: string }>(
+      `select category_id as id from products where id = $1`,
+      [productId]
+    );
+    const group = await pool.query<{ id: string }>(
+      `insert into catalog_groups(slug, name, status)
+       values ('seller-snapshot-group-' || gen_random_uuid()::text, 'Seller snapshot group', 'active')
+       returning id`
+    );
+    const item = await pool.query<{ id: string }>(
+      `insert into games(group_id, slug, name, status)
+       values ($1, 'seller-snapshot-item-' || gen_random_uuid()::text, 'Seller snapshot item', 'active')
+       returning id`,
+      [group.rows[0].id]
+    );
+    const section = await pool.query<{ id: string }>(
+      `insert into game_sections(game_id, category_id, slug, name, status)
+       values ($1, $2, 'seller-snapshot-section', 'Seller snapshot section', 'active')
+       returning id`,
+      [item.rows[0].id, category.rows[0].id]
+    );
+    await pool.query(
+      `insert into catalog_section_schemas(section_id, version, schema, status, published_at)
+       values ($1, 1, '{"fields":[]}', 'active', now())`,
+      [section.rows[0].id]
+    );
+    await pool.query(`update game_sections set current_schema_version = 1 where id = $1`, [section.rows[0].id]);
+    await pool.query(
+      `update products set game_id = $2, section_id = $3, schema_version = 1 where id = $1`,
+      [productId, item.rows[0].id, section.rows[0].id]
+    );
+
+    const visible = await request(app).get(`/users/${sellerId}`);
+    expect(visible.status, visible.text).toBe(200);
+    expect(visible.body.products.map((row: { id: string }) => row.id)).toContain(productId);
+    expect(visible.body.stats.activeListings).toBe(1);
+    await expectFavoriteListingCount(1);
+
+    await pool.query(`update catalog_groups set status = 'hidden' where id = $1`, [group.rows[0].id]);
+    const hiddenByGroup = await request(app).get(`/users/${sellerId}`);
+    expect(hiddenByGroup.status, hiddenByGroup.text).toBe(200);
+    expect(hiddenByGroup.body.products.map((row: { id: string }) => row.id)).not.toContain(productId);
+    expect(hiddenByGroup.body.stats.activeListings).toBe(0);
+    await expectFavoriteListingCount(0);
+
+    await pool.query(`update catalog_groups set status = 'active' where id = $1`, [group.rows[0].id]);
+    await pool.query(`update games set status = 'hidden' where id = $1`, [item.rows[0].id]);
+    const hiddenByItem = await request(app).get(`/users/${sellerId}`);
+    expect(hiddenByItem.status, hiddenByItem.text).toBe(200);
+    expect(hiddenByItem.body.products.map((row: { id: string }) => row.id)).not.toContain(productId);
+    expect(hiddenByItem.body.stats.activeListings).toBe(0);
+    await expectFavoriteListingCount(0);
+
+    await pool.query(`update games set status = 'active' where id = $1`, [item.rows[0].id]);
+    await pool.query(`update game_sections set status = 'hidden' where id = $1`, [section.rows[0].id]);
+    const hiddenBySection = await request(app).get(`/users/${sellerId}`);
+    expect(hiddenBySection.status, hiddenBySection.text).toBe(200);
+    expect(hiddenBySection.body.products.map((row: { id: string }) => row.id)).not.toContain(productId);
+    expect(hiddenBySection.body.stats.activeListings).toBe(0);
+    await expectFavoriteListingCount(0);
+
+    await pool.query(`update game_sections set status = 'active' where id = $1`, [section.rows[0].id]);
+    const restored = await request(app).get(`/users/${sellerId}`);
+    expect(restored.status, restored.text).toBe(200);
+    expect(restored.body.stats.activeListings).toBe(1);
+    await expectFavoriteListingCount(1);
   });
 });

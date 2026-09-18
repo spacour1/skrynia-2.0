@@ -13,7 +13,7 @@ import {
   addSellerPresence,
   attachCardMetadata
 } from "./marketplace.helpers.js";
-import { productSelect } from "./marketplace.sql.js";
+import { productSelect, publicProductEligibilitySql } from "./marketplace.sql.js";
 import { mapProductCardDto } from "./product.dto.js";
 
 const router = Router();
@@ -29,7 +29,13 @@ router.get(
     const result = await pool.query<{ id: string; productId: string; createdAt: Date | string }>(
       `select pf.product_id as id, pf.product_id as "productId", pf.created_at::text as "createdAt"
        from product_favorites pf
+       join products p on p.id = pf.product_id
+       join users u on u.id = p.seller_id
        where pf.user_id = $1
+         and p.status = 'active'
+         and p.stock > 0
+         and u.is_banned = false
+         and ${publicProductEligibilitySql("p")}
          ${cursorWhere ? `and ${cursorWhere}` : ""}
        order by pf.created_at desc, pf.product_id desc
        limit $${values.length}`,
@@ -64,6 +70,7 @@ router.get(
          and p.status = 'active'
          and p.stock > 0
          and u.is_banned = false
+         and ${publicProductEligibilitySql("p")}
          ${cursorWhere ? `and ${cursorWhere}` : ""}
        order by pf.created_at desc, pf.product_id desc
        limit $${favoriteValues.length}`,
@@ -75,6 +82,7 @@ router.get(
       ? await pool.query(
       `${productSelect}
        where p.id = any($1::uuid[]) and p.status = 'active' and p.stock > 0 and u.is_banned = false
+         and ${publicProductEligibilitySql("p")}
        group by p.id, c.id, g.id, gs.id, u.id
        order by p.created_at desc, p.id desc`,
           [productIds]
@@ -101,7 +109,17 @@ router.put(
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
     const productId = z.string().uuid().parse(req.params.productId);
-    const product = await pool.query(`select id from products where id = $1 and status = 'active'`, [productId]);
+    const product = await pool.query(
+      `select p.id
+       from products p
+       join users u on u.id = p.seller_id
+       where p.id = $1
+         and p.status = 'active'
+         and p.stock > 0
+         and u.is_banned = false
+         and ${publicProductEligibilitySql("p")}`,
+      [productId]
+    );
     if (!product.rows[0]) throw notFound("Product not found");
     await pool.query(
       `insert into product_favorites(user_id, product_id) values ($1, $2) on conflict do nothing`,

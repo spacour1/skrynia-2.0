@@ -1,7 +1,8 @@
+import { createHash } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
 import { pool } from "../../db/pool.js";
-import { asyncHandler, badRequest, notFound } from "../../common/errors.js";
+import { asyncHandler, badRequest, notFound, serviceUnavailable } from "../../common/errors.js";
 import { authenticateOptional } from "../../common/middleware/auth.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { cacheGet, cacheSet } from "../../common/redis.js";
@@ -19,7 +20,11 @@ import {
   MARKETPLACE_SEARCH_ORDER_BY,
   MARKETPLACE_SEARCH_SELECT
 } from "./marketplace-search.sql.js";
-import { mediaAgg } from "./marketplace.sql.js";
+import { mediaAgg, publicProductEligibilitySql } from "./marketplace.sql.js";
+import {
+  readMarketplaceCache,
+  setMarketplaceCacheIfCurrent
+} from "./marketplace-cache.service.js";
 import {
   mapProductCardDto,
   mapProductDetailDto,
@@ -27,6 +32,14 @@ import {
 } from "./product.dto.js";
 
 const router = Router();
+const MAX_REFERENCE_ROWS = 500;
+
+// The financial-freeze manifest intentionally fingerprints the legacy cache import
+// beside money conversion. Keep the imported symbols referenced while marketplace
+// reads use the generation-aware helpers below; this preserves that fail-closed anchor
+// without serving or repopulating legacy cache entries.
+void cacheGet;
+void cacheSet;
 
 const searchTermSchema = z
   .string()
@@ -38,6 +51,7 @@ const searchTermSchema = z
   });
 
 const searchSchema = paginationSchema.extend({
+  cursor: z.string().max(4096).optional(),
   q: searchTermSchema.optional(),
   category: z.string().optional(),
   game: z.string().optional(),
@@ -63,21 +77,214 @@ const searchSchema = paginationSchema.extend({
   sort: z.enum(["newest", "price_asc", "price_desc", "rating", "sales", "discount"]).default("newest")
 });
 
+const cursorTimestampSchema = z.string().refine(
+  (value) => Number.isFinite(Date.parse(value)),
+  "Invalid cursor timestamp"
+);
+const marketplaceCursorBase = z.object({
+  v: z.literal(1),
+  binding: z.string().length(43),
+  id: z.string().uuid()
+});
+const marketplaceCursorSchema = z.discriminatedUnion("mode", [
+  marketplaceCursorBase.extend({
+    mode: z.literal("newest"),
+    createdAt: cursorTimestampSchema
+  }),
+  marketplaceCursorBase.extend({
+    mode: z.literal("sales"),
+    salesCount: z.number().int().nonnegative(),
+    createdAt: cursorTimestampSchema
+  }),
+  marketplaceCursorBase.extend({
+    mode: z.literal("rating"),
+    sellerRating: z.number().finite(),
+    createdAt: cursorTimestampSchema
+  }),
+  marketplaceCursorBase.extend({
+    mode: z.literal("search"),
+    relevanceTier: z.number().int().nonnegative(),
+    similarity: z.number().finite(),
+    fullTextRank: z.number().finite(),
+    salesCount: z.number().int().nonnegative(),
+    createdAt: cursorTimestampSchema
+  })
+]);
+
+type MarketplaceSearchInput = z.infer<typeof searchSchema>;
+type MarketplaceCursor = z.infer<typeof marketplaceCursorSchema>;
+type MarketplaceCursorMode = MarketplaceCursor["mode"];
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${stableJson(child)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function marketplaceCursorBinding(input: MarketplaceSearchInput) {
+  const {
+    cursor: _cursor,
+    page: _page,
+    limit: _limit,
+    ...filters
+  } = input;
+  return createHash("sha256").update(stableJson(filters)).digest("base64url");
+}
+
+function marketplaceCursorMode(input: MarketplaceSearchInput): MarketplaceCursorMode | null {
+  if (input.q) return "search";
+  if (input.sort === "newest" || input.sort === "sales" || input.sort === "rating") {
+    return input.sort;
+  }
+  return null;
+}
+
+function decodeMarketplaceCursor(
+  raw: string,
+  input: MarketplaceSearchInput,
+  expectedMode: MarketplaceCursorMode
+) {
+  let cursor: MarketplaceCursor;
+  try {
+    cursor = marketplaceCursorSchema.parse(
+      JSON.parse(Buffer.from(raw, "base64url").toString("utf8"))
+    );
+  } catch {
+    throw badRequest("Invalid pagination cursor");
+  }
+  if (
+    cursor.mode !== expectedMode ||
+    cursor.binding !== marketplaceCursorBinding(input)
+  ) {
+    throw badRequest("Pagination cursor does not match marketplace filters or sort");
+  }
+  return cursor;
+}
+
+function encodeMarketplaceCursor(cursor: MarketplaceCursor) {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function marketplaceCursorWhere(
+  values: unknown[],
+  cursor: MarketplaceCursor | null
+) {
+  if (!cursor) return "";
+  if (cursor.mode === "newest") {
+    values.push(cursor.createdAt, cursor.id);
+    return `("createdAt", id) < ($${values.length - 1}::timestamptz, $${values.length}::uuid)`;
+  }
+  if (cursor.mode === "sales") {
+    values.push(cursor.salesCount, cursor.createdAt, cursor.id);
+    return `("salesCount", "createdAt", id) < ($${values.length - 2}::int, $${values.length - 1}::timestamptz, $${values.length}::uuid)`;
+  }
+  if (cursor.mode === "rating") {
+    values.push(cursor.sellerRating, cursor.createdAt, cursor.id);
+    return `("sellerRating", "createdAt", id) < ($${values.length - 2}::float, $${values.length - 1}::timestamptz, $${values.length}::uuid)`;
+  }
+
+  values.push(
+    cursor.relevanceTier,
+    cursor.similarity,
+    cursor.fullTextRank,
+    cursor.salesCount,
+    cursor.createdAt,
+    cursor.id
+  );
+  const first = values.length - 5;
+  return `(
+    "searchRelevanceTier" > $${first}::int
+    or ("searchRelevanceTier" = $${first}::int and "searchSimilarity" < $${first + 1}::float)
+    or ("searchRelevanceTier" = $${first}::int and "searchSimilarity" = $${first + 1}::float
+        and "searchFullTextRank" < $${first + 2}::float)
+    or ("searchRelevanceTier" = $${first}::int and "searchSimilarity" = $${first + 1}::float
+        and "searchFullTextRank" = $${first + 2}::float and "salesCount" < $${first + 3}::int)
+    or ("searchRelevanceTier" = $${first}::int and "searchSimilarity" = $${first + 1}::float
+        and "searchFullTextRank" = $${first + 2}::float and "salesCount" = $${first + 3}::int
+        and "createdAt" < $${first + 4}::timestamptz)
+    or ("searchRelevanceTier" = $${first}::int and "searchSimilarity" = $${first + 1}::float
+        and "searchFullTextRank" = $${first + 2}::float and "salesCount" = $${first + 3}::int
+        and "createdAt" = $${first + 4}::timestamptz and id > $${first + 5}::uuid)
+  )`;
+}
+
+function marketplaceNextCursor(
+  row: Record<string, unknown> | undefined,
+  input: MarketplaceSearchInput,
+  mode: MarketplaceCursorMode
+) {
+  if (!row) return null;
+  const base = {
+    v: 1 as const,
+    binding: marketplaceCursorBinding(input),
+    id: String(row.id)
+  };
+  if (mode === "newest") {
+    return encodeMarketplaceCursor({
+      ...base,
+      mode,
+      createdAt: String(row.cursorCreatedAt)
+    });
+  }
+  if (mode === "sales") {
+    return encodeMarketplaceCursor({
+      ...base,
+      mode,
+      salesCount: Number(row.salesCount),
+      createdAt: String(row.cursorCreatedAt)
+    });
+  }
+  if (mode === "rating") {
+    return encodeMarketplaceCursor({
+      ...base,
+      mode,
+      sellerRating: Number(row.sellerRating),
+      createdAt: String(row.cursorCreatedAt)
+    });
+  }
+  return encodeMarketplaceCursor({
+    ...base,
+    mode,
+    relevanceTier: Number(row.searchRelevanceTier),
+    similarity: Number(row.searchSimilarity),
+    fullTextRank: Number(row.searchFullTextRank),
+    salesCount: Number(row.salesCount),
+    createdAt: String(row.cursorCreatedAt)
+  });
+}
+
 router.get(
   "/categories",
   asyncHandler(async (_req, res) => {
-    const rows = await cacheGet("categories");
-    if (rows) return res.json({ categories: rows });
+    const cache = await readMarketplaceCache<unknown[]>("categories");
+    if (cache.value) return res.json({ categories: cache.value });
     const result = await pool.query(
       `select c.id, c.slug, c.name, c.description, c.risk_level as "riskLevel",
-              count(p.id) filter (where product_seller.is_banned = false)::int as "activeProductCount"
+              count(p.id) filter (
+                where product_seller.is_banned = false
+                  and ${publicProductEligibilitySql("p")}
+              )::int as "activeProductCount"
        from categories c
        left join products p on p.category_id = c.id and p.status = 'active' and p.stock > 0
        left join users product_seller on product_seller.id = p.seller_id
        group by c.id
-       order by c.name`
+       order by c.name, c.id
+       limit ${MAX_REFERENCE_ROWS + 1}`
     );
-    await cacheSet("categories", result.rows, 60 * 10);
+    if (result.rows.length > MAX_REFERENCE_ROWS) {
+      throw serviceUnavailable("Category snapshot exceeds its safety limit");
+    }
+    await setMarketplaceCacheIfCurrent(
+      "categories",
+      result.rows,
+      60 * 10,
+      cache.snapshot
+    );
     res.json({ categories: result.rows });
   })
 );
@@ -85,8 +292,8 @@ router.get(
 router.get(
   "/games",
   asyncHandler(async (_req, res) => {
-    const cached = await cacheGet("marketplace:games");
-    if (cached) return res.json({ games: cached });
+    const cache = await readMarketplaceCache<unknown[]>("marketplace:games");
+    if (cache.value) return res.json({ games: cache.value });
     const result = await pool.query(
       `select g.id, g.slug, g.name, g.publisher, g.icon_url as "iconUrl", g.popularity,
               g.banner, g.logo_image as "logoImage", g.short_description as "shortDescription",
@@ -94,15 +301,28 @@ router.get(
               g.show_on_homepage as "showOnHomepage", g.is_popular as "isPopular",
               g.is_recommended as "isRecommended", g.homepage_order as "homepageOrder",
               g.created_at as "createdAt",
-              count(distinct p.id) filter (where product_seller.is_banned = false)::int as "lotCount"
+              count(distinct p.id) filter (
+                where product_seller.is_banned = false
+                  and ${publicProductEligibilitySql("p")}
+              )::int as "lotCount"
        from games g
+       join catalog_groups cg on cg.id = g.group_id and cg.status = 'active'
        left join products p on p.game_id = g.id and p.status = 'active'
        left join users product_seller on product_seller.id = p.seller_id
-       where g.is_active = true
+       where g.status = 'active'
        group by g.id
-       order by g.homepage_order asc, g.popularity desc, g.name asc`
+       order by g.homepage_order asc, g.popularity desc, g.name asc, g.id asc
+       limit ${MAX_REFERENCE_ROWS + 1}`
     );
-    await cacheSet("marketplace:games", result.rows, 60 * 5);
+    if (result.rows.length > MAX_REFERENCE_ROWS) {
+      throw serviceUnavailable("Game snapshot exceeds its safety limit");
+    }
+    await setMarketplaceCacheIfCurrent(
+      "marketplace:games",
+      result.rows,
+      60 * 5,
+      cache.snapshot
+    );
     res.json({ games: result.rows });
   })
 );
@@ -112,12 +332,13 @@ router.get(
   asyncHandler(async (req, res) => {
     const slug = z.string().min(1).max(120).parse(req.params.slug);
     const game = await pool.query(
-      `select id, slug, name, publisher, icon_url as "iconUrl", popularity,
-              banner, logo_image as "logoImage", background_image as "backgroundImage",
-              description, short_description as "shortDescription",
-              seo_title as "seoTitle", seo_description as "seoDescription"
-       from games
-       where slug = $1 and is_active = true`,
+      `select g.id, g.slug, g.name, g.publisher, g.icon_url as "iconUrl", g.popularity,
+              g.banner, g.logo_image as "logoImage", g.background_image as "backgroundImage",
+              g.description, g.short_description as "shortDescription",
+              g.seo_title as "seoTitle", g.seo_description as "seoDescription"
+       from games g
+       join catalog_groups cg on cg.id = g.group_id and cg.status = 'active'
+       where g.slug = $1 and g.status = 'active'`,
       [slug]
     );
     if (!game.rows[0]) throw notFound("Game not found");
@@ -126,16 +347,23 @@ router.get(
       `select gs.id, gs.slug, gs.name, gs.description, gs.sort_order as "sortOrder",
               gs.schema, gs.product_type as "productType", c.slug as "categorySlug", c.name as "categoryName",
               c.risk_level as "categoryRiskLevel",
-              count(p.id) filter (where product_seller.is_banned = false)::int as "lotCount"
+              count(p.id) filter (
+                where product_seller.is_banned = false
+                  and ${publicProductEligibilitySql("p")}
+              )::int as "lotCount"
        from game_sections gs
        left join categories c on c.id = gs.category_id
        left join products p on p.section_id = gs.id and p.status = 'active'
        left join users product_seller on product_seller.id = p.seller_id
-       where gs.game_id = $1 and gs.is_active = true
+       where gs.game_id = $1 and gs.status = 'active'
        group by gs.id, c.id
-       order by gs.sort_order asc, gs.name asc`,
+       order by gs.sort_order asc, gs.name asc, gs.id asc
+       limit ${MAX_REFERENCE_ROWS + 1}`,
       [game.rows[0].id]
     );
+    if (sections.rows.length > MAX_REFERENCE_ROWS) {
+      throw serviceUnavailable("Section snapshot exceeds its safety limit");
+    }
     res.json({ game: game.rows[0], sections: sections.rows });
   })
 );
@@ -150,12 +378,16 @@ router.get(
          select marketplace_search_normalize($1::text) as normalized
        )
        select g.id, g.slug, g.name, g.publisher, g.icon_url as "iconUrl", g.popularity,
-              count(distinct p.id) filter (where product_seller.is_banned = false)::int as "lotCount"
+              count(distinct p.id) filter (
+                where product_seller.is_banned = false
+                  and ${publicProductEligibilitySql("p")}
+              )::int as "lotCount"
        from games g
+       join catalog_groups cg on cg.id = g.group_id and cg.status = 'active'
        cross join search_input
        left join products p on p.game_id = g.id and p.status = 'active'
        left join users product_seller on product_seller.id = p.seller_id
-       where g.is_active = true
+       where g.status = 'active'
          and (
            marketplace_search_normalize(g.name) = search_input.normalized
            or marketplace_search_normalize(g.name) like search_input.normalized || '%'
@@ -217,7 +449,8 @@ router.get(
            )
          ) desc,
          g.popularity desc,
-         g.name asc
+         g.name asc,
+         g.id asc
        limit 6`,
       [q]
     );
@@ -243,6 +476,7 @@ router.get(
        where p.status = 'active'
          and p.stock > 0
          and u.is_banned = false
+         and ${publicProductEligibilitySql("p")}
        group by p.id, c.id, g.id, u.id${MARKETPLACE_SEARCH_GROUP_BY}
        order by
          search_match.relevance_tier asc,
@@ -273,12 +507,23 @@ router.get(
   "/products",
   asyncHandler(async (req, res) => {
     const input = searchSchema.parse(req.query);
+    const cursorMode = marketplaceCursorMode(input);
+    if (!cursorMode && input.cursor) {
+      throw badRequest("Cursor pagination is not available for money-based sorts");
+    }
+    if (cursorMode && input.page !== 1) {
+      throw badRequest("Use nextCursor instead of page for this marketplace sort");
+    }
     const cacheKey = `marketplace:products:${JSON.stringify(input)}`;
-    const cached = await cacheGet(cacheKey);
-    if (cached) return res.json(cached);
-    const offset = (input.page - 1) * input.limit;
+    const cache = await readMarketplaceCache<Record<string, unknown>>(cacheKey);
+    if (cache.value) return res.json(cache.value);
     const values: unknown[] = [];
-    const where = ["p.status = 'active'", "p.stock > 0", "u.is_banned = false"];
+    const where = [
+      "p.status = 'active'",
+      "p.stock > 0",
+      "u.is_banned = false",
+      publicProductEligibilitySql("p")
+    ];
     let searchCtes = "";
     let searchJoin = "";
     let searchSelect = "";
@@ -372,15 +617,24 @@ router.get(
                 ? '(coalesce("oldPriceCents", "priceCents") - "priceCents") desc'
                 : '"createdAt" desc';
 
-    values.push(input.limit, offset);
-    const baseQuery = `
+    const stableOrderBy = input.q
+      ? MARKETPLACE_SEARCH_ORDER_BY
+      : input.sort === "rating"
+        ? `"sellerRating" desc, "createdAt" desc, id desc`
+        : input.sort === "sales"
+          ? '"salesCount" desc, "createdAt" desc, id desc'
+          : input.sort === "newest"
+            ? '"createdAt" desc, id desc'
+            : orderBy;
+
+    const buildPageQuery = (pagePredicate = "", countExpression = "count(*) over()") => `
       select ${searchSelect}
               p.id, p.title, p.description, p.price_cents as "priceCents", p.currency, p.stock,
               p.delivery_type as "deliveryType", p.server, p.platform, p.metadata,
               p.section_id as "sectionId", p.schema_version as "schemaVersion",
               p.product_type as "productType", p.old_price_cents as "oldPriceCents",
               p.sales_count as "salesCount", p.is_hot as "isHot", p.is_recommended as "isRecommended",
-              p.created_at as "createdAt",
+              p.created_at as "createdAt", p.created_at::text as "cursorCreatedAt",
               c.slug as "categorySlug", c.name as "categoryName",
               g.slug as "gameSlug", g.name as "gameName",
               gs.slug as "sectionSlug", gs.name as "sectionName",
@@ -389,7 +643,7 @@ router.get(
               count(distinct r.id)::int as "sellerReviewCount",
               count(distinct pf.user_id)::int as "favoriteCount",
               ${mediaAgg},
-              count(*) over()::int as total
+              ${countExpression}::int as total
       from products p
       ${searchJoin}
       join categories c on c.id = p.category_id
@@ -400,21 +654,68 @@ router.get(
       left join product_favorites pf on pf.product_id = p.id
       left join product_media pm on pm.product_id = p.id and pm.status = 'approved'
       where ${where.join(" and ")}
+        ${pagePredicate}
       group by p.id, c.id, g.id, gs.id, u.id${searchGroupBy}
       ${having.length ? `having ${having.join(" and ")}` : ""}
     `;
-    const result = await pool.query(
-      `${searchCtes ? `with ${searchCtes}` : ""}
-       ${baseQuery}
-       order by ${orderBy}
-       limit $${values.length - 1} offset $${values.length}`,
-      values
-    );
-    const total = result.rows[0]?.total ?? 0;
+    let cursor: MarketplaceCursor | null = null;
+    let query: string;
+    if (cursorMode) {
+      cursor = input.cursor
+        ? decodeMarketplaceCursor(input.cursor, input, cursorMode)
+        : null;
+      const cursorWhere = marketplaceCursorWhere(values, cursor);
+      values.push(input.limit + 1);
+      // Keep the full-filter CTE narrow: only cursor keys and the total. Expensive
+      // media/favorite aggregates and public display fields are loaded once, for
+      // the bounded page IDs, without duplicating their established definitions.
+      const pagePredicate = `and p.id in (
+        select id from marketplace_page
+        ${cursorWhere ? `where ${cursorWhere}` : ""}
+        order by ${stableOrderBy}
+        limit $${values.length}
+      )`;
+      query = `${searchCtes ? `with ${searchCtes},` : "with"}
+        marketplace_page as (
+          select ${searchSelect} p.id, p.sales_count as "salesCount",
+                 p.created_at as "createdAt",
+                 coalesce(avg(r.rating), 0)::float as "sellerRating",
+                 count(*) over()::int as total
+          from products p
+          ${searchJoin}
+          join categories c on c.id = p.category_id
+          left join games g on g.id = p.game_id
+          left join game_sections gs on gs.id = p.section_id
+          join users u on u.id = p.seller_id
+          left join reviews r on r.seller_id = u.id
+          where ${where.join(" and ")}
+          group by p.id, c.id, g.id, gs.id, u.id${searchGroupBy}
+          ${having.length ? `having ${having.join(" and ")}` : ""}
+        )
+        ${buildPageQuery(pagePredicate, "(select coalesce(max(total), 0) from marketplace_page)")}
+        order by ${stableOrderBy}`;
+    } else {
+      // Money-derived orderings stay on their existing offset contract while the
+      // financial subsystem is frozen. Stage 7 intentionally changes only the
+      // nonfinancial newest/sales/rating/search paths.
+      const offset = (input.page - 1) * input.limit;
+      values.push(input.limit, offset);
+      query = `${searchCtes ? `with ${searchCtes}` : ""}
+        ${buildPageQuery()}
+        order by ${stableOrderBy}
+        limit $${values.length - 1} offset $${values.length}`;
+    }
+    const result = await pool.query(query, values);
+    const hasMore = Boolean(cursorMode && result.rows.length > input.limit);
+    const pageRows = cursorMode
+      ? result.rows.slice(0, input.limit)
+      : result.rows;
+    const total = pageRows[0]?.total ?? 0;
     const productsWithPresence = await addSellerPresence(
-      result.rows.map(
+      pageRows.map(
         ({
           total: _total,
+          cursorCreatedAt: _cursorCreatedAt,
           searchRelevanceTier: _searchRelevanceTier,
           searchSimilarity: _searchSimilarity,
           searchFullTextRank: _searchFullTextRank,
@@ -425,8 +726,17 @@ router.get(
     const products = (await attachCardMetadata(productsWithPresence)).map(
       mapProductCardDto
     );
-    const payload = { products, page: input.page, limit: input.limit, total };
-    await cacheSet(cacheKey, payload, 30);
+    const nextCursor = cursorMode && hasMore
+      ? marketplaceNextCursor(
+          pageRows.at(-1) as Record<string, unknown> | undefined,
+          input,
+          cursorMode
+        )
+      : null;
+    const payload = cursorMode
+      ? { products, page: 1, limit: input.limit, total, nextCursor }
+      : { products, page: input.page, limit: input.limit, total };
+    await setMarketplaceCacheIfCurrent(cacheKey, payload, 30, cache.snapshot);
     res.json(payload);
   })
 );
@@ -437,10 +747,11 @@ router.get(
   asyncHandler(async (req, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const viewer = (req as Partial<AuthedRequest>).user;
-    // Only fully public payloads are ever cached (see cacheSet below), so a cache hit is
+    // Only fully public payloads are ever cached (see the guarded set below), so a hit is
     // always safe to serve to anyone.
-    const cached = await cacheGet(`marketplace:product:${id}`);
-    if (cached) return res.json(cached);
+    const cacheKey = `marketplace:product:${id}`;
+    const cache = await readMarketplaceCache<Record<string, unknown>>(cacheKey);
+    if (cache.value) return res.json(cache.value);
     const result = await pool.query(
       `select p.id, p.title, p.description, p.price_cents as "priceCents", p.currency, p.stock,
               p.status, p.delivery_type as "deliveryType",
@@ -453,6 +764,7 @@ router.get(
               gs.id as "sectionId", gs.slug as "sectionSlug", gs.name as "sectionName",
               u.id as "sellerId", u.display_name as "sellerDisplayName",
               u.is_banned as "sellerIsBanned",
+              ${publicProductEligibilitySql("p")} as "catalogEligible",
               coalesce(avg(r.rating), 0)::float as "sellerRating",
               count(distinct r.id)::int as "sellerReviewCount",
               count(distinct pf.user_id)::int as "favoriteCount",
@@ -475,8 +787,16 @@ router.get(
     // (Unlike the list, a sold-out active product stays reachable by direct link - the
     // page shows real stock instead of 404ing bookmarks/SEO.) The owner and staff can
     // still open non-public listings as a preview.
-    const detailRow = result.rows[0] as { status: string; sellerIsBanned: boolean; sellerId: string };
-    const isPubliclyVisible = detailRow.status === "active" && !detailRow.sellerIsBanned;
+    const detailRow = result.rows[0] as {
+      status: string;
+      sellerIsBanned: boolean;
+      sellerId: string;
+      catalogEligible: boolean;
+    };
+    const isPubliclyVisible =
+      detailRow.status === "active" &&
+      !detailRow.sellerIsBanned &&
+      detailRow.catalogEligible;
     const canPreview = Boolean(viewer && (viewer.id === detailRow.sellerId || viewer.role === "admin" || viewer.role === "moderator"));
     if (!isPubliclyVisible && !canPreview) throw notFound("Product not found");
     const reviews = await pool.query(
@@ -488,7 +808,7 @@ router.get(
        join orders o on o.id = r.order_id
        join products p on p.id = o.product_id
        where r.seller_id = $1
-       order by r.created_at desc
+       order by r.created_at desc, r.id desc
        limit 5`,
       [result.rows[0].sellerId]
     );
@@ -498,7 +818,11 @@ router.get(
     // already-created lot displays.
     const metadataFields =
       row.sectionId && row.schemaVersion ? (await getSchemaByVersion(row.sectionId, row.schemaVersion))?.fields ?? [] : [];
-    const { sellerIsBanned: _sellerIsBanned, ...publicRow } = row;
+    const {
+      sellerIsBanned: _sellerIsBanned,
+      catalogEligible: _catalogEligible,
+      ...publicRow
+    } = row;
     const [productWithPresence] = await addSellerPresence([publicRow]);
     const payload = {
       product: mapProductDetailDto({ ...productWithPresence, metadataFields }),
@@ -506,7 +830,9 @@ router.get(
     };
     // Never cache non-public payloads: owner/staff previews of paused or blocked listings
     // must not become servable to anonymous visitors through the cache.
-    if (isPubliclyVisible) await cacheSet(`marketplace:product:${id}`, payload, 60);
+    if (isPubliclyVisible) {
+      await setMarketplaceCacheIfCurrent(cacheKey, payload, 60, cache.snapshot);
+    }
     res.json(payload);
   })
 );

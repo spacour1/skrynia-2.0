@@ -2,8 +2,13 @@ import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
 import { inTx, pool } from "../../db/pool.js";
-import { asyncHandler, badRequest, notFound } from "../../common/errors.js";
-import { buildNextCursor, keysetWhereClause, parseCursorPage } from "../../common/pagination.js";
+import { asyncHandler, badRequest, forbidden, notFound } from "../../common/errors.js";
+import {
+  buildLookaheadNextCursor,
+  buildNextCursor,
+  keysetWhereClause,
+  parseCursorPage
+} from "../../common/pagination.js";
 import { requireRole } from "../../common/middleware/rbac.js";
 import type { AuthedRequest } from "../../common/types.js";
 import { enqueueJob, getJobQueue } from "../jobs/queue.js";
@@ -39,9 +44,10 @@ router.get(
     const { limit, cursor } = parseCursorPage(req.query, { defaultLimit: 100 });
     const values: unknown[] = [status ?? null];
     const cursorWhere = keysetWhereClause(values, cursor, "pm.created_at", "pm.id");
-    values.push(limit);
+    values.push(limit + 1);
     const result = await pool.query(
       `select pm.id, pm.url, pm.type, pm.sort_order as "sortOrder", pm.status, pm.created_at as "createdAt",
+              pm.created_at::text as "cursorCreatedAt",
               p.id as "productId", p.title as "productTitle",
               u.id as "sellerId", u.display_name as "sellerDisplayName"
        from product_media pm
@@ -53,7 +59,14 @@ router.get(
        limit $${values.length}`,
       values
     );
-    res.json({ media: result.rows, nextCursor: buildNextCursor(result.rows, limit) });
+    const media = result.rows
+      .slice(0, limit)
+      .map(({ cursorCreatedAt: _cursorCreatedAt, ...row }) => row);
+    const nextCursor = buildLookaheadNextCursor(
+      result.rows.map((row) => ({ id: row.id, createdAt: row.cursorCreatedAt })),
+      limit
+    );
+    res.json({ media, nextCursor });
   })
 );
 
@@ -80,7 +93,7 @@ router.get(
     const { limit, cursor } = parseCursorPage(req.query);
     const values: unknown[] = [];
     const where = keysetWhereClause(values, cursor, "a.created_at", "a.id");
-    values.push(limit);
+    values.push(limit + 1);
 
     const result = await pool.query(
       `select a.id, a.trace_id as "traceId", a.user_id as "userId",
@@ -88,7 +101,7 @@ router.get(
               a.method, a.path, a.endpoint, a.status_code as "statusCode",
               a.ip_address as "ipAddress", a.user_agent as "userAgent",
               a.action, a.request_body as "requestBody", a.metadata,
-              a.created_at as "createdAt"
+              a.created_at as "createdAt", a.created_at::text as "cursorCreatedAt"
        from audit_logs a
        left join users u on u.id = a.user_id
        ${where ? `where ${where}` : ""}
@@ -96,7 +109,14 @@ router.get(
        limit $${values.length}`,
       values
     );
-    res.json({ auditLogs: result.rows, nextCursor: buildNextCursor(result.rows, limit) });
+    const auditLogs = result.rows
+      .slice(0, limit)
+      .map(({ cursorCreatedAt: _cursorCreatedAt, ...row }) => row);
+    const nextCursor = buildLookaheadNextCursor(
+      result.rows.map((row) => ({ id: row.id, createdAt: row.cursorCreatedAt })),
+      limit
+    );
+    res.json({ auditLogs, nextCursor });
   })
 );
 
@@ -164,10 +184,11 @@ router.get(
     const { limit, cursor } = parseCursorPage(req.query, { defaultLimit: 100 });
     const values: unknown[] = [];
     const cursorWhere = keysetWhereClause(values, cursor, "p.created_at", "p.id");
-    values.push(limit);
-    const result = await pool.query<AdminProductSummaryRow>(
+    values.push(limit + 1);
+    const result = await pool.query<AdminProductSummaryRow & { cursorCreatedAt: string }>(
       `select p.id, p.title, p.status, p.price_cents as "priceCents", p.currency,
-              p.created_at as "createdAt", c.name as "categoryName",
+              p.created_at as "createdAt", p.created_at::text as "cursorCreatedAt",
+              c.name as "categoryName",
               g.name as "gameName", gs.name as "sectionName",
               u.display_name as "sellerDisplayName"
        from products p
@@ -182,8 +203,11 @@ router.get(
       values
     );
     res.json({
-      listings: result.rows.map(mapAdminProductSummaryDto),
-      nextCursor: buildNextCursor(result.rows, limit)
+      listings: result.rows.slice(0, limit).map(mapAdminProductSummaryDto),
+      nextCursor: buildLookaheadNextCursor(
+        result.rows.map((row) => ({ id: row.id, createdAt: row.cursorCreatedAt })),
+        limit
+      )
     });
   })
 );
@@ -201,7 +225,13 @@ router.patch(
         isRecommended: z.boolean().optional()
       })
       .parse(req.body);
-    const { listing, blockedTransition } = await inTx(async (client) => {
+    if (
+      req.user.role !== "admin" &&
+      (body.isHot !== undefined || body.isRecommended !== undefined)
+    ) {
+      throw forbidden("Only administrators can change merchandising flags");
+    }
+    const listing = await inTx(async (client) => {
       const existing = await client.query<{ status: string }>(
         `select status from products where id = $1 for update`,
         [id]
@@ -238,9 +268,11 @@ router.patch(
           }
         });
       }
-      return { listing: updatedListing, blockedTransition: wasBlocked };
+      return updatedListing;
     });
-    if (!blockedTransition) await invalidateProductCaches(listing);
+    // The database transaction is already committed here. Invalidate immediately even
+    // for blocked transitions; the outbox event remains the durable retry path.
+    await invalidateProductCaches(listing);
     res.json({ listing: mapAdminProductMutationDto(listing) });
   })
 );

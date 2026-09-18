@@ -1,7 +1,12 @@
 import { Router } from "express";
 import { z } from "zod";
-import { asyncHandler } from "../../common/errors.js";
-import { getActiveSchemaForSection, getPublicCatalogTree, getPublicGroupBySlug, getPublicItemBySlug } from "./catalog.service.js";
+import { asyncHandler, notFound } from "../../common/errors.js";
+import {
+  getPublicActiveSchemaForSection,
+  getPublicCatalogTree,
+  getPublicGroupBySlug,
+  getPublicItemBySlug
+} from "./catalog.service.js";
 
 const router = Router();
 
@@ -47,8 +52,9 @@ router.get(
   "/sections/:id/schema",
   asyncHandler(async (req, res) => {
     const id = z.string().uuid().parse(req.params.id);
-    const schema = await getActiveSchemaForSection(id);
-    res.json({ schema: schema ?? { fields: [] } });
+    const schema = await getPublicActiveSchemaForSection(id);
+    if (!schema) throw notFound("Section not found");
+    res.json({ schema });
   })
 );
 

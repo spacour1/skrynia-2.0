@@ -159,8 +159,18 @@ services:
         NEXT_PUBLIC_SENTRY_DSN: ""
         NEXT_PUBLIC_POSTHOG_KEY: ""
         NEXT_PUBLIC_POSTHOG_HOST: ""
+        NEXT_PUBLIC_POSTHOG_ASSETS_HOST: ""
+        NEXT_PUBLIC_MEDIA_ORIGINS: ""
+        FRONTEND_ALLOW_INSECURE_BUILD: "true"
+        FRONTEND_CSP_MODE: enforce
+        FRONTEND_HSTS_ENABLED: "false"
     environment:
       NEXT_PUBLIC_API_URL: http://api:4000
+      NEXT_PUBLIC_WS_URL: ws://api:4000/ws
+      NEXT_PUBLIC_SITE_URL: http://frontend:3000
+      FRONTEND_ALLOW_INSECURE_BUILD: "true"
+      FRONTEND_CSP_MODE: enforce
+      FRONTEND_HSTS_ENABLED: "false"
     depends_on:
       api:
         condition: service_healthy

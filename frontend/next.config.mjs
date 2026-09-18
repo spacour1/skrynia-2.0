@@ -1,14 +1,26 @@
 import { withSentryConfig } from "@sentry/nextjs";
+import { frontendSecurityEnvironment, frontendSecurityHeaders } from "./config/security.mjs";
 
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  reactStrictMode: true,
-  output: "standalone",
-  async rewrites() {
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
-    return [{ source: "/api/:path*", destination: `${backendUrl}/:path*` }];
-  }
-};
+export function createNextConfig(environment = process.env) {
+  // Validate while loading the production config, before building or accepting traffic.
+  frontendSecurityEnvironment(environment);
+  /** @type {import('next').NextConfig} */
+  const config = {
+    reactStrictMode: true,
+    poweredByHeader: false,
+    output: "standalone",
+    async rewrites() {
+      const { apiUrl } = frontendSecurityEnvironment(environment);
+      return [{ source: "/api/:path*", destination: `${apiUrl}/:path*` }];
+    },
+    async headers() {
+      return [{ source: "/:path*", headers: frontendSecurityHeaders(environment) }];
+    }
+  };
+  return config;
+}
+
+const nextConfig = createNextConfig();
 
 export function createSentryBuildOptions(environment = process.env) {
   const canUploadSourceMaps = Boolean(

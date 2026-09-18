@@ -43,6 +43,7 @@ const providerEnvironment = Object.freeze({
   MONOBANK_TOKEN: "",
   MONOBANK_WEBHOOK_URL: "",
   NEXT_PUBLIC_POSTHOG_HOST: "",
+  NEXT_PUBLIC_POSTHOG_ASSETS_HOST: "",
   NEXT_PUBLIC_POSTHOG_KEY: "",
   NEXT_PUBLIC_SENTRY_DSN: "",
   POSTHOG_API_KEY: "",
@@ -65,14 +66,29 @@ const providerEnvironment = Object.freeze({
   WAYFORPAY_SERVICE_URL: ""
 });
 
+const localFrontendEnvironment = Object.freeze({
+  FRONTEND_ALLOW_INSECURE_BUILD: "true",
+  FRONTEND_CSP_MODE: "enforce",
+  FRONTEND_HSTS_ENABLED: "false",
+  NEXT_PUBLIC_API_URL: "http://127.0.0.1:4000",
+  NEXT_PUBLIC_MEDIA_ORIGINS: "",
+  NEXT_PUBLIC_SITE_URL: "http://127.0.0.1:3000",
+  NEXT_PUBLIC_WS_COOKIE_FALLBACK: "false",
+  NEXT_PUBLIC_WS_URL: "ws://127.0.0.1:4000/ws"
+});
+
 const localOnlyEnvironment = Object.freeze({
   ...providerEnvironment,
+  ...localFrontendEnvironment,
   ENABLE_TEST_PAYMENTS: "false",
   NODE_ENV: "test"
 });
 
 const productionComposeEnvironment = Object.freeze({
   ...providerEnvironment,
+  ...localFrontendEnvironment,
+  FRONTEND_URL: "http://127.0.0.1:3000",
+  PUBLIC_BACKEND_URL: "http://127.0.0.1:4000",
   JWT_SECRET: "verify-only-jwt-secret-aaaaaaaaaaaa",
   METRICS_PASSWORD: "verify-only-metrics-password",
   POSTGRES_DB: "marketplace_verify",
@@ -429,7 +445,7 @@ function mergeEnvironment(extra = {}) {
   return { ...process.env, ...localOnlyEnvironment, ...extra };
 }
 
-function environmentFor(step, services) {
+export function environmentFor(step, services) {
   if (step.environment === "backend-test") {
     if (!services?.databaseUrl || !services?.redisUrl) {
       throw new Error("isolated database services are unavailable");
@@ -451,11 +467,7 @@ function environmentFor(step, services) {
     });
   }
   if (step.environment === "frontend") {
-    return mergeEnvironment({
-      NEXT_PUBLIC_API_URL: "http://127.0.0.1:4000",
-      NEXT_PUBLIC_SITE_URL: "http://127.0.0.1:3000",
-      NEXT_PUBLIC_WS_URL: "ws://127.0.0.1:4000/ws"
-    });
+    return mergeEnvironment({ NODE_ENV: "production" });
   }
   if (step.environment === "compose") {
     return mergeEnvironment(productionComposeEnvironment);
@@ -515,6 +527,21 @@ async function waitForContainer(containerName, probeArgs, attempts = 60) {
   throw new Error(`${containerName} did not become healthy within ${attempts}s`);
 }
 
+export function isolatedPostgresArguments(name) {
+  return [
+    "run", "--detach", "--rm", "--name", name,
+    // Disposable test state has no recovery value after this gate. Keep normal
+    // PostgreSQL fsync semantics while avoiding host-volume fsync stalls on Windows.
+    // Recovery/load certification uses a separate durable topology, never this one.
+    "--tmpfs", "/var/lib/postgresql/data:rw,nosuid,size=1g",
+    "--env", "POSTGRES_DB=marketplace_verify",
+    "--env", "POSTGRES_USER=marketplace_verify",
+    "--env", "POSTGRES_PASSWORD=verify-only-postgres-password",
+    "--publish", "127.0.0.1::5432",
+    "postgres:16-alpine"
+  ];
+}
+
 async function startIsolatedServices() {
   const suffix = `${process.pid}-${randomBytes(4).toString("hex")}`;
   const postgresName = `keepgame-verify-postgres-${suffix}`;
@@ -535,14 +562,7 @@ async function startIsolatedServices() {
   }
 
   try {
-    const postgres = await spawnCommand("docker", [
-      "run", "--detach", "--rm", "--name", postgresName,
-      "--env", "POSTGRES_DB=marketplace_verify",
-      "--env", "POSTGRES_USER=marketplace_verify",
-      "--env", "POSTGRES_PASSWORD=verify-only-postgres-password",
-      "--publish", "127.0.0.1::5432",
-      "postgres:16-alpine"
-    ], { capture: true });
+    const postgres = await spawnCommand("docker", isolatedPostgresArguments(postgresName), { capture: true });
     if (postgres.error || postgres.code !== 0) {
       throw new Error("Could not start the isolated PostgreSQL 16 container");
     }

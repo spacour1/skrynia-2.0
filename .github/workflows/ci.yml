@@ -87,6 +87,10 @@ jobs:
     env:
       NEXT_PUBLIC_API_URL: http://localhost:4000
       NEXT_PUBLIC_WS_URL: ws://localhost:4000/ws
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+      FRONTEND_ALLOW_INSECURE_BUILD: "true"
+      FRONTEND_CSP_MODE: enforce
+      FRONTEND_HSTS_ENABLED: "false"
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -212,6 +216,11 @@ jobs:
       JWT_SECRET: ci-secret-aaaaaaaaaaaaaaaaaaaaaaaa
       TWO_FACTOR_ENCRYPTION_KEY: "1111111111111111111111111111111111111111111111111111111111111111"
       METRICS_PASSWORD: ci-metrics-password-aaaaaaaa
+      NEXT_PUBLIC_WS_URL: ws://localhost:4000/ws
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+      FRONTEND_ALLOW_INSECURE_BUILD: "true"
+      FRONTEND_CSP_MODE: enforce
+      FRONTEND_HSTS_ENABLED: "false"
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:

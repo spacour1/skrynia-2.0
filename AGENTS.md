@@ -76,13 +76,18 @@ the repository's normal PR-only rule:
 
 1. Work on an up-to-date local `main` with a clean, understood worktree.
 2. Commit one logical topic and run the smallest sufficient risk gate below.
-3. For the approved milestone-gating run, execute the complete D5 gate and push only
-   at milestones 0, 4, 8, and 13. Keep every intermediate stage as its own commit.
+3. Finish the accumulated Stage 5–8 delivery with separate logical commits, then
+   execute the complete D5 gate and push at milestone 8. The continuation plan
+   supersedes the earlier 0/4/8/13-only gating: any later stage requires its own
+   commit, D5, push, and exact-SHA CI before another stage starts.
 4. Before a milestone push, review every accumulated commit, fetch `origin`, and
    compare `origin/main...main`.
 5. If remote advanced, rebase onto `origin/main` and rerun the complete D5 gate.
 6. Only after PASS, run `git push origin main`, verify local/remote SHA equality,
    and check GitHub Actions for the exact milestone SHA.
+
+Current user checkpoint: finish Stages 7 and 8, publish the verified accumulated
+changes, check exact-SHA CI, then pause. Do not start Stage 9 without a new request.
 
 Never force-push, rewrite published `main`, discard unknown work with
 `git reset --hard`, push an unverified commit, or continue past red CI without a

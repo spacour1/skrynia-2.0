@@ -4,14 +4,14 @@ SKRYNIA targets 10 k online users, 500–1 500 API RPS, 1 k–5 k WebSocket conn
 
 ---
 
-## Frontend — Vercel or Cloudflare Pages
+## Frontend — Next.js hosting or Docker
 
 ### Vercel (recommended)
 
 1. Push the repo to GitHub. In Vercel, import the repo.
 2. Set **Root Directory** to `frontend/`.
 3. Framework preset: **Next.js** (auto-detected).
-4. Add all `NEXT_PUBLIC_*` env vars in the Vercel dashboard → Settings → Environment Variables.
+4. Add the frontend variables below in the Vercel dashboard → Settings → Environment Variables.
 5. Build command: `npm run build` (default). Output: `.next` (auto-configured).
 
 Required env vars on Vercel:
@@ -20,27 +20,116 @@ Required env vars on Vercel:
 NEXT_PUBLIC_API_URL=https://api.your-domain.example
 NEXT_PUBLIC_WS_URL=wss://api.your-domain.example/ws
 NEXT_PUBLIC_SITE_URL=https://your-domain.example
+FRONTEND_ALLOW_INSECURE_BUILD=false
+FRONTEND_CSP_MODE=report-only
+FRONTEND_HSTS_ENABLED=false
+NEXT_PUBLIC_MEDIA_ORIGINS=          # optional exact legacy public-media origins
 NEXT_PUBLIC_SENTRY_DSN=...           # optional
 NEXT_PUBLIC_POSTHOG_KEY=...          # optional
-NEXT_PUBLIC_POSTHOG_HOST=...         # optional
+NEXT_PUBLIC_POSTHOG_HOST=https://eu.i.posthog.com  # optional; existing EU default
+NEXT_PUBLIC_POSTHOG_ASSETS_HOST=...  # optional explicit assets origin
 SENTRY_ORG=...                       # build-time only, for source maps
 SENTRY_PROJECT=...
 SENTRY_AUTH_TOKEN=...
+SENTRY_RELEASE=...                   # immutable release SHA
 ```
 
 > **Do not hardcode localhost** in any `NEXT_PUBLIC_*` variable for production builds.
 
-### Cloudflare Pages
+### Other managed hosts
 
-1. Connect repo, set root directory `frontend/`, build command `npm run build`, output `frontend/.next`.
-2. Enable **Next.js** preset (Cloudflare supports Next.js via `@cloudflare/next-on-pages`).
-3. Set env vars in Pages → Settings → Environment Variables.
+Use a host that supports the repository's Next.js App Router server, middleware,
+rewrites, and dynamic metadata routes; `.next` is not a static-site export. No
+Cloudflare adapter is installed or verified here. Any adapter-based deployment
+requires its own non-production compatibility gate and is currently **NOT RUN**.
 
 ### Notes
 
-- `NEXT_PUBLIC_API_URL` is used by the Next.js `rewrites()` rule to proxy `/api/*` requests server-side. On Vercel/Cloudflare this works without additional configuration.
+- `NEXT_PUBLIC_API_URL` is used by the Next.js `rewrites()` rule to proxy `/api/*` requests server-side. Docker Compose supplies `http://backend:4000`; an internal HTTP API is allowed and is not the browser origin.
 - WebSocket connections (`NEXT_PUBLIC_WS_URL`) connect browser → backend directly and bypass the Next.js proxy.
-- Source maps are uploaded to Sentry at build time if `SENTRY_AUTH_TOKEN` is set. They are hidden from browser responses via `hideSourceMaps: true` in `next.config.mjs`.
+- Sentry builds require a frontend DSN to enable the plugin. Source maps are generated
+  for upload only when `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, and `SENTRY_PROJECT` are all
+  present; uploaded browser maps are then deleted. `hideSourceMaps` is obsolete and
+  is not used. Missing upload configuration disables map generation rather than
+  publishing browser maps without an upload destination.
+
+### Frontend production security policy
+
+Production builds fail early when API, browser WebSocket, or canonical site URLs
+are missing or malformed. Site URLs must use HTTPS and browser sockets WSS. The
+explicit `FRONTEND_ALLOW_INSECURE_BUILD=true` exception is for isolated HTTP test
+stacks only; CI, the D5 runner, and E2E set it with test-only addresses. Never copy
+that exception into a real staging/production deployment. Production Compose
+requires explicit `NEXT_PUBLIC_SITE_URL` and `NEXT_PUBLIC_WS_URL` instead of silently
+compiling localhost values.
+
+`FRONTEND_CSP_MODE` accepts only `report-only` (default) or `enforce`. The policy is
+compiled into the frontend image; changing it or a public origin requires a rebuild.
+It permits the same-origin API/Sentry tunnel, configured socket, and enabled
+analytics origins. `NEXT_PUBLIC_MEDIA_ORIGINS` is a comma-separated list of exact
+origins for legacy public images, not URLs with paths, wildcards, or private S3
+bucket endpoints. New owned media uses `/api/storage` and needs no extra origin.
+`NEXT_PUBLIC_POSTHOG_ASSETS_HOST` overrides the explicitly allowed analytics asset
+origin when required by a deployed proxy; keep it aligned with the actual SDK host.
+The existing EU PostHog default remains unchanged. The installed SDK's legacy cloud
+aliases, remote-config script origin and optional static-host override are covered
+by offline routing regressions; no wildcard analytics domain is allowed.
+
+The policy retains inline scripts/styles required by the current statically rendered
+Next App Router. It is defense in depth, not a nonce-based strict XSS policy; nonces
+would require a separate rendering/caching migration. Production never permits
+`unsafe-eval`. Hosted form navigation is deliberately not restricted by `form-action`
+or `navigate-to`: that would change the frozen checkout redirect behavior.
+See the [Next 15 CSP guidance](https://nextjs.org/docs/15/app/guides/content-security-policy).
+
+The frontend also sets nosniff, a strict-origin-when-cross-origin referrer policy,
+frame protection, and restrictive browser permissions. `FRONTEND_HSTS_ENABLED`
+defaults to `false`; enabling it requires a production HTTPS canonical site and no
+insecure-build exception. Enable it only after the operator guarantees HTTPS for
+all public requests. The TLS proxy must redirect HTTP to HTTPS, overwrite forwarded
+protocol headers, and prevent direct public access to the plaintext frontend port.
+No `includeSubDomains` or preload commitment is made by this rollout.
+
+Rollout: deploy `report-only` to real non-production HTTPS, exercise login,
+marketplace, product media/previews, chat/socket reconnection, settings, Sentry
+`/monitoring`, and opt-in analytics in browser developer tools. Record unexpected
+CSP violations and fix only the necessary exact-origin allowances. No external CSP
+report collector is provisioned by this repository; console inspection is required
+unless the operator supplies one. Rebuild with `enforce` only after that check.
+Rollback uses the previous image or a rebuilt `report-only` policy; do not broaden
+the policy to wildcards or expose private storage to silence a violation.
+
+Real HTTPS proxy/HSTS validation and the report-only rollout are **BLOCKED** until
+an authorized non-production HTTPS deployment is available. Sentry upload/release
+mapping and PostHog delivery are **BLOCKED** without provider configuration/access.
+Local policy tests and isolated E2E are not evidence that those external systems work.
+
+### Docker source-map upload without token layers
+
+Supply Sentry upload credentials from the build host's secret store. The Dockerfile
+accepts only a temporary BuildKit secret named `sentry_auth_token` during `npm run
+build`; never pass this token as a build argument, persisted `ENV`, or copied file.
+This uses Docker's [build-secret mount mechanism](https://docs.docker.com/build/building/secrets/).
+The ordinary Compose build works without the optional secret and does not upload
+maps. For an explicitly authorized release upload, export the required public build
+variables and Sentry identifiers in the build environment, then use:
+
+```bash
+docker buildx build --load --target runner --tag skrynia-frontend:release \
+  --secret id=sentry_auth_token,env=SENTRY_AUTH_TOKEN \
+  --build-arg NEXT_PUBLIC_API_URL=http://backend:4000 \
+  --build-arg NEXT_PUBLIC_WS_URL --build-arg NEXT_PUBLIC_SITE_URL \
+  --build-arg NEXT_PUBLIC_SENTRY_DSN \
+  --build-arg SENTRY_ORG --build-arg SENTRY_PROJECT --build-arg SENTRY_RELEASE \
+  --build-arg FRONTEND_CSP_MODE=report-only frontend
+```
+
+Include any configured media/analytics build arguments as well. Deploy the matching
+immutable image tag without an automatic rebuild; keep `SENTRY_RELEASE` aligned
+with runtime telemetry. The command above is documentation, not an executed
+provider verification. After an authorized build, verify release/source-map mapping
+in Sentry and confirm no browser `.map` artifacts or upload credentials remain in
+the delivered image or public responses.
 
 ---
 
@@ -367,6 +456,11 @@ block concurrent writes while that index is built.
 ---
 
 ## Production deployment checklist
+
+The local `verify:all` integration database uses a bounded 1 GiB tmpfs to avoid
+host-volume fsync stalls. PostgreSQL durability settings are not disabled, but its
+test data is intentionally disposable. This is not backup/restore or durable-storage
+evidence: Stage 12/13 recovery certification must use its separate persistent topology.
 
 - [ ] `JWT_SECRET` is a unique ≥32-char random string
 - [ ] `TWO_FACTOR_ENCRYPTION_KEY` is a unique 64-hex (32-byte) key, not the dev default

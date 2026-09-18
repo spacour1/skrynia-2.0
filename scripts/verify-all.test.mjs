@@ -141,6 +141,7 @@ test("frontend build and Compose gates use an explicit isolated HTTP policy", ()
     assert.equal(values.NEXT_PUBLIC_SITE_URL, "http://127.0.0.1:3000");
     assert.equal(values.NEXT_PUBLIC_WS_URL, "ws://127.0.0.1:4000/ws");
     assert.equal(values.NEXT_PUBLIC_WS_COOKIE_FALLBACK, "false");
+    assert.equal(values.NEXT_PUBLIC_WS_ORIGINS, "");
     assert.equal(values.FRONTEND_ALLOW_INSECURE_BUILD, "true");
     assert.equal(values.FRONTEND_CSP_MODE, "enforce");
     assert.equal(values.FRONTEND_HSTS_ENABLED, "false");
@@ -155,7 +156,7 @@ test("frontend build and Compose gates use an explicit isolated HTTP policy", ()
 
 test("local frontend policy cannot inherit an external endpoint or unsafe deployment toggle", (context) => {
   const names = [
-    "NEXT_PUBLIC_API_URL", "NEXT_PUBLIC_SITE_URL", "NEXT_PUBLIC_WS_URL",
+    "NEXT_PUBLIC_API_URL", "NEXT_PUBLIC_SITE_URL", "NEXT_PUBLIC_WS_URL", "NEXT_PUBLIC_WS_ORIGINS",
     "NEXT_PUBLIC_WS_COOKIE_FALLBACK", "NEXT_PUBLIC_MEDIA_ORIGINS",
     "NEXT_PUBLIC_POSTHOG_ASSETS_HOST", "FRONTEND_ALLOW_INSECURE_BUILD",
     "FRONTEND_CSP_MODE", "FRONTEND_HSTS_ENABLED"

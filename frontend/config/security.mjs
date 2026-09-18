@@ -34,6 +34,12 @@ export function frontendSecurityEnvironment(environment = process.env) {
     fallback: production ? undefined : "ws://localhost:4000/ws",
     protocols: siteUrl.startsWith("https:") ? ["wss:"] : ["ws:", "wss:"], originOnly: false
   });
+  const wsOrigins = [...new Set((environment.NEXT_PUBLIC_WS_ORIGINS || "")
+    .split(",").filter((item) => item.trim()).map((item) => url(
+      { NEXT_PUBLIC_WS_ORIGINS: item.trim() }, "NEXT_PUBLIC_WS_ORIGINS",
+      { protocols: siteUrl.startsWith("https:") ? ["wss:"] : ["ws:", "wss:"] }
+    )))];
+  if (wsOrigins.length > 20) fail("NEXT_PUBLIC_WS_ORIGINS");
   boolean(environment, "NEXT_PUBLIC_WS_COOKIE_FALLBACK");
   const hsts = boolean(environment, "FRONTEND_HSTS_ENABLED");
   if (hsts && (!production || !siteUrl.startsWith("https:") || insecure)) fail("FRONTEND_HSTS_ENABLED");
@@ -73,7 +79,7 @@ export function frontendSecurityEnvironment(environment = process.env) {
     posthogAssetsOrigin = configuredAssets || posthogRemoteConfigOrigin;
   }
   return {
-    production, apiUrl, siteUrl, wsUrl, hsts, mode, mediaOrigins,
+    production, apiUrl, siteUrl, wsUrl, wsOrigins, hsts, mode, mediaOrigins,
     posthogOrigin, posthogFlagsOrigin, posthogRemoteConfigOrigin, posthogAssetsOrigin
   };
 }
@@ -97,7 +103,7 @@ export function frontendSecurityHeaders(environment = process.env) {
     "img-src": ["'self'", "data:", "blob:", ...policy.mediaOrigins],
     "font-src": ["'self'", "data:"],
     "connect-src": [
-      "'self'", new URL(policy.wsUrl).origin, policy.posthogOrigin,
+      "'self'", new URL(policy.wsUrl).origin, ...policy.wsOrigins, policy.posthogOrigin,
       policy.posthogFlagsOrigin, policy.posthogRemoteConfigOrigin, policy.posthogAssetsOrigin
     ],
     "worker-src": ["'self'", "blob:"],

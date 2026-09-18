@@ -30,6 +30,10 @@ describe("frontend environment and browser security policy", () => {
     ["NEXT_PUBLIC_SITE_URL", "http://example.test"],
     ["NEXT_PUBLIC_WS_URL", "ws://example.test/ws"],
     ["NEXT_PUBLIC_WS_URL", "wss://example.test/ws?ticket=private"],
+    ["NEXT_PUBLIC_WS_ORIGINS", "ws://replica.example.test"],
+    ["NEXT_PUBLIC_WS_ORIGINS", "wss://*.example.test"],
+    ["NEXT_PUBLIC_WS_ORIGINS", "wss://replica.example.test/ws"],
+    ["NEXT_PUBLIC_WS_ORIGINS", "https://replica.example.test"],
     ["NEXT_PUBLIC_MEDIA_ORIGINS", "https://*.example.test"],
     ["NEXT_PUBLIC_MEDIA_ORIGINS", "https://example.test; script-src *"],
     ["NEXT_PUBLIC_POSTHOG_HOST", "https://example.test/#private"],
@@ -60,6 +64,26 @@ describe("frontend environment and browser security policy", () => {
     expect(frontendSecurityEnvironment({ NODE_ENV: "development" })).toMatchObject({
       apiUrl: "http://localhost:4000", siteUrl: "http://localhost:3000", wsUrl: "ws://localhost:4000/ws"
     });
+  });
+
+  it("permits only explicitly configured replica socket origins and bounds their count", () => {
+    const extra = "wss://replica.example.test:8443";
+    const csp = headers({ ...production, ...{ NEXT_PUBLIC_WS_ORIGINS: `${extra}, ${extra}/` } })
+      ["Content-Security-Policy-Report-Only"];
+    expect(csp).toContain(`connect-src 'self' wss://api.keepgame.example ${extra};`);
+    expect(csp).not.toContain("img-src 'self' data: blob: wss:");
+    expect(headers()["Content-Security-Policy-Report-Only"]).not.toContain(extra);
+    expect(() => frontendSecurityEnvironment({
+      ...production,
+      NEXT_PUBLIC_WS_ORIGINS: Array.from({ length: 21 }, (_, index) => `wss://replica${index}.example.test`).join(",")
+    })).toThrow("NEXT_PUBLIC_WS_ORIGINS");
+    const isolated = {
+      NODE_ENV: "production", FRONTEND_ALLOW_INSECURE_BUILD: "true",
+      NEXT_PUBLIC_API_URL: "http://api:4000", NEXT_PUBLIC_SITE_URL: "http://frontend:3000",
+      NEXT_PUBLIC_WS_URL: "ws://api:4000/ws", NEXT_PUBLIC_WS_ORIGINS: "ws://api-replica:4000"
+    };
+    expect(headers(isolated)["Content-Security-Policy-Report-Only"])
+      .toContain("connect-src 'self' ws://api:4000 ws://api-replica:4000;");
   });
 
   it("defaults to report-only with bounded egress and frame protection", () => {

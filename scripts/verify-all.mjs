@@ -74,6 +74,7 @@ const localFrontendEnvironment = Object.freeze({
   NEXT_PUBLIC_MEDIA_ORIGINS: "",
   NEXT_PUBLIC_SITE_URL: "http://127.0.0.1:3000",
   NEXT_PUBLIC_WS_COOKIE_FALLBACK: "false",
+  NEXT_PUBLIC_WS_ORIGINS: "",
   NEXT_PUBLIC_WS_URL: "ws://127.0.0.1:4000/ws"
 });
 

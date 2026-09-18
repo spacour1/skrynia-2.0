@@ -24,6 +24,7 @@ FRONTEND_ALLOW_INSECURE_BUILD=false
 FRONTEND_CSP_MODE=report-only
 FRONTEND_HSTS_ENABLED=false
 NEXT_PUBLIC_MEDIA_ORIGINS=          # optional exact legacy public-media origins
+NEXT_PUBLIC_WS_ORIGINS=             # optional exact additional WSS origins
 NEXT_PUBLIC_SENTRY_DSN=...           # optional
 NEXT_PUBLIC_POSTHOG_KEY=...          # optional
 NEXT_PUBLIC_POSTHOG_HOST=https://eu.i.posthog.com  # optional; existing EU default
@@ -69,6 +70,10 @@ It permits the same-origin API/Sentry tunnel, configured socket, and enabled
 analytics origins. `NEXT_PUBLIC_MEDIA_ORIGINS` is a comma-separated list of exact
 origins for legacy public images, not URLs with paths, wildcards, or private S3
 bucket endpoints. New owned media uses `/api/storage` and needs no extra origin.
+`NEXT_PUBLIC_WS_ORIGINS` allows at most 20 additional exact socket origins, without
+paths, queries or wildcards, and requires WSS for an HTTPS site. Leave it empty when
+replicas share one public endpoint. Only the isolated multi-replica E2E overlay
+adds `ws://api-replica:4000`; ordinary builds do not allow this internal origin.
 `NEXT_PUBLIC_POSTHOG_ASSETS_HOST` overrides the explicitly allowed analytics asset
 origin when required by a deployed proxy; keep it aligned with the actual SDK host.
 The existing EU PostHog default remains unchanged. The installed SDK's legacy cloud

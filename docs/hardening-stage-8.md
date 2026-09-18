@@ -74,6 +74,26 @@ Graph output remains ignored. No financial dependency was introduced.
 
 ## Publication and pause
 
+First committed candidate `ea8f482b812a84dacf501c6ac50abeb40368a6b8` failed D5
+(exit 1, 976.3s): 649 backend tests and 205 frontend tests passed, as did production
+audits/builds, but E2E had 12 passes and one failure. Its CSP blocked the explicit
+second-replica socket (`connect-src` allowed only the primary). Gitleaks and final
+policy checks were not reached. That candidate was not pushed.
+
+The follow-up permits a bounded, opt-in list of exact additional socket origins;
+only the two-replica test overlay enables its internal secondary origin. No wildcard,
+disabled CSP, test skip or weakened session-revocation assertion was introduced.
+Five new unit regressions failed before this correction. Repeat targeted browser
+checks, then the entire D5 on the new committed SHA before publishing.
+
+Follow-up pre-commit checks on 2026-09-19: PASS, configuration tests 41/41 (2.01s),
+frontend typecheck exit 0, runner tests 9/9 (266.59ms), financial freeze exit 0.
+Joint production-browser run of `frontend-security-headers.spec.ts` and
+`realtime-replicas.spec.ts`: PASS, 3/3 tests, 14.8s, exit 0. Both sockets connected
+and both closed with the required session-revocation code/reason. Full D5 must
+still be repeated on the committed follow-up SHA; no result is inferred from these
+targeted checks.
+
 The accumulated linear delivery is Stage 5, Stage 6, dependency remediation,
 Stage 7, then Stage 8. Fetch before publication; if remote advances, integrate and
 repeat D5. Never force-push or publish a red gate. After D5, push directly to main
